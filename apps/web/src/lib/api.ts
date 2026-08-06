@@ -59,6 +59,7 @@ export const api = {
   users: () => request<{ users: User[] }>("/users"),
   updateProfile: (input: { name: string; email: string }) => request<{ user: User }>("/users/me", { method: "PATCH", body: input }),
   createAgent: (input: { name: string; email?: string }) => request<{ user: User }>("/users/agents", { method: "POST", body: input }),
+  deleteAgent: (userId: string) => request<void>(`/users/${userId}`, { method: "DELETE" }),
   agentTokens: (userId: string) => request<{ tokens: ApiTokenMetadata[] }>(`/users/${userId}/tokens`),
   createAgentToken: (userId: string, input: { name: string; expiresInDays: number | null }) => request<{ token: string; prefix: string; expiresAt: string | null; warning: string }>(`/users/${userId}/tokens`, { method: "POST", body: input }),
   revokeAgentToken: (id: string) => request<void>(`/users/tokens/${id}`, { method: "DELETE" }),

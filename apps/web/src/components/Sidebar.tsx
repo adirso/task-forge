@@ -24,7 +24,7 @@ export function Sidebar({ projects, currentId, user, unreadCount, settingsActive
       </nav>
       <div className="sidebar-bottom">
         <button className={settingsActive ? "active" : ""} onClick={onSettings}><Settings /><span>Settings</span></button>
-        <button className="profile-button" onClick={onLogout}><Avatar user={user} /><span><strong>{user.name}</strong><small>{user.email}</small></span><ChevronDown /></button>
+        <button className="profile-button" onClick={onLogout} aria-label="Log out"><Avatar user={user} /><span><strong>{user.name}</strong><small>{user.email}</small></span><ChevronDown /></button>
       </div>
     </aside>
   );
