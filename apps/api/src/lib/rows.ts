@@ -30,8 +30,8 @@ export function toProject(row: Row): Project {
   };
 }
 
-export function toTask(row: Row): Task {
-  const tags = db.prepare(`SELECT tags.* FROM tags JOIN task_tags ON task_tags.tag_id = tags.id
+export async function toTask(row: Row): Promise<Task> {
+  const tags = await db.prepare(`SELECT tags.* FROM tags JOIN task_tags ON task_tags.tag_id = tags.id
     WHERE task_tags.task_id = ? ORDER BY tags.name`).all(String(row.id)) as Row[];
   const task: Task = {
     id: String(row.id),
