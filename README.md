@@ -15,7 +15,7 @@ TaskForge is a local-first project and task manager for teams made of people and
 - Persistent notifications for assignments and review requests, with unread state and direct task navigation
 - Working settings for account details, default view, text size, agent identities, and API-token lifecycle management
 - Shareable `?project=KEY&task=KEY-N` deep links for people and agents
-- SQLite persistence, validation, project access checks, activity records, and cascade-safe nested tasks
+- SQLite or MySQL persistence, validation, project access checks, activity records, and cascade-safe nested tasks
 - Interactive API documentation at `http://127.0.0.1:4000/docs/`
 
 ## Quick start
@@ -36,13 +36,13 @@ Email:    demo@taskforge.local
 Password: demo1234
 ```
 
-The database is created at `data/taskforge.db`. Seeding is idempotent and adds a sample project, people, an agent identity, and ten representative tasks.
+SQLite is the default for local development and is created at `data/taskforge.db`. Seeding is idempotent and adds a sample project, people, an agent identity, and ten representative tasks.
 
 ## Workspace layout
 
 ```text
 apps/
-  api/        Fastify API, SQLite schema, seed, integration tests
+  api/        Fastify API, SQLite/MySQL schema, seed, integration tests
   web/        React/Vite client
 packages/
   contracts/  Shared Zod validation and TypeScript domain types
@@ -58,6 +58,7 @@ npm run build      # Production builds for all workspaces
 npm run typecheck  # Strict TypeScript checks
 npm test           # API integration tests
 npm run db:seed    # Idempotent demo seed
+npm run admin:bootstrap # Create or rotate the production administrator
 ```
 
 ## API overview
@@ -94,7 +95,16 @@ See [Agent API guide](docs/AGENT_API.md) for copy-paste examples.
 - Set a long random `JWT_SECRET`; startup refuses the development secret when `NODE_ENV=production`.
 - Restrict the comma-separated `CORS_ORIGIN` list to the deployed web origin(s). Local development accepts both `localhost` and `127.0.0.1`.
 - API tokens are only returned once. Only their SHA-256 hashes and non-secret prefixes are stored.
-- SQLite WAL mode is a good fit for a single service instance. For multi-instance deployment, move the same schema to PostgreSQL and keep the contracts/API boundary.
+- Use MySQL 8 or newer in production. TaskForge creates its empty schema during API startup. Configure the server with:
+
+  ```dotenv
+  DATABASE_DRIVER=mysql
+  DATABASE_URL=mysql://taskforge:URL_ENCODED_PASSWORD@127.0.0.1:3306/taskforge
+  ```
+
+- On the first deployment, temporarily set `ADMIN_EMAIL`, `ADMIN_PASSWORD` (at least 12 characters), and optionally `ADMIN_NAME`, then run `npm run admin:bootstrap`. Remove those bootstrap values after the command succeeds. Running it again safely rotates the matching human administrator's password.
+- SQLite remains available for local development. Set `DATABASE_DRIVER=sqlite` and `DATABASE_PATH=./data/taskforge.db`; no MySQL service is needed.
+- To exercise the same API suite against a dedicated empty MySQL database, run `TEST_DATABASE_URL=mysql://... npm run test:mysql -w @taskforge/api`. The test database is modified and must never point at production.
 - Put the API behind TLS before issuing real credentials.
 
 ## Design choices

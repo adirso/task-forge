@@ -7,7 +7,14 @@ import { after, before, test } from "node:test";
 import bcrypt from "bcryptjs";
 
 const testDir = mkdtempSync(path.join(tmpdir(), "taskforge-test-"));
-process.env.DATABASE_PATH = path.join(testDir, "test.db");
+const mysqlTestUrl = process.env.TEST_DATABASE_URL;
+if (mysqlTestUrl) {
+  process.env.DATABASE_DRIVER = "mysql";
+  process.env.DATABASE_URL = mysqlTestUrl;
+} else {
+  process.env.DATABASE_DRIVER = "sqlite";
+  process.env.DATABASE_PATH = path.join(testDir, "test.db");
+}
 process.env.JWT_SECRET = "test-secret-at-least-long-enough";
 process.env.TEST = "1";
 
@@ -26,19 +33,20 @@ let agentToken = "";
 before(async () => {
   const now = new Date().toISOString();
   const password = await bcrypt.hash("password123", 8);
-  db.prepare("INSERT INTO users (id, email, name, password_hash, kind, role, created_at) VALUES (?, ?, ?, ?, 'HUMAN', 'ADMIN', ?)")
+  await db.prepare("INSERT INTO users (id, email, name, password_hash, kind, role, created_at) VALUES (?, ?, ?, ?, 'HUMAN', 'ADMIN', ?)")
     .run(adminId, "admin@example.com", "Admin", password, now);
-  db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)")
+  await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)")
     .run(agentId, "agent@example.com", "Test Agent", now);
 });
 
 after(async () => {
   await app.close();
-  db.close();
-  rmSync(testDir, { recursive: true, force: true });
+  await db.close();
+  if (!mysqlTestUrl) rmSync(testDir, { recursive: true, force: true });
 });
 
 test("health endpoint is public", async () => {
+  assert.equal(db.dialect, mysqlTestUrl ? "mysql" : "sqlite");
   const response = await app.inject({ method: "GET", url: "/health" });
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), { status: "ok" });
@@ -53,7 +61,7 @@ test("human can log in and create a project", async () => {
     method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` },
     payload: { key: "API", name: "API project", description: "Integration test", color: "#6554C0" },
   });
-  assert.equal(created.statusCode, 201);
+  assert.equal(created.statusCode, 201, created.body);
   projectId = created.json().project.id;
 
   const profile = await app.inject({
@@ -132,6 +140,19 @@ test("task tag input is validated without changing persisted tags", async () => 
   assert.deepEqual(persisted.json().task.tags.map((tag: { name: string }) => tag.name), ["api", "backend"]);
 });
 
+test("concurrent task creation allocates unique project numbers", async () => {
+  const responses = await Promise.all(Array.from({ length: 4 }, (_, index) => app.inject({
+    method: "POST",
+    url: `/api/projects/${projectId}/tasks`,
+    headers: { authorization: `Bearer ${jwtToken}` },
+    payload: { title: `Concurrent task ${index + 1}`, status: "TODO", priority: "MEDIUM" },
+  })));
+
+  for (const response of responses) assert.equal(response.statusCode, 201, response.body);
+  const numbers = responses.map((response) => Number(response.json().task.number));
+  assert.equal(new Set(numbers).size, responses.length);
+});
+
 test("an issued agent token authenticates and is scoped by membership", async () => {
   const issued = await app.inject({
     method: "POST", url: `/api/users/${agentId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "CI token", expiresInDays: 30 },
@@ -191,7 +212,7 @@ test("an issued agent token authenticates and is scoped by membership", async ()
   const search = await app.inject({
     method: "GET", url: "/api/search?q=Agent-ready", headers: { authorization: `Bearer ${issued.json().token}` },
   });
-  assert.equal(search.statusCode, 200);
+  assert.equal(search.statusCode, 200, search.body);
   assert.equal(search.json().results[0].id, taskId);
 
   const context = await app.inject({
