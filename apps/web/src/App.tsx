@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Notification, Phase, Project, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
-import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import type { Notification, Phase, Project, Tag, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
+import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Plus, Search, Settings, Tag as TagIcon, Trash2, X } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
@@ -25,6 +25,7 @@ export default function App() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [phases, setPhases] = useState<Phase[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [boardPhaseId, setBoardPhaseId] = useState<string | null>(null);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [view, setView] = useState<View>(() => localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board");
@@ -32,6 +33,7 @@ export default function App() {
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("");
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "">("");
+  const [tagFilter, setTagFilter] = useState("");
   const [estimateMin, setEstimateMin] = useState("");
   const [estimateMax, setEstimateMax] = useState("");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -47,8 +49,8 @@ export default function App() {
   const [showDeleteProject, setShowDeleteProject] = useState(false);
 
   const loadProject = useCallback(async (id: string, phaseRef?: string | null) => {
-    const [{ project }, taskData, phaseData] = await Promise.all([api.project(id), api.tasks(id), api.phases(id)]);
-    setCurrentProject(project); setTasks(taskData.tasks); setPhases(phaseData.phases);
+    const [{ project }, taskData, phaseData, tagData] = await Promise.all([api.project(id), api.tasks(id), api.phases(id), api.tags(id)]);
+    setCurrentProject(project); setTasks(taskData.tasks); setPhases(phaseData.phases); setTags(tagData.tags); setTagFilter("");
     setBoardPhaseId(resolveBoardPhase(phaseData.phases, phaseRef)?.id ?? null);
     return { project, tasks: taskData.tasks, phases: phaseData.phases };
   }, []);
@@ -121,13 +123,14 @@ export default function App() {
   function flash(message: string) { setToast(message); window.setTimeout(() => setToast(""), 2600); }
 
   const visibleTasks = useMemo(() => tasks.filter((task) => {
-    const matchesQuery = !query || `${task.title} ${task.description} ${currentProject?.key}-${task.number}`.toLowerCase().includes(query.toLowerCase());
+    const matchesQuery = !query || `${task.title} ${task.description} ${task.tags.map((tag) => tag.name).join(" ")} ${currentProject?.key}-${task.number}`.toLowerCase().includes(query.toLowerCase());
     const estimate = task.estimatePoints;
     return matchesQuery && (!assigneeFilter || task.assigneeId === assigneeFilter)
       && (!statusFilter || task.status === statusFilter) && (!priorityFilter || task.priority === priorityFilter)
+      && (!tagFilter || task.tags.some((tag) => tag.id === tagFilter))
       && (!estimateMin || (estimate !== null && estimate >= Number(estimateMin)))
       && (!estimateMax || (estimate !== null && estimate <= Number(estimateMax)));
-  }), [tasks, query, assigneeFilter, statusFilter, priorityFilter, estimateMin, estimateMax, currentProject]);
+  }), [tasks, query, assigneeFilter, statusFilter, priorityFilter, tagFilter, estimateMin, estimateMax, currentProject]);
 
   const activePhase = phases.find((phase) => phase.isActive) ?? null;
   const selectedBoardPhase = phases.find((phase) => phase.id === boardPhaseId) ?? activePhase;
@@ -141,7 +144,7 @@ export default function App() {
     } else {
       const { task } = await api.createTask(currentProject.id, input); setTasks((items) => [...items, task]); flash("Task created");
     }
-    const phaseData = await api.phases(currentProject.id); setPhases(phaseData.phases);
+    const [phaseData, tagData] = await Promise.all([api.phases(currentProject.id), api.tags(currentProject.id)]); setPhases(phaseData.phases); setTags(tagData.tags);
   }
   async function moveTask(id: string, status: TaskStatus) {
     const existing = tasks.find((task) => task.id === id); if (!existing || existing.status === status) return;
@@ -195,7 +198,7 @@ export default function App() {
     if (!currentProject) return;
     await api.deleteProject(currentProject.id);
     const remaining = projects.filter((project) => project.id !== currentProject.id);
-    setProjects(remaining); setCurrentProject(null); setTasks([]); setPhases([]); setSelectedTask(null); setShowDeleteProject(false);
+    setProjects(remaining); setCurrentProject(null); setTasks([]); setPhases([]); setTags([]); setSelectedTask(null); setShowDeleteProject(false);
     if (remaining[0]) await loadProject(remaining[0].id);
     else {
       const url = new URL(window.location.href); url.searchParams.delete("project"); url.searchParams.delete("task"); url.searchParams.delete("view"); window.history.replaceState({}, "", url);
@@ -226,8 +229,9 @@ export default function App() {
             <div className="select-wrap"><select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as TaskStatus | "")}><option value="">All statuses</option><option value="BACKLOG">Backlog</option><option value="TODO">To do</option><option value="IN_PROGRESS">In progress</option><option value="IN_REVIEW">In review</option><option value="DONE">Done</option></select><ChevronDown /></div>
             <div className="select-wrap"><Filter /><select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)}><option value="">All assignees</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select><ChevronDown /></div>
             <div className="select-wrap"><select aria-label="Filter by priority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as TaskPriority | "")}><option value="">All priorities</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select><ChevronDown /></div>
+            <div className="select-wrap"><TagIcon /><select aria-label="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}><option value="">All tags</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select><ChevronDown /></div>
             <div className="estimate-filter" title="Estimated points range"><span>Points</span><input type="number" min="0" max="100" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)} placeholder="Min" aria-label="Minimum estimated points" /><i>–</i><input type="number" min="0" max="100" value={estimateMax} onChange={(e) => setEstimateMax(e.target.value)} placeholder="Max" aria-label="Maximum estimated points" /></div>
-            {(statusFilter || assigneeFilter || priorityFilter || estimateMin || estimateMax) && <button className="clear-filters" onClick={() => { setStatusFilter(""); setAssigneeFilter(""); setPriorityFilter(""); setEstimateMin(""); setEstimateMax(""); }}>Clear</button>}
+            {(statusFilter || assigneeFilter || priorityFilter || tagFilter || estimateMin || estimateMax) && <button className="clear-filters" onClick={() => { setStatusFilter(""); setAssigneeFilter(""); setPriorityFilter(""); setTagFilter(""); setEstimateMin(""); setEstimateMax(""); }}>Clear</button>}
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
           <section className="content-area">
@@ -235,7 +239,7 @@ export default function App() {
           </section>
         </> : <div className="empty-project"><h1>Create your first project</h1><p>Projects organize the shared work of people and agents.</p><button className="button button-primary" onClick={() => setShowProjectModal(true)}><Plus /> Create project</button></div>}
       </main>
-      {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? "TODO"} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
+      {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? "TODO"} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} availableTags={tags} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
       {showProjectModal && <ProjectModal onClose={() => setShowProjectModal(false)} onSave={createProject} />}
       {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
       {showNotifications && <><button className="notification-scrim" aria-label="Close notifications" onClick={() => setShowNotifications(false)} /><NotificationPanel notifications={notifications} onClose={() => setShowNotifications(false)} onOpen={(notification) => openNotification(notification).catch(() => flash("Could not open notification"))} onReadAll={() => readAllNotifications().catch(() => flash("Could not update notifications"))} /></>}

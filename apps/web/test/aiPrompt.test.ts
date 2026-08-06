@@ -37,6 +37,7 @@ const task: Task = {
   position: 0,
   createdAt: "2026-08-06T00:00:00.000Z",
   updatedAt: "2026-08-06T00:00:00.000Z",
+  tags: [],
 };
 
 const providerSignals: Record<AIProvider, string> = {

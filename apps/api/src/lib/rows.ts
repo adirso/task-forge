@@ -1,4 +1,5 @@
-import type { Project, Task, User } from "@taskforge/contracts";
+import type { Project, Tag, Task, User } from "@taskforge/contracts";
+import { db } from "../db/database.js";
 
 type Row = Record<string, unknown>;
 
@@ -30,6 +31,8 @@ export function toProject(row: Row): Project {
 }
 
 export function toTask(row: Row): Task {
+  const tags = db.prepare(`SELECT tags.* FROM tags JOIN task_tags ON task_tags.tag_id = tags.id
+    WHERE task_tags.task_id = ? ORDER BY tags.name`).all(String(row.id)) as Row[];
   const task: Task = {
     id: String(row.id),
     projectId: String(row.project_id),
@@ -52,6 +55,7 @@ export function toTask(row: Row): Task {
     position: Number(row.position),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+    tags: tags.map((tag): Tag => ({ id: String(tag.id), projectId: String(tag.project_id), name: String(tag.name), createdAt: String(tag.created_at) })),
   };
   if (row.assignee_name) {
     task.assignee = {
