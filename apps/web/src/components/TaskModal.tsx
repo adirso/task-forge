@@ -6,11 +6,11 @@ import { api } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { SendToAI } from "./SendToAI";
 
-export function TaskModal({ task, initialStatus, project, currentUser, members, phases, tasks, onClose, onSave, onDelete }: {
-  task: Task | null; initialStatus: TaskStatus; project: Project; currentUser: User; members: User[]; phases: Phase[]; tasks: Task[];
+export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, tasks, onClose, onSave, onDelete }: {
+  task: Task | null; initialStatus: TaskStatus; defaultPhaseId: string | null; project: Project; currentUser: User; members: User[]; phases: Phase[]; tasks: Task[];
   onClose: () => void; onSave: (input: TaskCreate) => Promise<void>; onDelete: (() => Promise<void>) | null;
 }) {
-  const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: phases.find((phase) => phase.isActive)?.id ?? null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null });
+  const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: defaultPhaseId, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [updates, setUpdates] = useState<TaskNote[]>([]);
