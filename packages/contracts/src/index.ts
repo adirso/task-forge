@@ -11,6 +11,8 @@ export const taskTagNameSchema = z.string().trim().min(1).max(32)
   .transform((value) => value.toLowerCase());
 export const taskTagsSchema = z.array(taskTagNameSchema).max(20)
   .transform((values) => [...new Set(values)]);
+export const taskDependencyIdsSchema = z.array(z.string().uuid()).max(50)
+  .transform((values) => [...new Set(values)]);
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -51,6 +53,7 @@ export const taskCreateSchema = z.object({
   pullRequestTitle: z.string().trim().max(240).nullable().optional(),
   pullRequestState: pullRequestStateSchema.nullable().optional(),
   tags: taskTagsSchema.optional(),
+  dependencyIds: taskDependencyIdsSchema.optional(),
 });
 
 export const taskUpdateSchema = taskCreateSchema.partial().extend({
@@ -138,6 +141,17 @@ export interface Tag {
   taskCount?: number;
 }
 
+export interface TaskDependency {
+  taskId: string;
+  dependsOnTaskId: string;
+  projectId: string;
+  projectKey: string;
+  number: number;
+  title: string;
+  status: TaskStatus;
+  isBlocking: boolean;
+}
+
 export interface Task {
   id: string;
   projectId: string;
@@ -164,6 +178,7 @@ export interface Task {
   creator?: User;
   subtasks?: Task[];
   tags: Tag[];
+  dependencies: TaskDependency[];
 }
 
 export interface TaskNote {
