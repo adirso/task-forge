@@ -6,6 +6,11 @@ export const projectMemberRoleSchema = z.enum(["OWNER", "MEMBER"]);
 export const taskStatusSchema = z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"]);
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
+export const taskTagNameSchema = z.string().trim().min(1).max(32)
+  .regex(/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/, "Tags may contain letters, numbers, hyphens, and underscores")
+  .transform((value) => value.toLowerCase());
+export const taskTagsSchema = z.array(taskTagNameSchema).max(20)
+  .transform((values) => [...new Set(values)]);
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -45,6 +50,7 @@ export const taskCreateSchema = z.object({
   pullRequestUrl: z.string().url().nullable().optional(),
   pullRequestTitle: z.string().trim().max(240).nullable().optional(),
   pullRequestState: pullRequestStateSchema.nullable().optional(),
+  tags: taskTagsSchema.optional(),
 });
 
 export const taskUpdateSchema = taskCreateSchema.partial().extend({
@@ -124,6 +130,14 @@ export interface Phase {
   taskCount?: number;
 }
 
+export interface Tag {
+  id: string;
+  projectId: string;
+  name: string;
+  createdAt: string;
+  taskCount?: number;
+}
+
 export interface Task {
   id: string;
   projectId: string;
@@ -149,6 +163,7 @@ export interface Task {
   assignee?: User | null;
   creator?: User;
   subtasks?: Task[];
+  tags: Tag[];
 }
 
 export interface TaskNote {

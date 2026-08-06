@@ -1,4 +1,4 @@
-import type { ApiTokenMetadata, AuthResponse, Notification, Phase, Project, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
+import type { ApiTokenMetadata, AuthResponse, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
@@ -49,6 +49,7 @@ export const api = {
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   tasks: (projectId: string) => request<{ tasks: Task[] }>(`/projects/${projectId}/tasks`),
+  tags: (projectId: string) => request<{ tags: Tag[] }>(`/projects/${projectId}/tags`),
   task: (id: string) => request<{ task: Task }>(`/tasks/${id}`),
   createTask: (projectId: string, input: TaskCreate) => request<{ task: Task }>(`/projects/${projectId}/tasks`, { method: "POST", body: input }),
   updateTask: (id: string, input: TaskUpdate) => request<{ task: Task }>(`/tasks/${id}`, { method: "PATCH", body: input }),
