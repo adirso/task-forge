@@ -1,4 +1,4 @@
-import type { Project, Tag, Task, User } from "@taskforge/contracts";
+import type { Project, Tag, Task, TaskDependency, User } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 
 type Row = Record<string, unknown>;
@@ -33,6 +33,12 @@ export function toProject(row: Row): Project {
 export async function toTask(row: Row): Promise<Task> {
   const tags = await db.prepare(`SELECT tags.* FROM tags JOIN task_tags ON task_tags.tag_id = tags.id
     WHERE task_tags.task_id = ? ORDER BY tags.name`).all(String(row.id)) as Row[];
+  const dependencies = await db.prepare(`SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.\`key\` AS project_key,
+      dep.number, dep.title, dep.status
+    FROM task_dependencies td
+    JOIN tasks dep ON dep.id = td.depends_on_task_id
+    JOIN projects p ON p.id = dep.project_id
+    WHERE td.task_id = ? ORDER BY dep.number`).all(String(row.id)) as Row[];
   const task: Task = {
     id: String(row.id),
     projectId: String(row.project_id),
@@ -56,6 +62,11 @@ export async function toTask(row: Row): Promise<Task> {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     tags: tags.map((tag): Tag => ({ id: String(tag.id), projectId: String(tag.project_id), name: String(tag.name), createdAt: String(tag.created_at) })),
+    dependencies: dependencies.map((dependency): TaskDependency => ({
+      taskId: String(dependency.task_id), dependsOnTaskId: String(dependency.depends_on_task_id), projectId: String(dependency.project_id),
+      projectKey: String(dependency.project_key), number: Number(dependency.number), title: String(dependency.title),
+      status: dependency.status as Task["status"], isBlocking: dependency.status !== "DONE",
+    })),
   };
   if (row.assignee_name) {
     task.assignee = {
