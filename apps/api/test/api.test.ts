@@ -84,21 +84,52 @@ test("task lifecycle supports assignment and status changes", async () => {
 
   const created = await app.inject({
     method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` },
-    payload: { title: "Agent-ready task", description: "", definitionOfDone: "A passing test", assigneeId: agentId, status: "TODO", priority: "HIGH", estimatePoints: 5 },
+    payload: { title: "Agent-ready task", description: "", definitionOfDone: "A passing test", assigneeId: agentId, status: "TODO", priority: "HIGH", estimatePoints: 5, tags: ["Frontend", "backend", "frontend"] },
   });
   assert.equal(created.statusCode, 201);
   assert.equal(created.json().task.number, 1);
   assert.equal(created.json().task.phaseId, phaseId);
+  assert.deepEqual(created.json().task.tags.map((tag: { name: string }) => tag.name), ["backend", "frontend"]);
   taskId = created.json().task.id;
 
   const updated = await app.inject({
     method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` },
-    payload: { status: "IN_PROGRESS", branch: "agent/test-task", pullRequestUrl: "https://github.com/example/repo/pull/17", pullRequestTitle: "Add agent-ready task", pullRequestState: "OPEN" },
+    payload: { status: "IN_PROGRESS", branch: "agent/test-task", pullRequestUrl: "https://github.com/example/repo/pull/17", pullRequestTitle: "Add agent-ready task", pullRequestState: "OPEN", tags: ["api", "backend"] },
   });
   assert.equal(updated.statusCode, 200);
   assert.equal(updated.json().task.status, "IN_PROGRESS");
   assert.equal(updated.json().task.branch, "agent/test-task");
   assert.equal(updated.json().task.pullRequestState, "OPEN");
+  assert.deepEqual(updated.json().task.tags.map((tag: { name: string }) => tag.name), ["api", "backend"]);
+
+  const persisted = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(persisted.statusCode, 200);
+  assert.deepEqual(persisted.json().task.tags.map((tag: { name: string }) => tag.name), ["api", "backend"]);
+
+  const removed = await app.inject({ method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { tags: [] } });
+  assert.equal(removed.statusCode, 200);
+  assert.deepEqual(removed.json().task.tags, []);
+  const restored = await app.inject({ method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { tags: ["api", "backend"] } });
+  assert.equal(restored.statusCode, 200);
+
+  const reusable = await app.inject({ method: "GET", url: `/api/projects/${projectId}/tags`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(reusable.statusCode, 200);
+  assert.deepEqual(reusable.json().tags.map((tag: { name: string }) => tag.name), ["api", "backend", "frontend"]);
+});
+
+test("task tag input is validated without changing persisted tags", async () => {
+  const invalid = await app.inject({
+    method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { tags: ["not a valid tag"] },
+  });
+  assert.equal(invalid.statusCode, 400, invalid.body);
+
+  const tooMany = await app.inject({
+    method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`) },
+  });
+  assert.equal(tooMany.statusCode, 400, tooMany.body);
+
+  const persisted = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.deepEqual(persisted.json().task.tags.map((tag: { name: string }) => tag.name), ["api", "backend"]);
 });
 
 test("an issued agent token authenticates and is scoped by membership", async () => {
@@ -129,10 +160,15 @@ test("an issued agent token authenticates and is scoped by membership", async ()
   assert.equal(tasks.json().tasks[0].id, taskId);
 
   const filteredTasks = await app.inject({
-    method: "GET", url: `/api/projects/${projectId}/tasks?priority=HIGH&phaseId=${phaseId}&minPoints=3&maxPoints=8`, headers: { authorization: `Bearer ${issued.json().token}` },
+    method: "GET", url: `/api/projects/${projectId}/tasks?priority=HIGH&phaseId=${phaseId}&tag=api&minPoints=3&maxPoints=8`, headers: { authorization: `Bearer ${issued.json().token}` },
   });
   assert.equal(filteredTasks.statusCode, 200);
   assert.equal(filteredTasks.json().tasks.length, 1);
+  assert.equal(filteredTasks.json().tasks[0].tags[0].name, "api");
+
+  const noTagMatch = await app.inject({ method: "GET", url: `/api/projects/${projectId}/tasks?tag=frontend`, headers: { authorization: `Bearer ${issued.json().token}` } });
+  assert.equal(noTagMatch.statusCode, 200);
+  assert.equal(noTagMatch.json().tasks.length, 0);
 
   const notifications = await app.inject({
     method: "GET", url: "/api/notifications", headers: { authorization: `Bearer ${issued.json().token}` },
