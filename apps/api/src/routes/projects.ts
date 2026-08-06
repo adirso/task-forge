@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { memberAddSchema, projectCreateSchema, projectUpdateSchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
-import { requireProjectAccess } from "../lib/access.js";
+import { requireProjectAccess, requireProjectOwnerOrAdmin } from "../lib/access.js";
 import { toProject, toUser } from "../lib/rows.js";
 
 type ProjectParams = { id: string };
@@ -50,10 +50,10 @@ export async function projectRoutes(app: FastifyInstance) {
     const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(request.params.id) as Record<string, unknown> | undefined;
     if (!row) return reply.code(404).send({ error: "Project not found" });
     const memberRows = db.prepare(`
-      SELECT u.* FROM users u JOIN project_members pm ON pm.user_id = u.id
+      SELECT u.*, pm.role AS project_role FROM users u JOIN project_members pm ON pm.user_id = u.id
       WHERE pm.project_id = ? ORDER BY u.kind, u.name
     `).all(request.params.id) as Record<string, unknown>[];
-    return { project: { ...toProject(row), members: memberRows.map((member) => toUser(member)) } };
+    return { project: { ...toProject(row), members: memberRows.map((member) => ({ ...toUser(member), projectRole: String(member.project_role) })) } };
   });
 
   app.patch<{ Params: ProjectParams }>("/:id", { schema: { tags: ["Projects"], summary: "Update a project" } }, async (request, reply) => {
@@ -75,13 +75,30 @@ export async function projectRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: ProjectParams }>("/:id/members", { schema: { tags: ["Projects"], summary: "Add a project member" } }, async (request, reply) => {
-    if (!requireProjectAccess(request, reply, request.params.id)) return;
+    if (!requireProjectOwnerOrAdmin(request, reply, request.params.id)) return;
     const body = memberAddSchema.parse(request.body);
     const user = db.prepare("SELECT id FROM users WHERE id = ?").get(body.userId);
     if (!user) return reply.code(404).send({ error: "User not found" });
+    const project = db.prepare("SELECT owner_id FROM projects WHERE id = ?").get(request.params.id) as { owner_id: string };
+    if (body.role === "OWNER" && body.userId !== project.owner_id) return reply.code(400).send({ error: "A project can only have its original owner" });
+    const memberRole = body.userId === project.owner_id ? "OWNER" : body.role;
     db.prepare(`INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(project_id, user_id) DO UPDATE SET role = excluded.role`)
-      .run(request.params.id, body.userId, body.role, new Date().toISOString());
+      .run(request.params.id, body.userId, memberRole, new Date().toISOString());
+    return reply.code(204).send();
+  });
+
+  app.delete<{ Params: ProjectParams & { userId: string } }>("/:id/members/:userId", { schema: { tags: ["Projects"], summary: "Remove a project member" } }, async (request, reply) => {
+    if (!requireProjectOwnerOrAdmin(request, reply, request.params.id)) return;
+    const project = db.prepare("SELECT owner_id FROM projects WHERE id = ?").get(request.params.id) as { owner_id: string };
+    if (request.params.userId === project.owner_id) return reply.code(400).send({ error: "The project owner cannot be removed" });
+    const member = db.prepare("SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?").get(request.params.id, request.params.userId);
+    if (!member) return reply.code(404).send({ error: "Project member not found" });
+    const now = new Date().toISOString();
+    db.transaction(() => {
+      db.prepare("UPDATE tasks SET assignee_id = NULL, updated_at = ? WHERE project_id = ? AND assignee_id = ?").run(now, request.params.id, request.params.userId);
+      db.prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?").run(request.params.id, request.params.userId);
+    })();
     return reply.code(204).send();
   });
 
