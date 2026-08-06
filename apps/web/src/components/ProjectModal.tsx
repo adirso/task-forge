@@ -1,0 +1,35 @@
+import { useState, type FormEvent } from "react";
+import { X } from "lucide-react";
+
+export function ProjectModal({ onClose, onSave }: { onClose: () => void; onSave: (project: { key: string; name: string; description: string; repoUrl: string | null; color: string }) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [key, setKey] = useState("");
+  const [keyEdited, setKeyEdited] = useState(false);
+  const [description, setDescription] = useState("");
+  const [repoUrl, setRepoUrl] = useState("");
+  const [color, setColor] = useState("#6554C0");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setError("");
+    try { await onSave({ name, key, description, repoUrl: repoUrl || null, color }); onClose(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not create project"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <form className="project-modal" onSubmit={submit}>
+        <header><div><span className="modal-kicker">New workspace</span><h2>Create a project</h2></div><button type="button" className="icon-button" onClick={onClose}><X /></button></header>
+        <p>Use a short key to create readable task IDs, such as WEB-42.</p>
+        <div className="project-form-row"><label>Project name<input autoFocus value={name} onChange={(e) => { const nextName = e.target.value; setName(nextName); if (!keyEdited) setKey(nextName.replace(/[^A-Za-z0-9]/g, "").slice(0, 3).toUpperCase()); }} placeholder="Website launch" required /></label><label>Key<input value={key} onChange={(e) => { setKeyEdited(true); setKey(e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase()); }} placeholder="WEB" minLength={2} maxLength={8} required /></label></div>
+        <label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="What is this project trying to achieve?" /></label>
+        <label>Repository URL <span className="optional">Optional</span><input type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/your-org/repo" /></label>
+        <label>Project color<input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
+        {error && <div className="form-error">{error}</div>}
+        <footer><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving}>{saving ? "Creating…" : "Create project"}</button></footer>
+      </form>
+    </div>
+  );
+}
