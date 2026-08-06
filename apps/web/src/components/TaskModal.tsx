@@ -59,6 +59,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
             <label>Task name<input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="What needs to be done?" required /></label>
             <label>Description<textarea value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Add context, requirements, or useful links…" rows={5} /></label>
             <label>Definition of done<textarea value={form.definitionOfDone} onChange={(e) => set("definitionOfDone", e.target.value)} placeholder="Describe the observable outcome that marks this complete…" rows={4} /></label>
+            <section className="dependency-field dependency-section"><div className="section-heading"><span><Link2 /> Dependencies</span></div><TaskDependencyEditor value={form.dependencyIds ?? []} tasks={tasks} projectKey={project.key} currentTaskId={task?.id} onChange={(dependencyIds) => set("dependencyIds", dependencyIds)} /></section>
             <section className="pr-editor">
               <div className="section-heading"><span><GitPullRequest /> Pull request</span>{form.pullRequestUrl && <a href={form.pullRequestUrl} target="_blank" rel="noreferrer">Open PR <ExternalLink /></a>}</div>
               <label>PR URL<input type="url" value={form.pullRequestUrl ?? ""} onChange={(e) => { const url = e.target.value || null; set("pullRequestUrl", url); if (url && !form.pullRequestState) set("pullRequestState", "OPEN"); if (!url) { set("pullRequestTitle", null); set("pullRequestState", null); } }} placeholder="https://github.com/org/repo/pull/123" /></label>
@@ -67,7 +68,6 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
           </div>
           <aside className="modal-fields">
             <div className="tag-field"><span>Tags</span><TaskTagEditor value={form.tags ?? []} availableTags={availableTags} onChange={(tags) => set("tags", tags)} /></div>
-            <div className="dependency-field"><span>Dependencies</span><TaskDependencyEditor value={form.dependencyIds ?? []} tasks={tasks} projectKey={project.key} currentTaskId={task?.id} onChange={(dependencyIds) => set("dependencyIds", dependencyIds)} /></div>
             <label>Phase<select value={form.phaseId ?? ""} onChange={(e) => set("phaseId", e.target.value || null)}><option value="">No phase</option>{phases.map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select></label>
             <label>Status<select value={form.status} onChange={(e) => set("status", e.target.value as TaskStatus)}>{Object.entries(statusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
             <label>Assignee<select value={form.assigneeId ?? ""} onChange={(e) => set("assigneeId", e.target.value || null)}><option value="">Unassigned</option>{members.map((user) => <option key={user.id} value={user.id}>{user.name}{user.kind === "AGENT" ? " (Agent)" : ""}</option>)}</select></label>
