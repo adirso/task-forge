@@ -290,3 +290,14 @@ test("only an owner or administrator can delete a project", async () => {
   const missing = await app.inject({ method: "GET", url: `/api/projects/${temporaryId}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(missing.statusCode, 404);
 });
+
+test("administrators can delete an unused agent identity", async () => {
+  const created = await app.inject({ method: "POST", url: "/api/users/agents", headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Disposable Agent" } });
+  const disposableId = created.json().user.id as string;
+  const forbidden = await app.inject({ method: "DELETE", url: `/api/users/${disposableId}`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(forbidden.statusCode, 403);
+  const deleted = await app.inject({ method: "DELETE", url: `/api/users/${disposableId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deleted.statusCode, 204, deleted.body);
+  const users = await app.inject({ method: "GET", url: "/api/users", headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(users.json().users.some((user: { id: string }) => user.id === disposableId), false);
+});

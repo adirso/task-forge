@@ -6,7 +6,7 @@ import { Avatar } from "./Avatar";
 
 type SettingsTab = "account" | "appearance" | "members" | "agents";
 
-export function SettingsPage({ user, users, projects, currentProject, defaultView, textSize, onUserUpdated, onAgentCreated, onProjectMembersChanged, onDefaultViewChange, onTextSizeChange }: {
+export function SettingsPage({ user, users, projects, currentProject, defaultView, textSize, onUserUpdated, onAgentCreated, onAgentDeleted, onProjectMembersChanged, onDefaultViewChange, onTextSizeChange }: {
   user: User;
   users: User[];
   projects: Project[];
@@ -15,6 +15,7 @@ export function SettingsPage({ user, users, projects, currentProject, defaultVie
   textSize: "comfortable" | "large";
   onUserUpdated: (user: User) => void;
   onAgentCreated: (user: User) => void;
+  onAgentDeleted: (id: string) => void;
   onProjectMembersChanged: (project: Project) => void;
   onDefaultViewChange: (view: "board" | "list") => void;
   onTextSizeChange: (size: "comfortable" | "large") => void;
@@ -131,6 +132,19 @@ export function SettingsPage({ user, users, projects, currentProject, defaultVie
     catch (err) { setError(err instanceof Error ? err.message : "Could not revoke token"); }
   }
 
+  async function deleteAgent() {
+    if (!selectedAgent || !window.confirm(`Delete ${selectedAgent.name}? This revokes all of the agent's tokens and removes its identity.`)) return;
+    setError("");
+    try {
+      const deletedId = selectedAgent.id;
+      await api.deleteAgent(deletedId);
+      onAgentDeleted(deletedId);
+      setSelectedAgentId(agents.find((agent) => agent.id !== deletedId)?.id ?? "");
+      setTokens([]); setIssuedToken("");
+      success("Agent identity deleted");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not delete agent"); }
+  }
+
   async function copyToken() {
     await navigator.clipboard.writeText(issuedToken); setCopied(true); window.setTimeout(() => setCopied(false), 1800);
   }
@@ -164,6 +178,7 @@ export function SettingsPage({ user, users, projects, currentProject, defaultVie
 
           {tab === "agents" && <div className="settings-section"><div className="settings-section-heading"><h2>Agents & API tokens</h2><p>Create identities for automation and manage their revocable credentials.</p></div>{user.role !== "ADMIN" ? <div className="settings-notice"><ShieldCheck /><span><strong>Administrator access required</strong><small>Ask a workspace administrator to manage agent identities and tokens.</small></span></div> : <div className="agent-settings"><form className="new-agent-form" onSubmit={addAgent}><h3><Plus /> New agent identity</h3><div><label>Name<input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Repository Builder" required /></label><label>Email <span>Optional</span><input type="email" value={agentEmail} onChange={(event) => setAgentEmail(event.target.value)} placeholder="builder@example.local" /></label><button className="button button-secondary">Create agent</button></div></form><div className="agent-manager"><div className="agent-list">{agents.map((agent) => <button key={agent.id} className={selectedAgentId === agent.id ? "active" : ""} onClick={() => { setSelectedAgentId(agent.id); setIssuedToken(""); }}><Avatar user={agent} size="md" /><span><strong>{agent.name}</strong><small>{agent.email}</small></span></button>)}</div>{selectedAgent ? <div className="token-manager"><div className="token-manager-title"><Avatar user={selectedAgent} /><span><strong>{selectedAgent.name}</strong><small>Token credentials</small></span></div><form className="token-form" onSubmit={issueToken}><label>Token name<input value={tokenName} onChange={(event) => setTokenName(event.target.value)} required /></label><label>Expires after<select value={expiresInDays} onChange={(event) => setExpiresInDays(event.target.value)}><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="">Never</option></select></label><button className="button button-primary"><KeyRound /> Issue token</button></form>{issuedToken && <div className="issued-token"><strong>Copy this token now</strong><p>It cannot be displayed again after you leave this page.</p><div><code>{issuedToken}</code><button onClick={copyToken}>{copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy"}</button></div></div>}<div className="token-list"><h3>Issued tokens</h3>{tokens.length ? tokens.map((token) => <article key={token.id} className={token.revokedAt ? "revoked" : ""}><KeyRound /><span><strong>{token.name}</strong><small>tf_{token.prefix}_… · {token.revokedAt ? "Revoked" : token.lastUsedAt ? `Used ${new Date(token.lastUsedAt).toLocaleDateString()}` : "Never used"}</small></span>{!token.revokedAt && <button onClick={() => revokeToken(token.id)} title="Revoke token"><Trash2 /></button>}</article>) : <p className="no-tokens">No tokens issued for this agent.</p>}</div></div> : <div className="select-agent-empty"><Bot /><span>Create or select an agent to manage its tokens.</span></div>}</div></div>}</div>}
           {error && <div className="form-error settings-message">{error}</div>}{message && <div className="form-success settings-message"><Check />{message}</div>}
+          {tab === "agents" && user.role === "ADMIN" && selectedAgent && <div className="agent-delete-action"><button type="button" className="button button-danger-quiet" onClick={() => deleteAgent().catch(() => undefined)}><Trash2 /> Delete selected agent</button></div>}
         </section>
       </div>
     </div>
