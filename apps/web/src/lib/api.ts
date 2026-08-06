@@ -45,6 +45,7 @@ export const api = {
   deletePhase: (id: string) => request<void>(`/phases/${id}`, { method: "DELETE" }),
   createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
+  deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   tasks: (projectId: string) => request<{ tasks: Task[] }>(`/projects/${projectId}/tasks`),
   task: (id: string) => request<{ task: Task }>(`/tasks/${id}`),
   createTask: (projectId: string, input: TaskCreate) => request<{ task: Task }>(`/projects/${projectId}/tasks`, { method: "POST", body: input }),

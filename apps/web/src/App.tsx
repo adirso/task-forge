@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Notification, Phase, Project, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
-import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Plus, Search, Settings, X } from "lucide-react";
+import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
@@ -13,6 +13,7 @@ import { NotificationPanel } from "./components/NotificationPanel";
 import { SearchPalette } from "./components/SearchPalette";
 import { SettingsPage } from "./components/SettingsPage";
 import { PhasesPage } from "./components/PhaseManager";
+import { ProjectDeleteModal } from "./components/ProjectDeleteModal";
 
 type DefaultView = "board" | "list";
 type View = DefaultView | "phases";
@@ -41,6 +42,7 @@ export default function App() {
   const [showSearch, setShowSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [textSize, setTextSize] = useState<"comfortable" | "large">(() => localStorage.getItem("taskforge_text_size") === "large" ? "large" : "comfortable");
+  const [showDeleteProject, setShowDeleteProject] = useState(false);
 
   const loadProject = useCallback(async (id: string) => {
     const [{ project }, taskData, phaseData] = await Promise.all([api.project(id), api.tasks(id), api.phases(id)]);
@@ -178,6 +180,17 @@ export default function App() {
     url.search = ""; url.searchParams.set("project", currentProject.key); url.searchParams.set("view", view);
     await navigator.clipboard.writeText(url.toString()); flash("Project link copied");
   }
+  async function deleteCurrentProject() {
+    if (!currentProject) return;
+    await api.deleteProject(currentProject.id);
+    const remaining = projects.filter((project) => project.id !== currentProject.id);
+    setProjects(remaining); setCurrentProject(null); setTasks([]); setPhases([]); setSelectedTask(null); setShowDeleteProject(false);
+    if (remaining[0]) await loadProject(remaining[0].id);
+    else {
+      const url = new URL(window.location.href); url.searchParams.delete("project"); url.searchParams.delete("task"); url.searchParams.delete("view"); window.history.replaceState({}, "", url);
+    }
+    flash("Project deleted");
+  }
 
   if (loading) return <div className="loading-screen"><span className="loading-mark" />Loading your workspace…</div>;
   if (!user) return <Login onLogin={login} />;
@@ -192,7 +205,7 @@ export default function App() {
             <div className="breadcrumbs"><span>Projects</span><span>/</span><strong>{currentProject.name}</strong></div>
             <div className="project-title-row">
               <div><span className="project-logo" style={{ background: currentProject.color }}>{currentProject.key.slice(0, 1)}</span><div><h1>{currentProject.name}</h1><p>{currentProject.description}</p></div></div>
-              <div className="header-actions"><button className="mobile-settings-button" onClick={() => { setSelectedTask(null); setShowSettings(true); }} aria-label="Settings"><Settings /></button><button className="mobile-search-button" onClick={() => setShowSearch(true)} aria-label="Search all tasks"><Search /></button><button className="mobile-notification-button" onClick={() => setShowNotifications(true)} aria-label="Notifications"><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button><div className="avatar-stack">{members.slice(0, 4).map((member) => <Avatar key={member.id} user={member} size="sm" />)}{members.length > 4 && <span>+{members.length - 4}</span>}</div><button className="button button-secondary" onClick={() => copyProjectLink().catch(() => flash("Could not copy link"))}><Link2 /> Copy link</button><button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>
+              <div className="header-actions"><button className="mobile-settings-button" onClick={() => { setSelectedTask(null); setShowSettings(true); }} aria-label="Settings"><Settings /></button><button className="mobile-search-button" onClick={() => setShowSearch(true)} aria-label="Search all tasks"><Search /></button><button className="mobile-notification-button" onClick={() => setShowNotifications(true)} aria-label="Notifications"><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button><div className="avatar-stack">{members.slice(0, 4).map((member) => <Avatar key={member.id} user={member} size="sm" />)}{members.length > 4 && <span>+{members.length - 4}</span>}</div><button className="button button-secondary" onClick={() => copyProjectLink().catch(() => flash("Could not copy link"))}><Link2 /> Copy link</button>{(user.role === "ADMIN" || currentProject.ownerId === user.id) && <button className="button button-project-delete" onClick={() => setShowDeleteProject(true)}><Trash2 /> Delete</button>}<button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>
             </div>
             <div className="project-tabs"><button className={view === "board" ? "active" : ""} onClick={() => changeDefaultView("board")}><Kanban /> Board</button><button className={view === "list" ? "active" : ""} onClick={() => changeDefaultView("list")}><LayoutList /> List</button><button className={view === "phases" ? "active" : ""} onClick={() => setView("phases")}><Flag /> Phases</button>{currentProject.repoUrl?.trim() && <a href={currentProject.repoUrl} target="_blank" rel="noreferrer"><Link2 /> Repository</a>}</div>
           </header>
@@ -213,6 +226,7 @@ export default function App() {
       </main>
       {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? "TODO"} project={currentProject} currentUser={user} members={members} phases={phases} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
       {showProjectModal && <ProjectModal onClose={() => setShowProjectModal(false)} onSave={createProject} />}
+      {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
       {showNotifications && <><button className="notification-scrim" aria-label="Close notifications" onClick={() => setShowNotifications(false)} /><NotificationPanel notifications={notifications} onClose={() => setShowNotifications(false)} onOpen={(notification) => openNotification(notification).catch(() => flash("Could not open notification"))} onReadAll={() => readAllNotifications().catch(() => flash("Could not update notifications"))} /></>}
       {showSearch && <SearchPalette onClose={() => setShowSearch(false)} onOpen={(task) => openSearchResult(task).catch(() => flash("Could not open task"))} />}
       {toast && <div className="toast">{toast}</div>}
