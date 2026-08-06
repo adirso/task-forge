@@ -14,6 +14,7 @@ import { SearchPalette } from "./components/SearchPalette";
 import { SettingsPage } from "./components/SettingsPage";
 import { PhasesPage } from "./components/PhaseManager";
 import { ProjectDeleteModal } from "./components/ProjectDeleteModal";
+import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
 
 type DefaultView = "board" | "list";
@@ -47,6 +48,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [textSize, setTextSize] = useState<"comfortable" | "large">(() => localStorage.getItem("taskforge_text_size") === "large" ? "large" : "comfortable");
   const [showDeleteProject, setShowDeleteProject] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const loadProject = useCallback(async (id: string, phaseRef?: string | null) => {
     const [{ project }, taskData, phaseData, tagData] = await Promise.all([api.project(id), api.tasks(id), api.phases(id), api.tags(id)]);
@@ -119,7 +121,7 @@ export default function App() {
     localStorage.setItem("taskforge_token", result.token); setUser(result.user); setLoading(true);
     await loadWorkspace(); setLoading(false);
   }
-  function logout() { localStorage.removeItem("taskforge_token"); setUser(null); setProjects([]); setCurrentProject(null); }
+  function logout() { localStorage.removeItem("taskforge_token"); setUser(null); setProjects([]); setCurrentProject(null); setShowLogoutConfirm(false); }
   function flash(message: string) { setToast(message); window.setTimeout(() => setToast(""), 2600); }
 
   const visibleTasks = useMemo(() => tasks.filter((task) => {
@@ -212,9 +214,9 @@ export default function App() {
   const members = currentProject?.members ?? allUsers.filter((candidate) => candidate.id === user.id);
   return (
     <div className="app-shell">
-      <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={logout} />
+      <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} />
       <main className="workspace">
-        {showSettings ? <SettingsPage user={user} users={allUsers} projects={projects} currentProject={currentProject} defaultView={localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board"} textSize={textSize} onUserUpdated={(updated) => { setUser(updated); setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); }} onAgentCreated={(created) => setAllUsers((items) => [...items, created])} onProjectMembersChanged={(updated) => { if (currentProject?.id === updated.id) { const memberIds = new Set(updated.members?.map((member) => member.id) ?? []); setCurrentProject(updated); setTasks((items) => items.map((task) => task.assigneeId && !memberIds.has(task.assigneeId) ? { ...task, assigneeId: null, assignee: null } : task)); } }} onDefaultViewChange={changeDefaultView} onTextSizeChange={changeTextSize} /> : currentProject ? <>
+        {showSettings ? <SettingsPage user={user} users={allUsers} projects={projects} currentProject={currentProject} defaultView={localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board"} textSize={textSize} onUserUpdated={(updated) => { setUser(updated); setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); }} onAgentCreated={(created) => setAllUsers((items) => [...items, created])} onAgentDeleted={(id) => setAllUsers((items) => items.filter((item) => item.id !== id))} onProjectMembersChanged={(updated) => { if (currentProject?.id === updated.id) { const memberIds = new Set(updated.members?.map((member) => member.id) ?? []); setCurrentProject(updated); setTasks((items) => items.map((task) => task.assigneeId && !memberIds.has(task.assigneeId) ? { ...task, assigneeId: null, assignee: null } : task)); } }} onDefaultViewChange={changeDefaultView} onTextSizeChange={changeTextSize} /> : currentProject ? <>
           <header className="project-header">
             <div className="breadcrumbs"><span>Projects</span><span>/</span><strong>{currentProject.name}</strong></div>
             <div className="project-title-row">
@@ -242,6 +244,7 @@ export default function App() {
       {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? "TODO"} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} availableTags={tags} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
       {showProjectModal && <ProjectModal onClose={() => setShowProjectModal(false)} onSave={createProject} />}
       {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
+      {showLogoutConfirm && <LogoutConfirmModal user={user} onClose={() => setShowLogoutConfirm(false)} onConfirm={logout} />}
       {showNotifications && <><button className="notification-scrim" aria-label="Close notifications" onClick={() => setShowNotifications(false)} /><NotificationPanel notifications={notifications} onClose={() => setShowNotifications(false)} onOpen={(notification) => openNotification(notification).catch(() => flash("Could not open notification"))} onReadAll={() => readAllNotifications().catch(() => flash("Could not update notifications"))} /></>}
       {showSearch && <SearchPalette onClose={() => setShowSearch(false)} onOpen={(task) => openSearchResult(task).catch(() => flash("Could not open task"))} />}
       {toast && <div className="toast">{toast}</div>}
