@@ -21,6 +21,7 @@ let jwtToken = "";
 let projectId = "";
 let taskId = "";
 let phaseId = "";
+let agentToken = "";
 
 before(async () => {
   const now = new Date().toISOString();
@@ -103,6 +104,7 @@ test("an issued agent token authenticates and is scoped by membership", async ()
   });
   assert.equal(issued.statusCode, 201);
   assert.match(issued.json().token, /^tf_/);
+  agentToken = issued.json().token;
 
   const postedUpdate = await app.inject({
     method: "POST", url: `/api/tasks/${taskId}/updates`, headers: { authorization: `Bearer ${issued.json().token}` },
@@ -164,4 +166,16 @@ test("an issued agent token authenticates and is scoped by membership", async ()
 test("unauthenticated project access is rejected", async () => {
   const response = await app.inject({ method: "GET", url: "/api/projects" });
   assert.equal(response.statusCode, 401);
+});
+
+test("only an owner or administrator can delete a project", async () => {
+  const forbidden = await app.inject({ method: "DELETE", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(forbidden.statusCode, 403);
+
+  const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "DEL", name: "Delete me", description: "Temporary project", color: "#DE350B" } });
+  const temporaryId = created.json().project.id;
+  const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${temporaryId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deleted.statusCode, 204);
+  const missing = await app.inject({ method: "GET", url: `/api/projects/${temporaryId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(missing.statusCode, 404);
 });
