@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { taskCreateSchema, taskPrioritySchema, taskStatusSchema, taskUpdateCreateSchema, taskUpdateSchema } from "@taskforge/contracts";
+import { taskCreateSchema, taskPrioritySchema, taskStatusSchema, taskTagNameSchema, taskUpdateCreateSchema, taskUpdateSchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 import { requireProjectAccess } from "../lib/access.js";
 import { toTask } from "../lib/rows.js";
 
 type ProjectParams = { projectId: string };
 type TaskParams = { id: string };
-type TaskQuery = { status?: string; assigneeId?: string; priority?: string; phaseId?: string; minPoints?: string; maxPoints?: string; q?: string };
+type TaskQuery = { status?: string; assigneeId?: string; priority?: string; phaseId?: string; tag?: string; minPoints?: string; maxPoints?: string; q?: string };
 
 const taskSelect = `
   SELECT t.*, u.name AS assignee_name, u.email AS assignee_email,
@@ -47,6 +47,18 @@ function createsParentCycle(taskId: string, parentId: string | null | undefined)
   return false;
 }
 
+function replaceTaskTags(taskId: string, projectId: string, names: string[], now: string) {
+  db.prepare("DELETE FROM task_tags WHERE task_id = ?").run(taskId);
+  const insertTag = db.prepare("INSERT OR IGNORE INTO tags (id, project_id, name, created_at) VALUES (?, ?, ?, ?)");
+  const findTag = db.prepare("SELECT id FROM tags WHERE project_id = ? AND name = ? COLLATE NOCASE");
+  const attachTag = db.prepare("INSERT INTO task_tags (task_id, tag_id, created_at) VALUES (?, ?, ?)");
+  for (const name of names) {
+    insertTag.run(randomUUID(), projectId, name, now);
+    const tag = findTag.get(projectId, name) as { id: string };
+    attachTag.run(taskId, tag.id, now);
+  }
+}
+
 export async function taskRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
 
@@ -62,6 +74,12 @@ export async function taskRoutes(app: FastifyInstance) {
     if (request.query.assigneeId) { where.push("t.assignee_id = ?"); values.push(request.query.assigneeId); }
     if (request.query.priority) { where.push("t.priority = ?"); values.push(taskPrioritySchema.parse(request.query.priority)); }
     if (request.query.phaseId) { where.push("t.phase_id = ?"); values.push(request.query.phaseId); }
+    if (request.query.tag) {
+      const parsedTag = taskTagNameSchema.safeParse(request.query.tag);
+      if (!parsedTag.success) return reply.code(400).send({ error: "Validation failed", issues: parsedTag.error.issues });
+      where.push("EXISTS (SELECT 1 FROM task_tags tt JOIN tags tag ON tag.id = tt.tag_id WHERE tt.task_id = t.id AND tag.name = ? COLLATE NOCASE)");
+      values.push(parsedTag.data);
+    }
     if (request.query.minPoints !== undefined) { where.push("t.estimate_points >= ?"); values.push(Number(request.query.minPoints)); }
     if (request.query.maxPoints !== undefined) { where.push("t.estimate_points <= ?"); values.push(Number(request.query.maxPoints)); }
     if (request.query.q) {
@@ -75,7 +93,9 @@ export async function taskRoutes(app: FastifyInstance) {
   app.post<{ Params: ProjectParams }>("/projects/:projectId/tasks", { schema: { tags: ["Tasks"], summary: "Create a task" } }, async (request, reply) => {
     const { projectId } = request.params;
     if (!requireProjectAccess(request, reply, projectId)) return;
-    const body = taskCreateSchema.parse(request.body);
+    const parsedBody = taskCreateSchema.safeParse(request.body);
+    if (!parsedBody.success) return reply.code(400).send({ error: "Validation failed", issues: parsedBody.error.issues });
+    const body = parsedBody.data;
     if (!validateRelation(projectId, "assignee", body.assigneeId)) return reply.code(400).send({ error: "Assignee is not a project member" });
     if (!validateRelation(projectId, "parent", body.parentId)) return reply.code(400).send({ error: "Parent task is not in this project" });
     const phaseId = body.phaseId === undefined
@@ -97,6 +117,7 @@ export async function taskRoutes(app: FastifyInstance) {
           body.estimatePoints ?? null, body.pullRequestUrl ?? null, body.pullRequestTitle ?? null,
           body.pullRequestUrl ? body.pullRequestState ?? "OPEN" : null, phaseId, position, now, now);
       db.prepare("UPDATE projects SET next_task_number = next_task_number + 1, updated_at = ? WHERE id = ?").run(now, projectId);
+      replaceTaskTags(id, projectId, body.tags ?? [], now);
       recordActivity(projectId, id, request.authUser.id, "task.created", { title: body.title });
       if (body.assigneeId && body.assigneeId !== request.authUser.id) {
         notify(body.assigneeId, projectId, id, "TASK_ASSIGNED", "Task assigned to you", `${request.authUser.name} assigned you “${body.title}”.`);
@@ -118,7 +139,9 @@ export async function taskRoutes(app: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: "Task not found" });
     const projectId = String(existing.project_id);
     if (!requireProjectAccess(request, reply, projectId)) return;
-    const body = taskUpdateSchema.parse(request.body);
+    const parsedBody = taskUpdateSchema.safeParse(request.body);
+    if (!parsedBody.success) return reply.code(400).send({ error: "Validation failed", issues: parsedBody.error.issues });
+    const body = parsedBody.data;
     if (!validateRelation(projectId, "assignee", body.assigneeId)) return reply.code(400).send({ error: "Assignee is not a project member" });
     if (!validateRelation(projectId, "parent", body.parentId)) return reply.code(400).send({ error: "Parent task is not in this project" });
     if (body.phaseId && !db.prepare("SELECT 1 FROM phases WHERE id = ? AND project_id = ?").get(body.phaseId, projectId)) return reply.code(400).send({ error: "Phase is not in this project" });
@@ -136,11 +159,13 @@ export async function taskRoutes(app: FastifyInstance) {
     for (const [key, column] of Object.entries(columns)) {
       if (key in body) { fields.push(`${column} = ?`); values.push(body[key as keyof typeof body] ?? null); }
     }
-    if (fields.length) {
+    if (fields.length || body.tags !== undefined) {
       const now = new Date().toISOString();
-      fields.push("updated_at = ?"); values.push(now, request.params.id);
+      if (fields.length) { fields.push("updated_at = ?"); values.push(now, request.params.id); }
       db.transaction(() => {
-        db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+        if (fields.length) db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+        else db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(now, request.params.id);
+        if (body.tags !== undefined) replaceTaskTags(request.params.id, projectId, body.tags, now);
         db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, projectId);
         recordActivity(projectId, request.params.id, request.authUser.id, "task.updated", body);
         const taskTitle = body.title ?? String(existing.title);
@@ -154,6 +179,15 @@ export async function taskRoutes(app: FastifyInstance) {
     }
     const row = db.prepare(`${taskSelect} WHERE t.id = ?`).get(request.params.id) as Record<string, unknown>;
     return { task: toTask(row) };
+  });
+
+  app.get<{ Params: ProjectParams }>("/projects/:projectId/tags", { schema: { tags: ["Tasks"], summary: "List reusable project tags" } }, async (request, reply) => {
+    const { projectId } = request.params;
+    if (!requireProjectAccess(request, reply, projectId)) return;
+    const tags = db.prepare(`SELECT tags.*, COUNT(task_tags.task_id) AS task_count FROM tags
+      LEFT JOIN task_tags ON task_tags.tag_id = tags.id WHERE tags.project_id = ?
+      GROUP BY tags.id ORDER BY tags.name`).all(projectId) as Record<string, unknown>[];
+    return { tags: tags.map((tag) => ({ id: String(tag.id), projectId: String(tag.project_id), name: String(tag.name), createdAt: String(tag.created_at), taskCount: Number(tag.task_count) })) };
   });
 
   app.get<{ Params: TaskParams }>("/tasks/:id/updates", { schema: { tags: ["Task updates"], summary: "List notes and updates on a task" } }, async (request, reply) => {

@@ -92,6 +92,22 @@ export function migrate() {
     CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status, position);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
 
+    CREATE TABLE IF NOT EXISTS tags (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL COLLATE NOCASE,
+      created_at TEXT NOT NULL,
+      UNIQUE (project_id, name)
+    );
+
+    CREATE TABLE IF NOT EXISTS task_tags (
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (task_id, tag_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_tags_tag_task ON task_tags(tag_id, task_id);
+
     CREATE TABLE IF NOT EXISTS activity (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
