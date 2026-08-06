@@ -42,6 +42,21 @@ export async function userRoutes(app: FastifyInstance) {
     return reply.code(201).send({ user: toUser(row) });
   });
 
+  app.delete<{ Params: UserParams }>("/:id", { schema: { tags: ["Agents"], summary: "Delete an agent identity" } }, async (request, reply) => {
+    if (!requireAdmin(request, reply)) return;
+    const agent = await db.prepare("SELECT id, kind FROM users WHERE id = ?").get(request.params.id) as { id: string; kind: string } | undefined;
+    if (!agent) return reply.code(404).send({ error: "Agent not found" });
+    if (agent.kind !== "AGENT") return reply.code(400).send({ error: "Only agent identities can be deleted" });
+    const references = await db.prepare(`SELECT
+      (SELECT COUNT(*) FROM projects WHERE owner_id = ?) AS owned_projects,
+      (SELECT COUNT(*) FROM tasks WHERE creator_id = ?) AS created_tasks,
+      (SELECT COUNT(*) FROM task_updates WHERE author_id = ?) AS authored_updates,
+      (SELECT COUNT(*) FROM activity WHERE actor_id = ?) AS activity_entries`).get(request.params.id, request.params.id, request.params.id, request.params.id) as Record<string, number>;
+    if (Object.values(references).some((count) => Number(count) > 0)) return reply.code(409).send({ error: "This agent has project or task history and cannot be deleted. Revoke its tokens and remove its project memberships instead." });
+    await db.transaction(async () => { await db.prepare("DELETE FROM users WHERE id = ?").run(request.params.id); })();
+    return reply.code(204).send();
+  });
+
   app.post<{ Params: UserParams }>("/:id/tokens", { schema: { tags: ["Agents"], summary: "Issue an API token (shown once)" } }, async (request, reply) => {
     if (request.authUser.id !== request.params.id && !requireAdmin(request, reply)) return;
     const body = tokenCreateSchema.parse(request.body);
