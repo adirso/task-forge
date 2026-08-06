@@ -84,4 +84,14 @@ export async function projectRoutes(app: FastifyInstance) {
       .run(request.params.id, body.userId, body.role, new Date().toISOString());
     return reply.code(204).send();
   });
+
+  app.delete<{ Params: ProjectParams }>("/:id", { schema: { tags: ["Projects"], summary: "Delete a project and all of its data" } }, async (request, reply) => {
+    const project = db.prepare("SELECT owner_id FROM projects WHERE id = ?").get(request.params.id) as { owner_id: string } | undefined;
+    if (!project) return reply.code(404).send({ error: "Project not found" });
+    if (request.authUser.role !== "ADMIN" && project.owner_id !== request.authUser.id) {
+      return reply.code(403).send({ error: "Only the project owner or an administrator can delete this project" });
+    }
+    db.prepare("DELETE FROM projects WHERE id = ?").run(request.params.id);
+    return reply.code(204).send();
+  });
 }
