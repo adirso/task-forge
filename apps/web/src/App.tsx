@@ -14,6 +14,7 @@ import { SearchPalette } from "./components/SearchPalette";
 import { SettingsPage } from "./components/SettingsPage";
 import { PhasesPage } from "./components/PhaseManager";
 import { ProjectDeleteModal } from "./components/ProjectDeleteModal";
+import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
 
 type DefaultView = "board" | "list";
 type View = DefaultView | "phases";
@@ -24,6 +25,7 @@ export default function App() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [phases, setPhases] = useState<Phase[]>([]);
+  const [boardPhaseId, setBoardPhaseId] = useState<string | null>(null);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [view, setView] = useState<View>(() => localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board");
   const [query, setQuery] = useState("");
@@ -44,9 +46,10 @@ export default function App() {
   const [textSize, setTextSize] = useState<"comfortable" | "large">(() => localStorage.getItem("taskforge_text_size") === "large" ? "large" : "comfortable");
   const [showDeleteProject, setShowDeleteProject] = useState(false);
 
-  const loadProject = useCallback(async (id: string) => {
+  const loadProject = useCallback(async (id: string, phaseRef?: string | null) => {
     const [{ project }, taskData, phaseData] = await Promise.all([api.project(id), api.tasks(id), api.phases(id)]);
     setCurrentProject(project); setTasks(taskData.tasks); setPhases(phaseData.phases);
+    setBoardPhaseId(resolveBoardPhase(phaseData.phases, phaseRef)?.id ?? null);
     return { project, tasks: taskData.tasks, phases: phaseData.phases };
   }, []);
 
@@ -56,12 +59,13 @@ export default function App() {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("view") === "phases") setView("phases");
     else if (urlParams.get("view") === "list") setView("list");
+    else if (urlParams.get("view") === "board") setView("board");
     if (urlParams.has("settings")) {
       setShowSettings(true);
     } else if (urlParams.get("project") || urlParams.get("task")) {
       try {
         const context = await api.context({ project: urlParams.get("project") ?? undefined, task: urlParams.get("task") ?? undefined });
-        const loaded = await loadProject(context.project.id);
+        const loaded = await loadProject(context.project.id, urlParams.get("phase"));
         if (context.task) setSelectedTask(loaded.tasks.find((task) => task.id === context.task?.id) ?? context.task);
       } catch {
         if (projectList[0]) await loadProject(projectList[0].id);
@@ -94,16 +98,19 @@ export default function App() {
     const url = new URL(window.location.href);
     if (showSettings) {
       url.searchParams.set("settings", "account");
-      url.searchParams.delete("project"); url.searchParams.delete("task");
+      url.searchParams.delete("project"); url.searchParams.delete("task"); url.searchParams.delete("phase");
     } else if (currentProject) {
       url.searchParams.delete("settings");
       url.searchParams.set("project", currentProject.key);
       url.searchParams.set("view", view);
       if (selectedTask) url.searchParams.set("task", `${currentProject.key}-${selectedTask.number}`);
       else url.searchParams.delete("task");
+      const phaseQuery = view === "board" ? boardPhaseQueryValue(phases.find((phase) => phase.id === boardPhaseId) ?? null, phases.find((phase) => phase.isActive) ?? null) : null;
+      if (phaseQuery) url.searchParams.set("phase", phaseQuery);
+      else url.searchParams.delete("phase");
     }
     window.history.replaceState({}, "", url);
-  }, [user, showSettings, currentProject, selectedTask, view]);
+  }, [user, showSettings, currentProject, selectedTask, view, boardPhaseId, phases]);
 
   async function login(email: string, password: string) {
     const result = await api.login(email, password);
@@ -123,7 +130,9 @@ export default function App() {
   }), [tasks, query, assigneeFilter, statusFilter, priorityFilter, estimateMin, estimateMax, currentProject]);
 
   const activePhase = phases.find((phase) => phase.isActive) ?? null;
-  const boardTasks = activePhase ? visibleTasks.filter((task) => task.phaseId === activePhase.id) : [];
+  const selectedBoardPhase = phases.find((phase) => phase.id === boardPhaseId) ?? activePhase;
+  const boardTasks = selectedBoardPhase ? visibleTasks.filter((task) => task.phaseId === selectedBoardPhase.id) : [];
+  const selectedPhaseHasTasks = selectedBoardPhase ? tasks.some((task) => task.phaseId === selectedBoardPhase.id) : false;
 
   async function saveTask(input: TaskCreate) {
     if (!currentProject) return;
@@ -178,6 +187,8 @@ export default function App() {
     if (!currentProject) return;
     const url = new URL(window.location.href);
     url.search = ""; url.searchParams.set("project", currentProject.key); url.searchParams.set("view", view);
+    const phaseQuery = view === "board" ? boardPhaseQueryValue(selectedBoardPhase, activePhase) : null;
+    if (phaseQuery) url.searchParams.set("phase", phaseQuery);
     await navigator.clipboard.writeText(url.toString()); flash("Project link copied");
   }
   async function deleteCurrentProject() {
@@ -220,11 +231,11 @@ export default function App() {
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
           <section className="content-area">
-            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={(updated) => { setPhases(updated); setTasks((items) => items.map((task) => task.phaseId && !updated.some((phase) => phase.id === task.phaseId) ? { ...task, phaseId: null } : task)); }} /> : view === "board" ? <>{activePhase ? <div className="active-phase-banner"><span className="phase-number-badge">{activePhase.number}</span><div><span>Active phase</span><strong>Phase {activePhase.number}</strong><p>{activePhase.goal}</p></div><small>{boardTasks.length} {boardTasks.length === 1 ? "task" : "tasks"}</small><button className="button button-secondary" onClick={() => setView("phases")}>Manage phases</button></div> : <div className="no-active-phase"><Flag /><div><strong>No active phase</strong><span>Choose an active phase to populate the board.</span></div><button className="button button-primary" onClick={() => setView("phases")}>Manage phases</button></div>}<BoardView tasks={boardTasks} project={currentProject} onOpen={setSelectedTask} onCreate={setNewTaskStatus} onMove={moveTask} /></> : <ListView tasks={visibleTasks} phases={phases} project={currentProject} onOpen={setSelectedTask} />}
+            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={(updated) => { setPhases(updated); setBoardPhaseId((selectedId) => updated.some((phase) => phase.id === selectedId) ? selectedId : resolveBoardPhase(updated)?.id ?? null); setTasks((items) => items.map((task) => task.phaseId && !updated.some((phase) => phase.id === task.phaseId) ? { ...task, phaseId: null } : task)); }} /> : view === "board" ? <>{selectedBoardPhase ? <><div className={`active-phase-banner${selectedBoardPhase.isActive ? "" : " viewing-phase"}`}><span className="phase-number-badge">{selectedBoardPhase.number}</span><div className="phase-banner-copy"><span>{selectedBoardPhase.isActive ? "Active phase" : "Viewing phase"}</span><strong>Phase {selectedBoardPhase.number}</strong><p>{selectedBoardPhase.goal}</p></div><label className="board-phase-selector"><span>Board phase</span><div><select aria-label="Board phase" value={selectedBoardPhase.id} onChange={(event) => setBoardPhaseId(event.target.value)}>{[...phases].sort((a, b) => a.number - b.number).map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select><ChevronDown /></div></label><small>{boardTasks.length} {boardTasks.length === 1 ? "task" : "tasks"}</small><button className="button button-secondary" onClick={() => setView("phases")}>Manage phases</button></div>{selectedPhaseHasTasks ? <BoardView tasks={boardTasks} project={currentProject} onOpen={setSelectedTask} onCreate={setNewTaskStatus} onMove={moveTask} /> : <div className="empty-board-phase"><Flag /><strong>No tasks in Phase {selectedBoardPhase.number}</strong><span>This phase is ready for its first task.</span><button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>}</> : <div className="no-active-phase"><Flag /><div><strong>No active phase</strong><span>Choose an active phase to populate the board.</span></div><button className="button button-primary" onClick={() => setView("phases")}>Manage phases</button></div>}</> : <ListView tasks={visibleTasks} phases={phases} project={currentProject} onOpen={setSelectedTask} />}
           </section>
         </> : <div className="empty-project"><h1>Create your first project</h1><p>Projects organize the shared work of people and agents.</p><button className="button button-primary" onClick={() => setShowProjectModal(true)}><Plus /> Create project</button></div>}
       </main>
-      {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? "TODO"} project={currentProject} currentUser={user} members={members} phases={phases} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
+      {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? "TODO"} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
       {showProjectModal && <ProjectModal onClose={() => setShowProjectModal(false)} onSave={createProject} />}
       {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
       {showNotifications && <><button className="notification-scrim" aria-label="Close notifications" onClick={() => setShowNotifications(false)} /><NotificationPanel notifications={notifications} onClose={() => setShowNotifications(false)} onOpen={(notification) => openNotification(notification).catch(() => flash("Could not open notification"))} onReadAll={() => readAllNotifications().catch(() => flash("Could not update notifications"))} /></>}
