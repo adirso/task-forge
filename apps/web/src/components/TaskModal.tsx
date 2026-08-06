@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Phase, Project, PullRequestState, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, User } from "@taskforge/contracts";
-import { Check, ExternalLink, GitBranch, GitPullRequest, Link2, Send, Trash2, X } from "lucide-react";
+import { Check, ExternalLink, GitBranch, GitPullRequest, Link2, Send, Sparkles, Trash2, X } from "lucide-react";
 import { priorityMeta, statusMeta } from "../lib/ui";
 import { api } from "../lib/api";
 import { Avatar } from "./Avatar";
+import { SendToAI } from "./SendToAI";
 
 export function TaskModal({ task, initialStatus, project, currentUser, members, phases, tasks, onClose, onSave, onDelete }: {
   task: Task | null; initialStatus: TaskStatus; project: Project; currentUser: User; members: User[]; phases: Phase[]; tasks: Task[];
@@ -16,6 +17,7 @@ export function TaskModal({ task, initialStatus, project, currentUser, members, 
   const [updateBody, setUpdateBody] = useState("");
   const [postingUpdate, setPostingUpdate] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [showSendToAI, setShowSendToAI] = useState(false);
 
   useEffect(() => {
     if (task) {
@@ -49,7 +51,7 @@ export function TaskModal({ task, initialStatus, project, currentUser, members, 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form className="task-modal" onSubmit={submit}>
-        <header><div><span className="modal-kicker">{task ? `${project.key}-${task.number}` : `New task in ${project.name}`}</span><h2>{task ? "Edit task" : "Create a task"}</h2></div><div className="modal-header-actions">{task && <button type="button" className="copy-task-link" onClick={() => copyTaskLink().catch(() => setError("Could not copy task link"))}>{linkCopied ? <Check /> : <Link2 />}{linkCopied ? "Copied" : "Copy link"}</button>}<button type="button" className="icon-button" onClick={onClose}><X /></button></div></header>
+        <header><div><span className="modal-kicker">{task ? `${project.key}-${task.number}` : `New task in ${project.name}`}</span><h2>{task ? "Edit task" : "Create a task"}</h2></div><div className="modal-header-actions">{task && <button type="button" className="send-to-ai-button" onClick={() => setShowSendToAI(true)}><Sparkles /> Send to AI</button>}{task && <button type="button" className="copy-task-link" onClick={() => copyTaskLink().catch(() => setError("Could not copy task link"))}>{linkCopied ? <Check /> : <Link2 />}{linkCopied ? "Copied" : "Copy link"}</button>}<button type="button" className="icon-button" onClick={onClose}><X /></button></div></header>
         <div className="modal-grid">
           <div className="modal-main">
             <label>Task name<input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="What needs to be done?" required /></label>
@@ -79,6 +81,7 @@ export function TaskModal({ task, initialStatus, project, currentUser, members, 
         </section>}
         {error && <div className="form-error">{error}</div>}
         <footer>{onDelete ? <button type="button" className="button button-danger-quiet" onClick={onDelete}><Trash2 /> Delete</button> : <span />}<div><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving}>{saving ? "Saving…" : task ? "Save changes" : "Create task"}</button></div></footer>
+        {showSendToAI && task && <SendToAI project={project} task={task} phaseNumber={phases.find((phase) => phase.id === task.phaseId)?.number ?? null} onClose={() => setShowSendToAI(false)} />}
       </form>
     </div>
   );
