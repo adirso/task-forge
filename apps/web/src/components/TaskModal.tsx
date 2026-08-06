@@ -6,12 +6,13 @@ import { api } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { SendToAI } from "./SendToAI";
 import { TaskTagEditor } from "./TaskTags";
+import { TaskDependencyEditor } from "./TaskDependencies";
 
 export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete }: {
   task: Task | null; initialStatus: TaskStatus; defaultPhaseId: string | null; project: Project; currentUser: User; members: User[]; phases: Phase[]; availableTags: Tag[]; tasks: Task[];
   onClose: () => void; onSave: (input: TaskCreate) => Promise<void>; onDelete: (() => Promise<void>) | null;
 }) {
-  const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: defaultPhaseId, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, tags: [] });
+  const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: defaultPhaseId, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, tags: [], dependencyIds: [] });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [updates, setUpdates] = useState<TaskNote[]>([]);
@@ -22,7 +23,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
 
   useEffect(() => {
     if (task) {
-      setForm({ title: task.title, description: task.description, definitionOfDone: task.definitionOfDone, status: task.status, priority: task.priority, assigneeId: task.assigneeId, parentId: task.parentId, branch: task.branch, dueDate: task.dueDate, estimatePoints: task.estimatePoints, phaseId: task.phaseId, pullRequestUrl: task.pullRequestUrl, pullRequestTitle: task.pullRequestTitle, pullRequestState: task.pullRequestState, tags: task.tags.map((tag) => tag.name) });
+      setForm({ title: task.title, description: task.description, definitionOfDone: task.definitionOfDone, status: task.status, priority: task.priority, assigneeId: task.assigneeId, parentId: task.parentId, branch: task.branch, dueDate: task.dueDate, estimatePoints: task.estimatePoints, phaseId: task.phaseId, pullRequestUrl: task.pullRequestUrl, pullRequestTitle: task.pullRequestTitle, pullRequestState: task.pullRequestState, tags: task.tags.map((tag) => tag.name), dependencyIds: task.dependencies.map((dependency) => dependency.dependsOnTaskId) });
       api.taskUpdates(task.id).then(({ updates: taskUpdates }) => setUpdates(taskUpdates)).catch(() => setUpdates([]));
     } else setUpdates([]);
   }, [task]);
@@ -58,6 +59,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
             <label>Task name<input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="What needs to be done?" required /></label>
             <label>Description<textarea value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Add context, requirements, or useful links…" rows={5} /></label>
             <label>Definition of done<textarea value={form.definitionOfDone} onChange={(e) => set("definitionOfDone", e.target.value)} placeholder="Describe the observable outcome that marks this complete…" rows={4} /></label>
+            <section className="dependency-field dependency-section"><div className="section-heading"><span>Dependencies</span></div><TaskDependencyEditor value={form.dependencyIds ?? []} tasks={tasks} projectKey={project.key} currentTaskId={task?.id} onChange={(dependencyIds) => set("dependencyIds", dependencyIds)} /></section>
             <section className="pr-editor">
               <div className="section-heading"><span><GitPullRequest /> Pull request</span>{form.pullRequestUrl && <a href={form.pullRequestUrl} target="_blank" rel="noreferrer">Open PR <ExternalLink /></a>}</div>
               <label>PR URL<input type="url" value={form.pullRequestUrl ?? ""} onChange={(e) => { const url = e.target.value || null; set("pullRequestUrl", url); if (url && !form.pullRequestState) set("pullRequestState", "OPEN"); if (!url) { set("pullRequestTitle", null); set("pullRequestState", null); } }} placeholder="https://github.com/org/repo/pull/123" /></label>

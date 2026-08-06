@@ -47,6 +47,31 @@ async function createsParentCycle(taskId: string, parentId: string | null | unde
   return false;
 }
 
+async function dependencyPathReaches(startId: string, targetId: string, visited = new Set<string>()): Promise<boolean> {
+  if (startId === targetId) return true;
+  if (visited.has(startId)) return false;
+  visited.add(startId);
+  const rows = await db.prepare("SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ?").all(startId) as { depends_on_task_id: string }[];
+  for (const row of rows) if (await dependencyPathReaches(row.depends_on_task_id, targetId, visited)) return true;
+  return false;
+}
+
+async function validateDependencies(projectId: string, taskId: string, dependencyIds: string[]) {
+  for (const dependencyId of dependencyIds) {
+    if (dependencyId === taskId) return "A task cannot depend on itself";
+    const dependency = await db.prepare("SELECT project_id FROM tasks WHERE id = ?").get(dependencyId) as { project_id: string } | undefined;
+    if (!dependency || dependency.project_id !== projectId) return "Dependencies must belong to the same project";
+    if (await dependencyPathReaches(dependencyId, taskId)) return "Dependencies cannot create a cycle";
+  }
+  return null;
+}
+
+async function replaceTaskDependencies(taskId: string, dependencyIds: string[], now: string) {
+  await db.prepare("DELETE FROM task_dependencies WHERE task_id = ?").run(taskId);
+  const insert = await db.prepare("INSERT INTO task_dependencies (task_id, depends_on_task_id, created_at) VALUES (?, ?, ?)");
+  for (const dependencyId of dependencyIds) await insert.run(taskId, dependencyId, now);
+}
+
 async function replaceTaskTags(taskId: string, projectId: string, names: string[], now: string) {
   await db.prepare("DELETE FROM task_tags WHERE task_id = ?").run(taskId);
   const insertTag = await db.prepare("INSERT OR IGNORE INTO tags (id, project_id, name, created_at) VALUES (?, ?, ?, ?)");
@@ -96,13 +121,15 @@ export async function taskRoutes(app: FastifyInstance) {
     const parsedBody = taskCreateSchema.safeParse(request.body);
     if (!parsedBody.success) return reply.code(400).send({ error: "Validation failed", issues: parsedBody.error.issues });
     const body = parsedBody.data;
+    const id = randomUUID();
     if (!(await validateRelation(projectId, "assignee", body.assigneeId))) return reply.code(400).send({ error: "Assignee is not a project member" });
     if (!(await validateRelation(projectId, "parent", body.parentId))) return reply.code(400).send({ error: "Parent task is not in this project" });
+    const dependencyError = await validateDependencies(projectId, id, body.dependencyIds ?? []);
+    if (dependencyError) return reply.code(400).send({ error: dependencyError });
     const phaseId = body.phaseId === undefined
       ? (await db.prepare("SELECT id FROM phases WHERE project_id = ? AND is_active = 1").get(projectId) as { id: string } | undefined)?.id ?? null
       : body.phaseId;
     if (phaseId && !await db.prepare("SELECT 1 FROM phases WHERE id = ? AND project_id = ?").get(phaseId, projectId)) return reply.code(400).send({ error: "Phase is not in this project" });
-    const id = randomUUID();
     const now = new Date().toISOString();
     await db.transaction(async () => {
       const project = await db.prepare(`SELECT next_task_number FROM projects WHERE id = ?${db.dialect === "mysql" ? " FOR UPDATE" : ""}`)
@@ -119,6 +146,7 @@ export async function taskRoutes(app: FastifyInstance) {
           body.pullRequestUrl ? body.pullRequestState ?? "OPEN" : null, phaseId, position, now, now);
       await db.prepare("UPDATE projects SET next_task_number = next_task_number + 1, updated_at = ? WHERE id = ?").run(now, projectId);
       await replaceTaskTags(id, projectId, body.tags ?? [], now);
+      await replaceTaskDependencies(id, body.dependencyIds ?? [], now);
       await recordActivity(projectId, id, request.authUser.id, "task.created", { title: body.title });
       if (body.assigneeId && body.assigneeId !== request.authUser.id) {
         await notify(body.assigneeId, projectId, id, "TASK_ASSIGNED", "Task assigned to you", `${request.authUser.name} assigned you “${body.title}”.`);
@@ -145,6 +173,10 @@ export async function taskRoutes(app: FastifyInstance) {
     const body = parsedBody.data;
     if (!(await validateRelation(projectId, "assignee", body.assigneeId))) return reply.code(400).send({ error: "Assignee is not a project member" });
     if (!(await validateRelation(projectId, "parent", body.parentId))) return reply.code(400).send({ error: "Parent task is not in this project" });
+    if (body.dependencyIds !== undefined) {
+      const dependencyError = await validateDependencies(projectId, request.params.id, body.dependencyIds);
+      if (dependencyError) return reply.code(400).send({ error: dependencyError });
+    }
     if (body.phaseId && !await db.prepare("SELECT 1 FROM phases WHERE id = ? AND project_id = ?").get(body.phaseId, projectId)) return reply.code(400).send({ error: "Phase is not in this project" });
     if (body.parentId !== undefined && await createsParentCycle(request.params.id, body.parentId)) return reply.code(400).send({ error: "Parent relationship would create a cycle" });
 
@@ -160,13 +192,14 @@ export async function taskRoutes(app: FastifyInstance) {
     for (const [key, column] of Object.entries(columns)) {
       if (key in body) { fields.push(`${column} = ?`); values.push(body[key as keyof typeof body] ?? null); }
     }
-    if (fields.length || body.tags !== undefined) {
+    if (fields.length || body.tags !== undefined || body.dependencyIds !== undefined) {
       const now = new Date().toISOString();
       if (fields.length) { fields.push("updated_at = ?"); values.push(now, request.params.id); }
       await db.transaction(async () => {
         if (fields.length) await db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values);
         else await db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(now, request.params.id);
         if (body.tags !== undefined) await replaceTaskTags(request.params.id, projectId, body.tags, now);
+        if (body.dependencyIds !== undefined) await replaceTaskDependencies(request.params.id, body.dependencyIds, now);
         await db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, projectId);
         await recordActivity(projectId, request.params.id, request.authUser.id, "task.updated", body);
         const taskTitle = body.title ?? String(existing.title);
