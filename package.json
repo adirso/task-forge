@@ -1,0 +1,25 @@
+{
+  "name": "taskforge",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "predev": "npm run build -w @taskforge/contracts",
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w @taskforge/api\" \"npm run dev -w @taskforge/web\"",
+    "build": "npm run build -w @taskforge/contracts && npm run build -w @taskforge/api && npm run build -w @taskforge/web",
+    "pretypecheck": "npm run build -w @taskforge/contracts",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:seed": "npm run db:seed -w @taskforge/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
