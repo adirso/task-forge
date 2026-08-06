@@ -66,6 +66,9 @@ test("human can log in and create a project", async () => {
   const phases = await app.inject({ method: "GET", url: `/api/projects/${projectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(phases.statusCode, 200);
   assert.equal(phases.json().phases[0].isActive, true);
+  const project = await app.inject({ method: "GET", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(project.statusCode, 200);
+  assert.equal(project.json().project.members[0].projectRole, "OWNER");
   const nextPhase = await app.inject({ method: "POST", url: `/api/projects/${projectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { number: 2, goal: "Deliver the integration", isActive: true } });
   assert.equal(nextPhase.statusCode, 201);
   assert.equal(nextPhase.json().phase.isActive, true);
@@ -161,6 +164,27 @@ test("an issued agent token authenticates and is scoped by membership", async ()
   assert.equal(context.statusCode, 200);
   assert.equal(context.json().project.id, projectId);
   assert.equal(context.json().task.id, taskId);
+});
+
+test("only owners and administrators can manage project membership", async () => {
+  const forbidden = await app.inject({
+    method: "POST", url: `/api/projects/${projectId}/members`, headers: { authorization: `Bearer ${agentToken}` },
+    payload: { userId: adminId, role: "MEMBER" },
+  });
+  assert.equal(forbidden.statusCode, 403);
+
+  const protectedOwner = await app.inject({ method: "DELETE", url: `/api/projects/${projectId}/members/${adminId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(protectedOwner.statusCode, 400);
+
+  const removed = await app.inject({ method: "DELETE", url: `/api/projects/${projectId}/members/${agentId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(removed.statusCode, 204);
+
+  const inaccessible = await app.inject({ method: "GET", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(inaccessible.statusCode, 403);
+
+  const task = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(task.statusCode, 200);
+  assert.equal(task.json().task.assigneeId, null);
 });
 
 test("unauthenticated project access is rejected", async () => {
