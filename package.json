@@ -13,7 +13,8 @@
     "pretypecheck": "npm run build -w @taskforge/contracts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "db:seed": "npm run db:seed -w @taskforge/api"
+    "db:seed": "npm run db:seed -w @taskforge/api",
+    "admin:bootstrap": "npm run admin:bootstrap -w @taskforge/api"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
