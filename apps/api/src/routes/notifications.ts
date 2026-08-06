@@ -24,8 +24,8 @@ export async function notificationRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
 
   app.get("/", { schema: { tags: ["Notifications"], summary: "List the current user's notifications" } }, async (request) => {
-    const rows = db.prepare(`
-      SELECT n.*, p.name AS project_name, p.key AS project_key, t.number AS task_number
+    const rows = await db.prepare(`
+      SELECT n.*, p.name AS project_name, p.\`key\` AS project_key, t.number AS task_number
       FROM notifications n
       LEFT JOIN projects p ON p.id = n.project_id
       LEFT JOIN tasks t ON t.id = n.task_id
@@ -36,17 +36,17 @@ export async function notificationRoutes(app: FastifyInstance) {
   });
 
   app.patch<{ Params: NotificationParams }>("/:id/read", { schema: { tags: ["Notifications"], summary: "Mark a notification as read" } }, async (request, reply) => {
-    const result = db.prepare("UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?")
+    const result = await db.prepare("UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?")
       .run(new Date().toISOString(), request.params.id, request.authUser.id);
     if (!result.changes) return reply.code(404).send({ error: "Notification not found" });
-    const row = db.prepare(`SELECT n.*, p.name AS project_name, p.key AS project_key, t.number AS task_number
+    const row = await db.prepare(`SELECT n.*, p.name AS project_name, p.\`key\` AS project_key, t.number AS task_number
       FROM notifications n LEFT JOIN projects p ON p.id = n.project_id LEFT JOIN tasks t ON t.id = n.task_id
       WHERE n.id = ?`).get(request.params.id) as Record<string, unknown>;
     return { notification: toNotification(row) };
   });
 
   app.post("/read-all", { schema: { tags: ["Notifications"], summary: "Mark all notifications as read" } }, async (request) => {
-    const result = db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL")
+    const result = await db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL")
       .run(new Date().toISOString(), request.authUser.id);
     return { updated: result.changes };
   });

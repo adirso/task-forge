@@ -38,7 +38,7 @@ export function installAuth(app: FastifyInstance) {
     let user: AuthRow | undefined;
 
     if (token.startsWith("tf_")) {
-      const row = db.prepare(`
+      const row = await db.prepare(`
         SELECT u.id, u.name, u.email, u.kind, u.role, t.id AS token_id
         FROM api_tokens t JOIN users u ON u.id = t.user_id
         WHERE t.token_hash = ? AND t.revoked_at IS NULL
@@ -46,12 +46,12 @@ export function installAuth(app: FastifyInstance) {
       `).get(hashToken(token), new Date().toISOString()) as (AuthRow & { token_id: string }) | undefined;
       if (row) {
         user = row;
-        db.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").run(new Date().toISOString(), row.token_id);
+        await db.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").run(new Date().toISOString(), row.token_id);
       }
     } else {
       try {
         const payload = jwt.verify(token, config.jwtSecret) as jwt.JwtPayload;
-        user = db.prepare("SELECT id, name, email, kind, role FROM users WHERE id = ?").get(payload.sub) as AuthRow | undefined;
+        user = await db.prepare("SELECT id, name, email, kind, role FROM users WHERE id = ?").get(payload.sub) as AuthRow | undefined;
       } catch {
         user = undefined;
       }
