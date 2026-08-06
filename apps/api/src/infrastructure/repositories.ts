@@ -1,0 +1,146 @@
+import { randomUUID } from "node:crypto";
+import type { ApiTokenEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
+import type { ApiTokenRepository, ActivityRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
+import type { TaskFilters } from "../application/services.js";
+
+export interface DatabasePort {
+  readonly dialect: "sqlite" | "mysql";
+  prepare(sql: string): {
+    get<T extends Record<string, unknown> = Record<string, unknown>>(...params: unknown[]): Promise<T | undefined>;
+    all<T extends Record<string, unknown> = Record<string, unknown>>(...params: unknown[]): Promise<T[]>;
+    run(...params: unknown[]): Promise<{ changes: number }>;
+  };
+  transaction<T>(callback: () => Promise<T>): () => Promise<T>;
+}
+
+type Row = Record<string, unknown>;
+const text = (value: unknown) => String(value);
+const nullableText = (value: unknown) => (value == null ? null : String(value));
+const date = (value: unknown) => String(value);
+
+function toUser(row: Row): UserEntity {
+  return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), createdAt: date(row.created_at) };
+}
+
+function toProject(row: Row): ProjectEntity {
+  return { id: text(row.id), key: text(row.key), name: text(row.name), description: text(row.description), repoUrl: nullableText(row.repo_url), color: text(row.color), ownerId: text(row.owner_id), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
+}
+
+function toPhase(row: Row): PhaseEntity {
+  return { id: text(row.id), projectId: text(row.project_id), number: Number(row.number), goal: text(row.goal), isActive: Boolean(row.is_active), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
+}
+
+function toTask(row: Row): TaskEntity {
+  return {
+    id: text(row.id), projectId: text(row.project_id), number: Number(row.number), title: text(row.title), description: text(row.description),
+    definitionOfDone: text(row.definition_of_done), status: row.status as TaskEntity["status"], priority: row.priority as TaskEntity["priority"],
+    assigneeId: nullableText(row.assignee_id), creatorId: text(row.creator_id), parentId: nullableText(row.parent_id), branch: nullableText(row.branch),
+    dueDate: nullableText(row.due_date), estimatePoints: row.estimate_points == null ? null : Number(row.estimate_points), phaseId: nullableText(row.phase_id),
+    pullRequestUrl: nullableText(row.pull_request_url), pullRequestTitle: nullableText(row.pull_request_title), pullRequestState: (row.pull_request_state as TaskEntity["pullRequestState"]) ?? null,
+    position: Number(row.position), createdAt: date(row.created_at), updatedAt: date(row.updated_at),
+  };
+}
+
+function toTag(row: Row): TaskTagEntity {
+  return { id: text(row.id), projectId: text(row.project_id), name: text(row.name), createdAt: date(row.created_at) };
+}
+
+function toDependency(row: Row): TaskDependencyEntity {
+  return { taskId: text(row.task_id), dependsOnTaskId: text(row.depends_on_task_id), projectId: text(row.project_id), number: Number(row.number), title: text(row.title), status: row.status as TaskDependencyEntity["status"] };
+}
+
+function toUpdate(row: Row): TaskUpdateEntity {
+  return { id: text(row.id), taskId: text(row.task_id), authorId: text(row.author_id), body: text(row.body), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
+}
+
+function toNotification(row: Row): NotificationEntity {
+  return { id: text(row.id), userId: text(row.user_id), projectId: nullableText(row.project_id), taskId: nullableText(row.task_id), type: text(row.type), title: text(row.title), message: text(row.message), readAt: nullableText(row.read_at), createdAt: date(row.created_at) };
+}
+
+function toToken(row: Row): ApiTokenEntity {
+  return { id: text(row.id), userId: text(row.user_id), name: text(row.name), prefix: text(row.token_prefix ?? row.prefix), expiresAt: nullableText(row.expires_at ?? row.expiresAt), lastUsedAt: nullableText(row.last_used_at ?? row.lastUsedAt), revokedAt: nullableText(row.revoked_at ?? row.revokedAt), createdAt: date(row.created_at ?? row.createdAt) };
+}
+
+function createUserRepository(db: DatabasePort): UserRepository {
+  return {
+    async findById(id) { const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); return row ? toUser(row) : null; },
+    async findByEmail(email) { const row = await db.prepare("SELECT * FROM users WHERE email = ?").get(email.toLowerCase()); return row ? { ...toUser(row), passwordHash: nullableText(row.password_hash) } : null; },
+    async list() { return (await db.prepare("SELECT * FROM users ORDER BY kind, name").all()).map(toUser); },
+    async saveProfile(id, input) { await db.prepare("UPDATE users SET name = ?, email = ? WHERE id = ?").run(input.name, input.email.toLowerCase(), id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after update"); return toUser(row); },
+    async createAgent(input) { await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)").run(input.id, input.email.toLowerCase(), input.name, input.createdAt); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(input.id); if (!row) throw new Error("Agent not found after create"); return toUser(row); },
+    async deleteAgent(id) { await db.prepare("DELETE FROM users WHERE id = ?").run(id); },
+  };
+}
+
+function createProjectRepository(db: DatabasePort): ProjectRepository {
+  return {
+    async findById(id) { const row = await db.prepare("SELECT * FROM projects WHERE id = ?").get(id); return row ? toProject(row) : null; },
+    async findByKey(key) { const row = await db.prepare("SELECT * FROM projects WHERE `key` = ?").get(key); return row ? toProject(row) : null; },
+    async listAccessible(actorId, isAdmin) { const rows = await db.prepare(`SELECT p.* FROM projects p WHERE ? = 1 OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?) ORDER BY p.updated_at DESC`).all(isAdmin ? 1 : 0, actorId); return rows.map(toProject); },
+    async create(input) { await db.prepare("INSERT INTO projects (id, `key`, name, description, repo_url, color, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.key, input.name, input.description, input.repoUrl, input.color, input.ownerId, input.createdAt, input.updatedAt); return input; },
+    async update(id, input) { const fields: string[] = []; const values: unknown[] = []; const columns: Record<string, string> = { name: "name", description: "description", repoUrl: "repo_url", color: "color" }; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM projects WHERE id = ?").get(id); if (!row) throw new Error("Project not found after update"); return toProject(row); },
+    async delete(id) { await db.prepare("DELETE FROM projects WHERE id = ?").run(id); },
+  };
+}
+
+function createMembershipRepository(db: DatabasePort): MembershipRepository {
+  return {
+    async isMember(projectId, userId) { return Boolean(await db.prepare("SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?").get(projectId, userId)); },
+    async list(projectId) { return (await db.prepare("SELECT u.* FROM users u JOIN project_members pm ON pm.user_id = u.id WHERE pm.project_id = ? ORDER BY u.kind, u.name").all(projectId)).map(toUser); },
+    async add(projectId, userId, role) { await db.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, ?, ?)").run(projectId, userId, role, new Date().toISOString()); },
+    async remove(projectId, userId) { await db.prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?").run(projectId, userId); },
+  };
+}
+
+function createPhaseRepository(db: DatabasePort): PhaseRepository {
+  return {
+    async list(projectId) { return (await db.prepare("SELECT * FROM phases WHERE project_id = ? ORDER BY number DESC").all(projectId)).map(toPhase); },
+    async findById(id) { const row = await db.prepare("SELECT * FROM phases WHERE id = ?").get(id); return row ? toPhase(row) : null; },
+    async findActive(projectId) { const row = await db.prepare("SELECT * FROM phases WHERE project_id = ? AND is_active = 1").get(projectId); return row ? toPhase(row) : null; },
+    async create(input) { await db.prepare("INSERT INTO phases (id, project_id, number, goal, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(input.id, input.projectId, input.number, input.goal, input.isActive ? 1 : 0, input.createdAt, input.updatedAt); return input; },
+    async update(id, input) { const fields: string[] = []; const values: unknown[] = []; if (input.number !== undefined) { fields.push("number = ?"); values.push(input.number); } if (input.goal !== undefined) { fields.push("goal = ?"); values.push(input.goal); } if (input.isActive !== undefined) { fields.push("is_active = ?"); values.push(input.isActive ? 1 : 0); } fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE phases SET ${fields.join(", ")} WHERE id = ?`).run(...values); const row = await db.prepare("SELECT * FROM phases WHERE id = ?").get(id); if (!row) throw new Error("Phase not found after update"); return toPhase(row); },
+    async delete(id) { await db.prepare("UPDATE tasks SET phase_id = NULL WHERE phase_id = ?").run(id); await db.prepare("DELETE FROM phases WHERE id = ?").run(id); },
+  };
+}
+
+function createTaskRepository(db: DatabasePort): TaskRepository {
+  return {
+    async findById(id) { const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); return row ? toTask(row) : null; },
+    async listByProject(projectId, filters = {}) { const where = ["project_id = ?"]; const values: unknown[] = [projectId]; const filterMap: Record<string, string> = { status: "status", assigneeId: "assignee_id", priority: "priority", phaseId: "phase_id" }; for (const [key, column] of Object.entries(filterMap)) if (filters[key as keyof TaskFilters] !== undefined) { where.push(`${column} = ?`); values.push(filters[key as keyof TaskFilters]); } if (filters.minPoints !== undefined) { where.push("estimate_points >= ?"); values.push(filters.minPoints); } if (filters.maxPoints !== undefined) { where.push("estimate_points <= ?"); values.push(filters.maxPoints); } if (filters.query) { where.push("(title LIKE ? OR description LIKE ?)"); values.push(`%${filters.query}%`, `%${filters.query}%`); } const rows = await db.prepare(`SELECT * FROM tasks WHERE ${where.join(" AND ")} ORDER BY status, position, created_at DESC`).all(...values); return rows.map(toTask); },
+    async create(input) { await db.prepare(`INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, priority, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.id, input.projectId, input.number, input.title, input.description, input.definitionOfDone, input.status, input.priority, input.assigneeId, input.creatorId, input.parentId, input.branch, input.dueDate, input.estimatePoints, input.phaseId, input.pullRequestUrl, input.pullRequestTitle, input.pullRequestState, input.position, input.createdAt, input.updatedAt); return input; },
+    async update(id, input) { const columns: Record<string, string> = { title: "title", description: "description", definitionOfDone: "definition_of_done", status: "status", priority: "priority", assigneeId: "assignee_id", parentId: "parent_id", branch: "branch", dueDate: "due_date", estimatePoints: "estimate_points", phaseId: "phase_id", pullRequestUrl: "pull_request_url", pullRequestTitle: "pull_request_title", pullRequestState: "pull_request_state", position: "position" }; const fields: string[] = []; const values: unknown[] = []; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); if (!row) throw new Error("Task not found after update"); return toTask(row); },
+    async delete(id) { await db.prepare("DELETE FROM tasks WHERE id = ?").run(id); },
+  };
+}
+
+function createTagRepository(db: DatabasePort): TaskTagRepository {
+  return { async listForTask(taskId) { return (await db.prepare("SELECT * FROM tags JOIN task_tags ON task_tags.tag_id = tags.id WHERE task_tags.task_id = ? ORDER BY tags.name").all(taskId)).map(toTag); }, async replaceForTask(taskId, projectId, names, createdAt) { await db.prepare("DELETE FROM task_tags WHERE task_id = ?").run(taskId); for (const name of [...new Set(names)]) { const existing = await db.prepare("SELECT id FROM tags WHERE project_id = ? AND name = ?").get(projectId, name); const id = existing?.id ? text(existing.id) : randomUUID(); if (!existing) await db.prepare("INSERT INTO tags (id, project_id, name, created_at) VALUES (?, ?, ?, ?)").run(id, projectId, name, createdAt); await db.prepare("INSERT INTO task_tags (task_id, tag_id, created_at) VALUES (?, ?, ?)").run(taskId, id, createdAt); } } };
+}
+
+function createDependencyRepository(db: DatabasePort): TaskDependencyRepository {
+  return { async listForTask(taskId) { return (await db.prepare("SELECT td.task_id, td.depends_on_task_id, dep.project_id, dep.number, dep.title, dep.status FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id WHERE td.task_id = ? ORDER BY dep.number").all(taskId)).map(toDependency); }, async replaceForTask(taskId, dependencyIds, createdAt) { await db.prepare("DELETE FROM task_dependencies WHERE task_id = ?").run(taskId); for (const dependencyId of [...new Set(dependencyIds)]) await db.prepare("INSERT INTO task_dependencies (task_id, depends_on_task_id, created_at) VALUES (?, ?, ?)").run(taskId, dependencyId, createdAt); } };
+}
+
+function createUpdateRepository(db: DatabasePort): TaskUpdateRepository {
+  return { async listForTask(taskId) { return (await db.prepare("SELECT * FROM task_updates WHERE task_id = ? ORDER BY created_at DESC").all(taskId)).map(toUpdate); }, async create(input) { await db.prepare("INSERT INTO task_updates (id, task_id, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.authorId, input.body, input.createdAt, input.updatedAt); return input; } };
+}
+
+function createNotificationRepository(db: DatabasePort): NotificationRepository {
+  return { async notify(input) { await db.prepare("INSERT INTO notifications (id, user_id, project_id, task_id, type, title, message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), input.userId, input.projectId ?? null, input.taskId ?? null, input.type, input.title, input.message, new Date().toISOString()); }, async listForUser(userId) { return (await db.prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50").all(userId)).map(toNotification); }, async markRead(userId, id) { await db.prepare("UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?").run(new Date().toISOString(), id, userId); const row = await db.prepare("SELECT * FROM notifications WHERE id = ? AND user_id = ?").get(id, userId); if (!row) throw new Error("Notification not found after read"); return toNotification(row); }, async markAllRead(userId) { return (await db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(new Date().toISOString(), userId)).changes; } };
+}
+
+function createTokenRepository(db: DatabasePort): ApiTokenRepository {
+  return { async create(input) { await db.prepare("INSERT INTO api_tokens (id, user_id, name, token_prefix, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(input.id, input.userId, input.name, input.prefix, input.hash, input.expiresAt, input.createdAt); }, async listForUser(userId) { return (await db.prepare("SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC").all(userId)).map(toToken); }, async revoke(id) { await db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE id = ?").run(new Date().toISOString(), id); } };
+}
+
+function createActivityRepository(db: DatabasePort): ActivityRepository {
+  return { async record(input) { await db.prepare("INSERT INTO activity (id, project_id, task_id, actor_id, action, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), input.projectId, input.taskId ?? null, input.actorId, input.action, JSON.stringify(input.metadata ?? {}), new Date().toISOString()); } };
+}
+
+function createSearchRepository(db: DatabasePort): SearchRepository {
+  return { async searchAccessible(input) { const access = input.isAdmin ? "1 = 1" : "EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = t.project_id AND pm.user_id = ?)"; const values: unknown[] = input.isAdmin ? [`%${input.query}%`, `%${input.query}%`] : [input.actorId, `%${input.query}%`, `%${input.query}%`]; const rows = await db.prepare(`SELECT t.* FROM tasks t WHERE ${access} AND (t.title LIKE ? OR t.description LIKE ?) ORDER BY t.updated_at DESC`).all(...values); return rows.map(toTask); } };
+}
+
+export function createRepositories(db: DatabasePort): RepositorySet {
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
+}
