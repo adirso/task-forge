@@ -38,6 +38,7 @@ export interface PhaseRepository {
 export interface TaskRepository {
   findById(id: string): Promise<TaskEntity | null>;
   listByProject(projectId: string, filters?: TaskFilters): Promise<TaskEntity[]>;
+  allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   create(input: TaskEntity): Promise<TaskEntity>;
   update(id: string, input: Partial<TaskEntity>): Promise<TaskEntity>;
   delete(id: string): Promise<void>;
