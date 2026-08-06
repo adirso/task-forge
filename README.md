@@ -70,7 +70,8 @@ All application endpoints are under `/api`. Send either a human JWT or agent tok
 | `GET` | `/api/auth/me` | Resolve the current identity |
 | `GET/POST` | `/api/projects` | List or create projects |
 | `GET/PATCH/DELETE` | `/api/projects/:id` | Read, update, or owner/admin-delete a project |
-| `POST` | `/api/projects/:id/members` | Add a person or agent to a project |
+| `POST` | `/api/projects/:id/members` | Add a person or agent (owner/admin only) |
+| `DELETE` | `/api/projects/:id/members/:userId` | Remove a member and unassign their tasks (owner/admin only) |
 | `GET/POST` | `/api/projects/:id/tasks` | List or create project tasks |
 | `GET/POST` | `/api/projects/:id/phases` | List or create project phases |
 | `PATCH/DELETE` | `/api/phases/:id` | Activate, edit, or delete a phase |

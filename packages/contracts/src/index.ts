@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const userKindSchema = z.enum(["HUMAN", "AGENT"]);
 export const userRoleSchema = z.enum(["ADMIN", "MEMBER"]);
+export const projectMemberRoleSchema = z.enum(["OWNER", "MEMBER"]);
 export const taskStatusSchema = z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"]);
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
@@ -76,6 +77,7 @@ export const taskUpdateCreateSchema = z.object({
 
 export type UserKind = z.infer<typeof userKindSchema>;
 export type UserRole = z.infer<typeof userRoleSchema>;
+export type ProjectMemberRole = z.infer<typeof projectMemberRoleSchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 export type PullRequestState = z.infer<typeof pullRequestStateSchema>;
@@ -93,6 +95,10 @@ export interface User {
   createdAt: string;
 }
 
+export interface ProjectMember extends User {
+  projectRole: ProjectMemberRole;
+}
+
 export interface Project {
   id: string;
   key: string;
@@ -104,7 +110,7 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   taskCount?: number;
-  members?: User[];
+  members?: ProjectMember[];
 }
 
 export interface Phase {
