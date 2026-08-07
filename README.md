@@ -7,7 +7,7 @@ TaskForge is a local-first project and task manager for teams made of people and
 - Human login with 8-hour JWT sessions
 - Agent identities with hashed, revocable, optionally expiring API tokens
 - Project ownership, membership, repository links, keys, colors, and descriptions
-- Tasks with a stable project number, description, definition of done, workflow status, priority, assignee, creator, branch, pull request, parent task, due date, estimate, and ordering
+- Tasks with a stable project number, description, definition of done, workflow status, priority, type (feature, bug, infra, update, security, docs, chore), assignee, creator, branch, pull request, parent task, due date, estimate, and ordering
 - Chronological task notes and progress updates authored by people or agents
 - Numbered project phases with goals, one active phase for the board, and phase-grouped list planning
 - Five-column drag-and-drop board and sortable-feeling structured list view

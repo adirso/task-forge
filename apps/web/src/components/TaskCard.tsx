@@ -4,11 +4,12 @@ import { formatDate, priorityMeta } from "../lib/ui";
 import { Avatar } from "./Avatar";
 import { TaskTagPills } from "./TaskTags";
 import { TaskDependencyPills } from "./TaskDependencies";
+import { TaskTypePill } from "./TaskTypePill";
 
 export function TaskCard({ task, project, onOpen }: { task: Task; project: Project; onOpen: () => void }) {
   return (
     <article className="task-card" draggable onDragStart={(event) => event.dataTransfer.setData("text/task-id", task.id)} onClick={onOpen}>
-      <div className="card-top"><span className={`priority priority-${task.priority.toLowerCase()}`}>{priorityMeta[task.priority].symbol} {priorityMeta[task.priority].label}</span><span className="task-key">{project.key}-{task.number}</span></div>
+      <div className="card-top"><TaskTypePill type={task.type} /><span className={`priority priority-${task.priority.toLowerCase()}`}>{priorityMeta[task.priority].symbol} {priorityMeta[task.priority].label}</span><span className="task-key">{project.key}-{task.number}</span></div>
       <h3>{task.title}</h3>
       <TaskTagPills tags={task.tags} limit={3} />
       <TaskDependencyPills dependencies={task.dependencies} limit={2} />

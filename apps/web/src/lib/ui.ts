@@ -1,4 +1,5 @@
-import type { TaskPriority, TaskStatus } from "@taskforge/contracts";
+import type { TaskPriority, TaskStatus, TaskType } from "@taskforge/contracts";
+import { Bug, FileText, RefreshCw, Server, ShieldCheck, Sparkles, Wrench, type LucideIcon } from "lucide-react";
 
 export const statusMeta: Record<TaskStatus, { label: string; tone: string }> = {
   BACKLOG: { label: "Backlog", tone: "slate" },
@@ -13,6 +14,16 @@ export const priorityMeta: Record<TaskPriority, { label: string; symbol: string 
   MEDIUM: { label: "Medium", symbol: "=" },
   HIGH: { label: "High", symbol: "↑" },
   URGENT: { label: "Urgent", symbol: "↑↑" },
+};
+
+export const taskTypeMeta: Record<TaskType, { label: string; icon: LucideIcon }> = {
+  FEATURE: { label: "Feature", icon: Sparkles },
+  BUG: { label: "Bug", icon: Bug },
+  INFRA: { label: "Infra", icon: Server },
+  UPDATE: { label: "Update", icon: RefreshCw },
+  SECURITY: { label: "Security", icon: ShieldCheck },
+  DOCS: { label: "Docs", icon: FileText },
+  CHORE: { label: "Chore", icon: Wrench },
 };
 
 export function initials(name: string) {
