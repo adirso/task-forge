@@ -5,6 +5,7 @@ export const userRoleSchema = z.enum(["ADMIN", "MEMBER"]);
 export const projectMemberRoleSchema = z.enum(["OWNER", "MEMBER"]);
 export const taskStatusSchema = z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"]);
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
+export const taskTypeSchema = z.enum(["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
 export const taskTagNameSchema = z.string().trim().min(1).max(32)
   .regex(/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/, "Tags may contain letters, numbers, hyphens, and underscores")
@@ -44,6 +45,7 @@ export const taskCreateSchema = z.object({
   definitionOfDone: z.string().trim().max(10000).default(""),
   status: taskStatusSchema.default("TODO"),
   priority: taskPrioritySchema.default("MEDIUM"),
+  type: taskTypeSchema.default("FEATURE"),
   assigneeId: z.string().uuid().nullable().optional(),
   parentId: z.string().uuid().nullable().optional(),
   branch: z.string().trim().max(255).nullable().optional(),
@@ -96,7 +98,7 @@ export const avatarUploadSchema = z.object({
   data: z.string().min(1).max(4_000_000),
 });
 
-export const automationFieldSchema = z.enum(["status", "priority", "assigneeId", "pullRequestState", "phaseId", "branch", "estimatePoints"]);
+export const automationFieldSchema = z.enum(["status", "priority", "type", "assigneeId", "pullRequestState", "phaseId", "branch", "estimatePoints"]);
 export const automationOperatorSchema = z.enum(["equals", "not_equals", "changed_to", "is_empty", "is_not_empty"]);
 export const automationConditionSchema = z.object({ field: automationFieldSchema, operator: automationOperatorSchema, value: z.string().nullable().default(null) });
 export const automationValueTypeSchema = z.enum(["static", "actor", "user", "service", "null"]);
@@ -109,6 +111,7 @@ export type UserRole = z.infer<typeof userRoleSchema>;
 export type ProjectMemberRole = z.infer<typeof projectMemberRoleSchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
+export type TaskType = z.infer<typeof taskTypeSchema>;
 export type PullRequestState = z.infer<typeof pullRequestStateSchema>;
 export type ProjectCreate = z.infer<typeof projectCreateSchema>;
 export type TaskCreate = z.infer<typeof taskCreateSchema>;
@@ -184,6 +187,7 @@ export interface Task {
   definitionOfDone: string;
   status: TaskStatus;
   priority: TaskPriority;
+  type: TaskType;
   assigneeId: string | null;
   creatorId: string;
   parentId: string | null;

@@ -9,6 +9,7 @@ export interface TaskFilters {
   status?: string;
   assigneeId?: string;
   priority?: string;
+  type?: string;
   phaseId?: string;
   tag?: string;
   minPoints?: number;

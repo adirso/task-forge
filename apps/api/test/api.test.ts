@@ -342,6 +342,38 @@ test("automations can assign the actor and merge open pull requests", async () =
   const rules = await app.inject({ method: "GET", url: `/api/projects/${projectId}/automations`, headers: { authorization: `Bearer ${jwtToken}` } }); assert.equal(rules.json().automations.length, 2);
 });
 
+test("task types default to FEATURE and are settable, filterable, and validated", async () => {
+  const project = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "TYP", name: "Task types", description: "Task type coverage", color: "#0747A6" } });
+  assert.equal(project.statusCode, 201, project.body);
+  const typeProjectId = project.json().project.id as string;
+
+  const defaulted = await app.inject({ method: "POST", url: `/api/projects/${typeProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Type is optional" } });
+  assert.equal(defaulted.statusCode, 201, defaulted.body);
+  assert.equal(defaulted.json().task.type, "FEATURE");
+  const defaultedId = defaulted.json().task.id as string;
+
+  const bug = await app.inject({ method: "POST", url: `/api/projects/${typeProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Crash while saving", type: "BUG" } });
+  assert.equal(bug.statusCode, 201, bug.body);
+  assert.equal(bug.json().task.type, "BUG");
+
+  const patched = await app.inject({ method: "PATCH", url: `/api/tasks/${defaultedId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { type: "SECURITY" } });
+  assert.equal(patched.statusCode, 200, patched.body);
+  assert.equal(patched.json().task.type, "SECURITY");
+  const reread = await app.inject({ method: "GET", url: `/api/tasks/${defaultedId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(reread.json().task.type, "SECURITY");
+
+  const filtered = await app.inject({ method: "GET", url: `/api/projects/${typeProjectId}/tasks?type=BUG`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(filtered.statusCode, 200);
+  assert.deepEqual(filtered.json().tasks.map((task: { title: string }) => task.title), ["Crash while saving"]);
+
+  const invalidBody = await app.inject({ method: "POST", url: `/api/projects/${typeProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Lowercase type", type: "feature" } });
+  assert.equal(invalidBody.statusCode, 400);
+  assert.deepEqual(invalidBody.json().issues[0].options, ["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
+
+  const invalidFilter = await app.inject({ method: "GET", url: `/api/projects/${typeProjectId}/tasks?type=EPIC`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(invalidFilter.statusCode, 400, invalidFilter.body);
+});
+
 test("unauthenticated project access is rejected", async () => {
   const response = await app.inject({ method: "GET", url: "/api/projects" });
   assert.equal(response.statusCode, 401);
