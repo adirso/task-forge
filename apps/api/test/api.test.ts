@@ -83,6 +83,16 @@ test("human can log in and create a project", async () => {
   phaseId = nextPhase.json().phase.id;
 });
 
+test("project owners can update project details", async () => {
+  const updated = await app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Updated API project", repoUrl: "https://github.com/example/updated", color: "#123456" } });
+  assert.equal(updated.statusCode, 200, updated.body);
+  assert.equal(updated.json().project.name, "Updated API project");
+  assert.equal(updated.json().project.repoUrl, "https://github.com/example/updated");
+  assert.equal(updated.json().project.color, "#123456");
+  const persisted = await app.inject({ method: "GET", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(persisted.json().project.name, "Updated API project");
+});
+
 test("task lifecycle supports assignment and status changes", async () => {
   const addMember = await app.inject({
     method: "POST", url: `/api/projects/${projectId}/members`, headers: { authorization: `Bearer ${jwtToken}` },
