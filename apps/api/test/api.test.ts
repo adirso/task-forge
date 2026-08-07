@@ -93,6 +93,12 @@ test("project owners can update project details", async () => {
   assert.equal(persisted.json().project.name, "Updated API project");
 });
 
+test("duplicate project keys return a conflict instead of an internal error", async () => {
+  const duplicate = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "API", name: "Duplicate project", description: "", color: "#6554C0" } });
+  assert.equal(duplicate.statusCode, 409);
+  assert.equal(duplicate.json().error, "Project key API is already in use");
+});
+
 test("task lifecycle supports assignment and status changes", async () => {
   const addMember = await app.inject({
     method: "POST", url: `/api/projects/${projectId}/members`, headers: { authorization: `Bearer ${jwtToken}` },
