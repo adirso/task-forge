@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { SearchApplicationService } from "../application/cross-cutting-services.js";
+import { taskResponse } from "../lib/task-response.js";
 
 type SearchQuery = { q?: string };
 const service = new SearchApplicationService(createUnitOfWork(db));
@@ -9,5 +10,5 @@ const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; rol
 
 export async function searchRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
-  app.get<{ Querystring: SearchQuery }>("/", { schema: { tags: ["Search"], summary: "Search accessible tasks across projects" } }, async (request) => ({ results: request.query.q?.trim() ? await service.search(context(request), request.query.q.trim()) : [] }));
+  app.get<{ Querystring: SearchQuery }>("/", { schema: { tags: ["Search"], summary: "Search accessible tasks across projects" } }, async (request) => ({ results: request.query.q?.trim() ? (await service.search(context(request), request.query.q.trim())).map(taskResponse) : [] }));
 }

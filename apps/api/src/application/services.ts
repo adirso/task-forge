@@ -1,5 +1,5 @@
 import type { ProjectContext, RequestContext } from "./context.js";
-import type { ApiTokenEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ApiTokenEntity, AttachmentEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
 export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
@@ -51,6 +51,13 @@ export interface TaskService {
   addUpdate(context: RequestContext, taskId: string, body: string): Promise<TaskUpdateEntity>;
   listUpdates(context: RequestContext, taskId: string): Promise<TaskUpdateEntity[]>;
   listTags(context: ProjectContext): Promise<Array<{ id: string; projectId: string; name: string; createdAt: string; taskCount: number }>>;
+}
+
+export interface AttachmentService {
+  list(context: RequestContext, taskId: string): Promise<AttachmentEntity[]>;
+  upload(context: RequestContext, taskId: string, input: { fileName: string; mimeType: string; data: string }): Promise<AttachmentEntity>;
+  get(context: RequestContext, attachmentId: string): Promise<AttachmentEntity>;
+  remove(context: RequestContext, attachmentId: string): Promise<void>;
 }
 
 export interface UserService {

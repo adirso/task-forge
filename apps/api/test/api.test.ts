@@ -274,6 +274,26 @@ test("only owners and administrators can manage project membership", async () =>
   assert.equal(task.json().task.assigneeId, null);
 });
 
+test("task attachments persist, download, and appear in task responses", async () => {
+  const uploaded = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/attachments`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { fileName: "notes.txt", mimeType: "text/plain", data: Buffer.from("attachment content").toString("base64") } });
+  assert.equal(uploaded.statusCode, 201, uploaded.body);
+  const attachment = uploaded.json().attachment;
+  assert.equal(attachment.fileName, "notes.txt");
+  assert.equal(attachment.size, 18);
+  const task = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(task.statusCode, 200);
+  assert.equal(task.json().task.attachments[0].id, attachment.id);
+  const listed = await app.inject({ method: "GET", url: `/api/tasks/${taskId}/attachments`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json().attachments.length, 1);
+  const download = await app.inject({ method: "GET", url: `/api/attachments/${attachment.id}/download`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(download.statusCode, 200);
+  assert.equal(download.body, "attachment content");
+  const removed = await app.inject({ method: "DELETE", url: `/api/attachments/${attachment.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(removed.statusCode, 204);
+  assert.equal((await app.inject({ method: "GET", url: `/api/tasks/${taskId}/attachments`, headers: { authorization: `Bearer ${jwtToken}` } })).json().attachments.length, 0);
+});
+
 test("unauthenticated project access is rejected", async () => {
   const response = await app.inject({ method: "GET", url: "/api/projects" });
   assert.equal(response.statusCode, 401);

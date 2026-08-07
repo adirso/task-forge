@@ -7,3 +7,4 @@ export * from "./task-service.js";
 export * from "./auth-service.js";
 export * from "./resource-services.js";
 export * from "./cross-cutting-services.js";
+export * from "./attachment-service.js";

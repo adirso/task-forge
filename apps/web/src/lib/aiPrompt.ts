@@ -58,6 +58,7 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
   const contextEndpoint = `${normalizedApiBase}/context?project=${encodeURIComponent(project.key)}&task=${encodeURIComponent(taskKey)}`;
   const taskEndpoint = `${normalizedApiBase}/tasks/${task.id}`;
   const updatesEndpoint = `${taskEndpoint}/updates`;
+  const attachmentsEndpoint = `${taskEndpoint}/attachments`;
   const repository = project.repoUrl?.trim() || "Not configured in TaskForge. Use the repository/workspace supplied by the operator; do not guess a repository.";
 
   return [
@@ -76,6 +77,7 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
     `- Repository: ${repository}`,
     `- Suggested branch: ${branch}`,
     `- TaskForge URL: ${contextUrl}`,
+    `- Attachments: ${task.attachments.length} (list with GET ${attachmentsEndpoint}; download each attachment using its downloadUrl)`,
     "",
     "Description:",
     task.description || "No description provided.",

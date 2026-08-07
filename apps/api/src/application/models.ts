@@ -60,6 +60,7 @@ export interface TaskEntity {
   assignee?: UserEntity | null;
   tags?: TaskTagEntity[];
   dependencies?: TaskDependencyEntity[];
+  attachments?: AttachmentEntity[];
   projectName?: string;
   projectKey?: string;
   projectColor?: string;
@@ -91,6 +92,18 @@ export interface TaskUpdateEntity {
   createdAt: string;
   updatedAt: string;
   author?: UserEntity;
+}
+
+export interface AttachmentEntity {
+  id: string;
+  taskId: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  storageKey: string;
+  uploadedById: string;
+  createdAt: string;
+  uploadedBy?: UserEntity;
 }
 
 export interface ApiTokenEntity {
