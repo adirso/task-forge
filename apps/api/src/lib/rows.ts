@@ -67,6 +67,7 @@ export async function toTask(row: Row): Promise<Task> {
       projectKey: String(dependency.project_key), number: Number(dependency.number), title: String(dependency.title),
       status: dependency.status as Task["status"], isBlocking: dependency.status !== "DONE",
     })),
+    attachments: [],
   };
   if (row.assignee_name) {
     task.assignee = {

@@ -174,6 +174,8 @@ const sqliteSchema = [
   `CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, read_at, created_at)`,
   `CREATE TABLE IF NOT EXISTS task_updates (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, author_id TEXT NOT NULL REFERENCES users(id), body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_task_updates_task_created ON task_updates(task_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS task_attachments (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, file_name TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, storage_key TEXT NOT NULL UNIQUE, uploaded_by_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_task_attachments_task_created ON task_attachments(task_id, created_at)`,
 ];
 
 const mysqlSchema = [
@@ -189,6 +191,7 @@ const mysqlSchema = [
   `CREATE TABLE IF NOT EXISTS activity (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, task_id CHAR(36), actor_id CHAR(36) NOT NULL, action VARCHAR(80) NOT NULL, metadata TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (actor_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS notifications (id CHAR(36) PRIMARY KEY, user_id CHAR(36) NOT NULL, project_id CHAR(36), task_id CHAR(36), type VARCHAR(60) NOT NULL, title VARCHAR(240) NOT NULL, message TEXT NOT NULL, read_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, INDEX idx_notifications_user_unread (user_id, read_at, created_at), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS task_updates (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, author_id CHAR(36) NOT NULL, body TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_task_updates_task_created (task_id, created_at), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (author_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS task_attachments (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, file_name VARCHAR(255) NOT NULL, mime_type VARCHAR(160) NOT NULL, file_size BIGINT NOT NULL, storage_key VARCHAR(255) NOT NULL UNIQUE, uploaded_by_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, INDEX idx_task_attachments_task_created (task_id, created_at), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (uploaded_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
 async function migrate(adapter: Adapter, dialect: DatabaseDriver) {
