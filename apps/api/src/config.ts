@@ -10,6 +10,7 @@ export const config = {
   port: Number(process.env.PORT ?? 4000),
   host: process.env.HOST ?? "127.0.0.1",
   databasePath: path.resolve(repoRoot, process.env.DATABASE_PATH ?? "data/taskforge.db"),
+  attachmentsPath: path.resolve(repoRoot, process.env.ATTACHMENTS_PATH ?? "data/attachments"),
   databaseDriver: (process.env.DATABASE_DRIVER ?? (process.env.DATABASE_URL ? "mysql" : "sqlite")) as "sqlite" | "mysql",
   databaseUrl: process.env.DATABASE_URL,
   jwtSecret: process.env.JWT_SECRET ?? "development-only-change-me-taskforge-secret",

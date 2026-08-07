@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
-import type { Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, User } from "@taskforge/contracts";
-import { Check, ExternalLink, GitBranch, GitPullRequest, Link2, Send, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useState, type DragEvent, type FormEvent } from "react";
+import type { Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, User } from "@taskforge/contracts";
+import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
 import { priorityMeta, statusMeta } from "../lib/ui";
 import { api } from "../lib/api";
 import { Avatar } from "./Avatar";
@@ -20,12 +20,16 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [postingUpdate, setPostingUpdate] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [showSendToAI, setShowSendToAI] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>(task?.attachments ?? []);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
 
   useEffect(() => {
     if (task) {
       setForm({ title: task.title, description: task.description, definitionOfDone: task.definitionOfDone, status: task.status, priority: task.priority, assigneeId: task.assigneeId, parentId: task.parentId, branch: task.branch, dueDate: task.dueDate, estimatePoints: task.estimatePoints, phaseId: task.phaseId, pullRequestUrl: task.pullRequestUrl, pullRequestTitle: task.pullRequestTitle, pullRequestState: task.pullRequestState, tags: task.tags.map((tag) => tag.name), dependencyIds: task.dependencies.map((dependency) => dependency.dependsOnTaskId) });
       api.taskUpdates(task.id).then(({ updates: taskUpdates }) => setUpdates(taskUpdates)).catch(() => setUpdates([]));
-    } else setUpdates([]);
+      api.taskAttachments(task.id).then(({ attachments: taskAttachments }) => setAttachments(taskAttachments)).catch(() => setAttachments(task.attachments ?? []));
+    } else { setUpdates([]); setAttachments([]); }
   }, [task]);
 
   const set = <K extends keyof TaskCreate>(key: K, value: TaskCreate[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -49,6 +53,22 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
     url.search = ""; url.searchParams.set("project", project.key); url.searchParams.set("task", `${project.key}-${task.number}`);
     await navigator.clipboard.writeText(url.toString()); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 1800);
   }
+  async function uploadFiles(files: FileList | File[]) {
+    if (!task || !files.length) return;
+    setUploadingFiles(true); setError("");
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name} is larger than the 25 MB limit`);
+        const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error(`Could not read ${file.name}`)); reader.readAsDataURL(file); });
+        const { attachment } = await api.uploadTaskAttachment(task.id, { fileName: file.name, mimeType: file.type || "application/octet-stream", data });
+        setAttachments((items) => [attachment, ...items]);
+      }
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not upload attachment"); }
+    finally { setUploadingFiles(false); }
+  }
+  function onDrop(event: DragEvent<HTMLDivElement>) { event.preventDefault(); setDraggingFiles(false); void uploadFiles(event.dataTransfer.files); }
+  async function downloadAttachment(attachment: Attachment) { try { const blob = await api.downloadTaskAttachment(attachment.id); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = attachment.fileName; link.click(); URL.revokeObjectURL(url); } catch (err) { setError(err instanceof Error ? err.message : "Could not download attachment"); } }
+  async function removeAttachment(attachment: Attachment) { try { await api.deleteTaskAttachment(attachment.id); setAttachments((items) => items.filter((item) => item.id !== attachment.id)); } catch (err) { setError(err instanceof Error ? err.message : "Could not remove attachment"); } }
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -60,6 +80,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
             <label>Description<textarea value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Add context, requirements, or useful links…" rows={5} /></label>
             <label>Definition of done<textarea value={form.definitionOfDone} onChange={(e) => set("definitionOfDone", e.target.value)} placeholder="Describe the observable outcome that marks this complete…" rows={4} /></label>
             <section className="dependency-field dependency-section"><div className="section-heading"><span>Dependencies</span></div><TaskDependencyEditor value={form.dependencyIds ?? []} tasks={tasks} projectKey={project.key} currentTaskId={task?.id} onChange={(dependencyIds) => set("dependencyIds", dependencyIds)} /></section>
+            {task && <section className="attachments-section"><div className="section-heading"><span><Paperclip /> Attachments <b>{attachments.length}</b></span></div><div className={`attachment-dropzone${draggingFiles ? " is-dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDraggingFiles(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDraggingFiles(false); }} onDrop={onDrop}><UploadCloud /><strong>{uploadingFiles ? "Uploading…" : "Drop files here"}</strong><span>PDFs, documents, and photos up to 25 MB</span><label className="button button-secondary attachment-browse"><input type="file" multiple accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" onChange={(event) => { if (event.target.files) void uploadFiles(event.target.files); event.currentTarget.value = ""; }} /> Browse files</label></div>{attachments.length > 0 && <div className="attachment-list">{attachments.map((attachment) => <article className="attachment-item" key={attachment.id}><span className="attachment-icon">{attachment.mimeType.startsWith("image/") ? <Image /> : <FileText />}</span><span><strong title={attachment.fileName}>{attachment.fileName}</strong><small>{formatBytes(attachment.size)} · {attachment.uploadedBy.name}</small></span><button type="button" title="Download attachment" onClick={() => void downloadAttachment(attachment)}><Download /></button><button type="button" title="Remove attachment" onClick={() => void removeAttachment(attachment)}><X /></button></article>)}</div>}</section>}
             <section className="pr-editor">
               <div className="section-heading"><span><GitPullRequest /> Pull request</span>{form.pullRequestUrl && <a href={form.pullRequestUrl} target="_blank" rel="noreferrer">Open PR <ExternalLink /></a>}</div>
               <label>PR URL<input type="url" value={form.pullRequestUrl ?? ""} onChange={(e) => { const url = e.target.value || null; set("pullRequestUrl", url); if (url && !form.pullRequestState) set("pullRequestState", "OPEN"); if (!url) { set("pullRequestTitle", null); set("pullRequestState", null); } }} placeholder="https://github.com/org/repo/pull/123" /></label>
@@ -90,3 +111,5 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
     </div>
   );
 }
+
+function formatBytes(bytes: number) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / (1024 * 1024)).toFixed(1)} MB`; }

@@ -1,4 +1,4 @@
-import type { ApiTokenMetadata, AuthResponse, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
+import type { ApiTokenMetadata, Attachment, AuthResponse, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
@@ -56,6 +56,10 @@ export const api = {
   deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: "DELETE" }),
   taskUpdates: (id: string) => request<{ updates: TaskNote[] }>(`/tasks/${id}/updates`),
   addTaskUpdate: (id: string, body: string) => request<{ update: TaskNote }>(`/tasks/${id}/updates`, { method: "POST", body: { body } }),
+  taskAttachments: (id: string) => request<{ attachments: Attachment[] }>(`/tasks/${id}/attachments`),
+  uploadTaskAttachment: (id: string, input: { fileName: string; mimeType: string; data: string }) => request<{ attachment: Attachment }>(`/tasks/${id}/attachments`, { method: "POST", body: input }),
+  deleteTaskAttachment: (id: string) => request<void>(`/attachments/${id}`, { method: "DELETE" }),
+  downloadTaskAttachment: async (id: string) => { const token = localStorage.getItem("taskforge_token"); const response = await fetch(`${API_URL}/attachments/${id}/download`, { headers: token ? { Authorization: `Bearer ${token}` } : {} }); if (!response.ok) throw new ApiError("Could not download attachment", response.status); return response.blob(); },
   users: () => request<{ users: User[] }>("/users"),
   updateProfile: (input: { name: string; email: string }) => request<{ user: User }>("/users/me", { method: "PATCH", body: input }),
   createAgent: (input: { name: string; email?: string }) => request<{ user: User }>("/users/agents", { method: "POST", body: input }),

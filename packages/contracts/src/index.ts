@@ -84,6 +84,12 @@ export const taskUpdateCreateSchema = z.object({
   body: z.string().trim().min(1).max(10000),
 });
 
+export const attachmentUploadSchema = z.object({
+  fileName: z.string().trim().min(1).max(255),
+  mimeType: z.string().trim().min(1).max(160),
+  data: z.string().min(1).max(35_000_000),
+});
+
 export type UserKind = z.infer<typeof userKindSchema>;
 export type UserRole = z.infer<typeof userRoleSchema>;
 export type ProjectMemberRole = z.infer<typeof projectMemberRoleSchema>;
@@ -179,6 +185,18 @@ export interface Task {
   subtasks?: Task[];
   tags: Tag[];
   dependencies: TaskDependency[];
+  attachments: Attachment[];
+}
+
+export interface Attachment {
+  id: string;
+  taskId: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  uploadedBy: User;
+  downloadUrl: string;
 }
 
 export interface TaskNote {

@@ -75,8 +75,8 @@ export class TaskApplicationService implements TaskService {
   }
 
   private async hydrate(repositories: RepositorySet, task: TaskEntity) {
-    const [tags, dependencies, assignee] = await Promise.all([repositories.tags.listForTask ? repositories.tags.listForTask(task.id) : Promise.resolve([]), repositories.dependencies.listForTask ? repositories.dependencies.listForTask(task.id) : Promise.resolve([]), task.assigneeId && repositories.users.findById ? repositories.users.findById(task.assigneeId) : Promise.resolve(null)]);
-    return { ...task, tags, dependencies: dependencies.map((dependency) => ({ ...dependency, isBlocking: dependency.status !== "DONE" })), assignee };
+    const [tags, dependencies, attachments, assignee] = await Promise.all([repositories.tags.listForTask ? repositories.tags.listForTask(task.id) : Promise.resolve([]), repositories.dependencies.listForTask ? repositories.dependencies.listForTask(task.id) : Promise.resolve([]), repositories.attachments?.listForTask ? repositories.attachments.listForTask(task.id) : Promise.resolve([]), task.assigneeId && repositories.users.findById ? repositories.users.findById(task.assigneeId) : Promise.resolve(null)]);
+    return { ...task, tags, dependencies: dependencies.map((dependency) => ({ ...dependency, isBlocking: dependency.status !== "DONE" })), attachments, assignee };
   }
 
   private async assertProjectAccess(repositories: RepositorySet, context: RequestContext, projectId?: string) {
