@@ -6,6 +6,7 @@ export interface UserRepository {
   findByEmail(email: string): Promise<(UserEntity & { passwordHash: string | null }) | null>;
   list(): Promise<UserEntity[]>;
   saveProfile(id: string, input: { name: string; email: string }): Promise<UserEntity>;
+  updateAvatar(id: string, avatarUrl: string | null): Promise<UserEntity>;
   createAgent(input: { id: string; name: string; email: string; createdAt: string }): Promise<UserEntity>;
   deleteAgent(id: string): Promise<void>;
   hasAgentHistory(id: string): Promise<boolean>;

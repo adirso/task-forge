@@ -100,6 +100,12 @@ test("task lifecycle supports assignment and status changes", async () => {
   assert.deepEqual(created.json().task.tags.map((tag: { name: string }) => tag.name), ["backend", "frontend"]);
   taskId = created.json().task.id;
 
+  const avatar = await app.inject({ method: "POST", url: `/api/users/${agentId}/avatar`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" } });
+  assert.equal(avatar.statusCode, 200, avatar.body);
+  assert.match(avatar.json().user.avatarUrl, /^data:image\/png;base64,/);
+  const avatarTask = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(avatarTask.json().task.assignee.avatarUrl, avatar.json().user.avatarUrl);
+
   const blocker = await app.inject({
     method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` },
     payload: { title: "Dependency blocker", description: "Must be completed first.", status: "TODO", priority: "MEDIUM" },

@@ -63,6 +63,7 @@ export interface AttachmentService {
 export interface UserService {
   list(context: RequestContext): Promise<UserEntity[]>;
   updateProfile(context: RequestContext, input: { name: string; email: string }): Promise<UserEntity>;
+  updateAvatar(context: RequestContext, userId: string, avatarUrl: string | null): Promise<UserEntity>;
   createAgent(context: RequestContext, input: { name: string; email?: string }): Promise<UserEntity>;
   deleteAgent(context: RequestContext, agentId: string): Promise<void>;
   listTokens(context: RequestContext, userId: string): Promise<ApiTokenEntity[]>;
