@@ -90,6 +90,11 @@ export const attachmentUploadSchema = z.object({
   data: z.string().min(1).max(35_000_000),
 });
 
+export const avatarUploadSchema = z.object({
+  mimeType: z.string().regex(/^image\/(png|jpeg|jpg|gif|webp)$/i, "Profile pictures must be PNG, JPEG, GIF, or WebP images"),
+  data: z.string().min(1).max(4_000_000),
+});
+
 export type UserKind = z.infer<typeof userKindSchema>;
 export type UserRole = z.infer<typeof userRoleSchema>;
 export type ProjectMemberRole = z.infer<typeof projectMemberRoleSchema>;
