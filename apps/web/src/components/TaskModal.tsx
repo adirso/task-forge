@@ -1,7 +1,7 @@
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
-import type { Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, User } from "@taskforge/contracts";
+import type { Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
 import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
-import { priorityMeta, statusMeta } from "../lib/ui";
+import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
 import { api } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { SendToAI } from "./SendToAI";
@@ -12,7 +12,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   task: Task | null; initialStatus: TaskStatus; defaultPhaseId: string | null; project: Project; currentUser: User; members: User[]; phases: Phase[]; availableTags: Tag[]; tasks: Task[];
   onClose: () => void; onSave: (input: TaskCreate) => Promise<void>; onDelete: (() => Promise<void>) | null;
 }) {
-  const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: defaultPhaseId, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, tags: [], dependencyIds: [] });
+  const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", type: "FEATURE", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: defaultPhaseId, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, tags: [], dependencyIds: [] });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [updates, setUpdates] = useState<TaskNote[]>([]);
@@ -26,7 +26,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
 
   useEffect(() => {
     if (task) {
-      setForm({ title: task.title, description: task.description, definitionOfDone: task.definitionOfDone, status: task.status, priority: task.priority, assigneeId: task.assigneeId, parentId: task.parentId, branch: task.branch, dueDate: task.dueDate, estimatePoints: task.estimatePoints, phaseId: task.phaseId, pullRequestUrl: task.pullRequestUrl, pullRequestTitle: task.pullRequestTitle, pullRequestState: task.pullRequestState, tags: task.tags.map((tag) => tag.name), dependencyIds: task.dependencies.map((dependency) => dependency.dependsOnTaskId) });
+      setForm({ title: task.title, description: task.description, definitionOfDone: task.definitionOfDone, status: task.status, priority: task.priority, type: task.type, assigneeId: task.assigneeId, parentId: task.parentId, branch: task.branch, dueDate: task.dueDate, estimatePoints: task.estimatePoints, phaseId: task.phaseId, pullRequestUrl: task.pullRequestUrl, pullRequestTitle: task.pullRequestTitle, pullRequestState: task.pullRequestState, tags: task.tags.map((tag) => tag.name), dependencyIds: task.dependencies.map((dependency) => dependency.dependsOnTaskId) });
       api.taskUpdates(task.id).then(({ updates: taskUpdates }) => setUpdates(taskUpdates)).catch(() => setUpdates([]));
       api.taskAttachments(task.id).then(({ attachments: taskAttachments }) => setAttachments(taskAttachments)).catch(() => setAttachments(task.attachments ?? []));
     } else { setUpdates([]); setAttachments([]); }
@@ -89,6 +89,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
           </div>
           <aside className="modal-fields">
             <div className="tag-field"><span>Tags</span><TaskTagEditor value={form.tags ?? []} availableTags={availableTags} onChange={(tags) => set("tags", tags)} /></div>
+            <label>Type<select value={form.type} onChange={(e) => set("type", e.target.value as TaskType)}>{Object.entries(taskTypeMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
             <label>Phase<select value={form.phaseId ?? ""} onChange={(e) => set("phaseId", e.target.value || null)}><option value="">No phase</option>{phases.map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select></label>
             <label>Status<select value={form.status} onChange={(e) => set("status", e.target.value as TaskStatus)}>{Object.entries(statusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
             <label>Assignee<select value={form.assigneeId ?? ""} onChange={(e) => set("assigneeId", e.target.value || null)}><option value="">Unassigned</option>{members.map((user) => <option key={user.id} value={user.id}>{user.name}{user.kind === "AGENT" ? " (Agent)" : ""}</option>)}</select></label>

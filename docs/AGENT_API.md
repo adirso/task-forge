@@ -89,7 +89,7 @@ curl -sS "http://127.0.0.1:4000/api/projects/$PROJECT_ID/phases" \
   -H "Authorization: Bearer $AGENT_TOKEN"
 ```
 
-The task list also supports `assigneeId`, `priority`, `phaseId`, `minPoints`, `maxPoints`, and `q` query parameters. New tasks default to the project's active phase when `phaseId` is omitted.
+The task list also supports `assigneeId`, `priority`, `type`, `phaseId`, `minPoints`, `maxPoints`, and `q` query parameters. New tasks default to the project's active phase when `phaseId` is omitted.
 
 Create a task:
 
@@ -103,6 +103,7 @@ curl -sS "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks" \
     "definitionOfDone":"Integration tests cover 429 and 503 responses.",
     "status":"IN_PROGRESS",
     "priority":"HIGH",
+    "type":"INFRA",
     "branch":"agent/retry-logic",
     "pullRequestUrl":"https://github.com/example/repo/pull/17",
     "pullRequestTitle":"Add bounded retry logic",
@@ -120,7 +121,7 @@ curl -sS -X PATCH "http://127.0.0.1:4000/api/tasks/$TASK_ID" \
   -d '{"status":"IN_REVIEW"}'
 ```
 
-Statuses are `BACKLOG`, `TODO`, `IN_PROGRESS`, `IN_REVIEW`, and `DONE`. Priorities are `LOW`, `MEDIUM`, `HIGH`, and `URGENT`.
+Statuses are `BACKLOG`, `TODO`, `IN_PROGRESS`, `IN_REVIEW`, and `DONE`. Priorities are `LOW`, `MEDIUM`, `HIGH`, and `URGENT`. Types are `FEATURE`, `BUG`, `INFRA`, `UPDATE`, `SECURITY`, `DOCS`, and `CHORE`; a task without an explicit `type` is created as `FEATURE`. Classify the work you create or pick up so boards stay readable — report a defect as `BUG`, deployment and tooling work as `INFRA`, and a documentation-only change as `DOCS`.
 
 To create a subtask, pass the parent task's UUID as `parentId`. The API rejects cross-project parents and cycles.
 

@@ -25,6 +25,7 @@ const task: Task = {
   definitionOfDone: "Claude Code, Codex, and Cursor receive tailored prompts.",
   status: "TODO",
   priority: "HIGH",
+  type: "FEATURE",
   assigneeId: null,
   creatorId: "owner-id",
   parentId: null,
@@ -40,6 +41,7 @@ const task: Task = {
   updatedAt: "2026-08-06T00:00:00.000Z",
   tags: [],
   dependencies: [],
+  attachments: [],
 };
 
 const providerSignals: Record<AIProvider, string> = {
@@ -59,6 +61,7 @@ test("builds a complete and tailored prompt for every provider", () => {
     assert.match(prompt, new RegExp(providerSignals[provider].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(prompt, /TAS-3 — Add Send to AI task action/);
     assert.match(prompt, /Phase 1/);
+    assert.match(prompt, /Type: FEATURE/);
     assert.match(prompt, /https:\/\/github\.com\/adirso\/task-forge/);
     assert.match(prompt, /agent\/tas-3-add-send-to-ai-task-action/);
     assert.match(prompt, /\/api\/context\?project=TAS&task=TAS-3/);

@@ -72,6 +72,7 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
     `- Task: ${taskKey} — ${task.title}`,
     `- Status: ${task.status}`,
     `- Priority: ${task.priority}`,
+    `- Type: ${task.type}`,
     `- Phase: ${phaseNumber === null ? "Not assigned" : `Phase ${phaseNumber}`}`,
     `- Estimate: ${task.estimatePoints === null ? "Not estimated" : `${task.estimatePoints} points`}`,
     `- Repository: ${repository}`,

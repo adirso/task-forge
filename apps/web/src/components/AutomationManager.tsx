@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import type { Automation, AutomationAction, AutomationCondition, AutomationCreate, Phase, Project, User } from "@taskforge/contracts";
 import { Check, Plus, Save, Trash2, Zap } from "lucide-react";
 import { api } from "../lib/api";
+import { taskTypeMeta } from "../lib/ui";
 
-const fields = [{ value: "status", label: "Status" }, { value: "priority", label: "Priority" }, { value: "assigneeId", label: "Assignee" }, { value: "pullRequestState", label: "PR state" }, { value: "phaseId", label: "Phase" }, { value: "branch", label: "Branch" }, { value: "estimatePoints", label: "Estimate" }] as const;
+const fields = [{ value: "status", label: "Status" }, { value: "priority", label: "Priority" }, { value: "type", label: "Type" }, { value: "assigneeId", label: "Assignee" }, { value: "pullRequestState", label: "PR state" }, { value: "phaseId", label: "Phase" }, { value: "branch", label: "Branch" }, { value: "estimatePoints", label: "Estimate" }] as const;
 const operators = ["equals", "not_equals", "changed_to", "is_empty", "is_not_empty"] as const;
 const services = ["agent-api", "github-actions", "taskforge"];
 const blankCondition = (): AutomationCondition => ({ field: "status", operator: "equals", value: "" });
@@ -11,6 +12,7 @@ const blankAction = (): AutomationAction => ({ field: "status", valueType: "stat
 const choices: Partial<Record<AutomationCondition["field"], Array<{ value: string; label: string }>>> = {
   status: ["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"].map((value) => ({ value, label: value.replaceAll("_", " ") })),
   priority: ["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => ({ value, label: value })),
+  type: Object.entries(taskTypeMeta).map(([value, meta]) => ({ value, label: meta.label })),
   pullRequestState: ["OPEN", "MERGED", "CLOSED"].map((value) => ({ value, label: value })),
 };
 
