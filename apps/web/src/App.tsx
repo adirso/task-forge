@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Notification, Phase, Project, Tag, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
-import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Plus, Search, Settings, Tag as TagIcon, Trash2, X, Zap } from "lucide-react";
+import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Pencil, Plus, Search, Settings, Tag as TagIcon, Trash2, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
@@ -41,6 +41,7 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus | null>(null);
   const [showProjectModal, setShowProjectModal] = useState(false);
+  const [showEditProject, setShowEditProject] = useState(false);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -165,6 +166,13 @@ export default function App() {
   async function createProject(input: { key: string; name: string; description: string; repoUrl: string | null; color: string }) {
     const { project } = await api.createProject(input); setProjects((items) => [project, ...items]); setShowSettings(false); await loadProject(project.id); flash("Project created");
   }
+  async function updateProject(input: { name: string; description: string; repoUrl: string | null; color: string }) {
+    if (!currentProject) return;
+    const { project } = await api.updateProject(currentProject.id, input);
+    setCurrentProject((current) => current?.id === project.id ? { ...current, ...project } : current);
+    setProjects((items) => items.map((item) => item.id === project.id ? { ...item, ...project } : item));
+    setShowEditProject(false); flash("Project updated");
+  }
   async function openNotification(notification: Notification) {
     if (!notification.readAt) {
       const { notification: updated } = await api.readNotification(notification.id);
@@ -223,7 +231,7 @@ export default function App() {
             <div className="breadcrumbs"><span>Projects</span><span>/</span><strong>{currentProject.name}</strong></div>
             <div className="project-title-row">
               <div><span className="project-logo" style={{ background: currentProject.color }}>{currentProject.key.slice(0, 1)}</span><div><h1>{currentProject.name}</h1><p>{currentProject.description}</p></div></div>
-              <div className="header-actions"><button className="mobile-settings-button" onClick={() => { setSelectedTask(null); setShowSettings(true); }} aria-label="Settings"><Settings /></button><button className="mobile-search-button" onClick={() => setShowSearch(true)} aria-label="Search all tasks"><Search /></button><button className="mobile-notification-button" onClick={() => setShowNotifications(true)} aria-label="Notifications"><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button><div className="avatar-stack">{members.slice(0, 4).map((member) => <Avatar key={member.id} user={member} size="sm" />)}{members.length > 4 && <span>+{members.length - 4}</span>}</div><button className="button button-secondary" onClick={() => copyProjectLink().catch(() => flash("Could not copy link"))}><Link2 /> Copy link</button>{(user.role === "ADMIN" || currentProject.ownerId === user.id) && <button className="button button-project-delete" onClick={() => setShowDeleteProject(true)}><Trash2 /> Delete</button>}<button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>
+              <div className="header-actions"><button className="mobile-settings-button" onClick={() => { setSelectedTask(null); setShowSettings(true); }} aria-label="Settings"><Settings /></button><button className="mobile-search-button" onClick={() => setShowSearch(true)} aria-label="Search all tasks"><Search /></button><button className="mobile-notification-button" onClick={() => setShowNotifications(true)} aria-label="Notifications"><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button><div className="avatar-stack">{members.slice(0, 4).map((member) => <Avatar key={member.id} user={member} size="sm" />)}{members.length > 4 && <span>+{members.length - 4}</span>}</div><button className="button button-secondary" onClick={() => copyProjectLink().catch(() => flash("Could not copy link"))}><Link2 /> Copy link</button>{(user.role === "ADMIN" || currentProject.ownerId === user.id) && <><button className="button button-secondary" onClick={() => setShowEditProject(true)}><Pencil /> Edit</button><button className="button button-project-delete" onClick={() => setShowDeleteProject(true)}><Trash2 /> Delete</button></>}<button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>
             </div>
             <div className="project-tabs"><button className={view === "board" ? "active" : ""} onClick={() => changeDefaultView("board")}><Kanban /> Board</button><button className={view === "list" ? "active" : ""} onClick={() => changeDefaultView("list")}><LayoutList /> List</button><button className={view === "phases" ? "active" : ""} onClick={() => setView("phases")}><Flag /> Phases</button><button className={view === "automations" ? "active" : ""} onClick={() => setView("automations")}><Zap /> Automations</button>{currentProject.repoUrl?.trim() && <a href={currentProject.repoUrl} target="_blank" rel="noreferrer"><Link2 /> Repository</a>}</div>
           </header>
@@ -246,6 +254,7 @@ export default function App() {
       </main>
       {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? "TODO"} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} availableTags={tags} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
       {showProjectModal && <ProjectModal onClose={() => setShowProjectModal(false)} onSave={createProject} />}
+      {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onSave={async ({ name, description, repoUrl, color }) => updateProject({ name, description, repoUrl, color })} />}
       {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
       {showLogoutConfirm && <LogoutConfirmModal user={user} onClose={() => setShowLogoutConfirm(false)} onConfirm={logout} />}
       {showNotifications && <><button className="notification-scrim" aria-label="Close notifications" onClick={() => setShowNotifications(false)} /><NotificationPanel notifications={notifications} onClose={() => setShowNotifications(false)} onOpen={(notification) => openNotification(notification).catch(() => flash("Could not open notification"))} onReadAll={() => readAllNotifications().catch(() => flash("Could not update notifications"))} /></>}
