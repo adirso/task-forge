@@ -1,7 +1,7 @@
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { ApiTokenEntity, AttachmentEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
-export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt">;
+export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
 export type TaskCreateInput = TaskInputFields & { tags?: string[]; dependencyIds?: string[] };
 export type TaskUpdateInput = Partial<TaskInputFields> & { tags?: string[]; dependencyIds?: string[] };
@@ -31,6 +31,7 @@ export interface ProjectService {
   create(context: RequestContext, input: ProjectCreateInput): Promise<ProjectEntity>;
   update(context: ProjectContext, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "color">>): Promise<ProjectEntity>;
   delete(context: ProjectContext): Promise<void>;
+  reorder(context: RequestContext, projectIds: string[]): Promise<void>;
   addMember(context: ProjectContext, userId: string, role: "OWNER" | "MEMBER"): Promise<void>;
   removeMember(context: ProjectContext, userId: string): Promise<void>;
 }

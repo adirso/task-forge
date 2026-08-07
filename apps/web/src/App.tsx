@@ -217,6 +217,12 @@ export default function App() {
     }
     flash("Project deleted");
   }
+  async function reorderProjects(projectIds: string[]) {
+    const previous = projects;
+    const byId = new Map(projects.map((project) => [project.id, project]));
+    setProjects(projectIds.map((id) => byId.get(id)).filter((project): project is Project => Boolean(project)));
+    try { await api.reorderProjects(projectIds); } catch { setProjects(previous); flash("Could not save project order"); }
+  }
 
   if (loading) return <div className="loading-screen"><span className="loading-mark" />Loading your workspace…</div>;
   if (!user) return <Login onLogin={login} />;
@@ -224,7 +230,7 @@ export default function App() {
   const members = currentProject?.members ?? allUsers.filter((candidate) => candidate.id === user.id);
   return (
     <div className="app-shell">
-      <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} />
+      <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} />
       <main className="workspace">
         {showSettings ? <SettingsPage user={user} users={allUsers} projects={projects} currentProject={currentProject} defaultView={localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board"} textSize={textSize} onUserUpdated={(updated) => { setUser(updated); setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); }} onAgentCreated={(created) => setAllUsers((items) => [...items, created])} onAgentUpdated={(updated) => { setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); setTasks((items) => items.map((task) => task.assigneeId === updated.id ? { ...task, assignee: updated } : task)); }} onAgentDeleted={(id) => setAllUsers((items) => items.filter((item) => item.id !== id))} onProjectMembersChanged={(updated) => { if (currentProject?.id === updated.id) { const memberIds = new Set(updated.members?.map((member) => member.id) ?? []); setCurrentProject(updated); setTasks((items) => items.map((task) => task.assigneeId && !memberIds.has(task.assigneeId) ? { ...task, assigneeId: null, assignee: null } : task)); } }} onDefaultViewChange={changeDefaultView} onTextSizeChange={changeTextSize} /> : currentProject ? <>
           <header className="project-header">

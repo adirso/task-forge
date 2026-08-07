@@ -10,6 +10,7 @@ const project: Project = {
   description: "Agent-ready project management",
   repoUrl: "https://github.com/adirso/task-forge",
   color: "#6554C0",
+  sortOrder: 0,
   ownerId: "owner-id",
   createdAt: "2026-08-06T00:00:00.000Z",
   updatedAt: "2026-08-06T00:00:00.000Z",
