@@ -2,8 +2,9 @@ import type { ProjectContext, RequestContext } from "./context.js";
 import type { ApiTokenEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
 export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt">;
-export type TaskCreateInput = Omit<TaskEntity, "id" | "number" | "creatorId" | "createdAt" | "updatedAt"> & { tags?: string[]; dependencyIds?: string[] };
-export type TaskUpdateInput = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "createdAt" | "updatedAt">> & { tags?: string[]; dependencyIds?: string[] };
+type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
+export type TaskCreateInput = TaskInputFields & { tags?: string[]; dependencyIds?: string[] };
+export type TaskUpdateInput = Partial<TaskInputFields> & { tags?: string[]; dependencyIds?: string[] };
 export interface TaskFilters {
   status?: string;
   assigneeId?: string;
@@ -48,6 +49,8 @@ export interface TaskService {
   update(context: RequestContext, taskId: string, input: TaskUpdateInput): Promise<TaskEntity>;
   delete(context: RequestContext, taskId: string): Promise<void>;
   addUpdate(context: RequestContext, taskId: string, body: string): Promise<TaskUpdateEntity>;
+  listUpdates(context: RequestContext, taskId: string): Promise<TaskUpdateEntity[]>;
+  listTags(context: ProjectContext): Promise<Array<{ id: string; projectId: string; name: string; createdAt: string; taskCount: number }>>;
 }
 
 export interface UserService {
