@@ -4,3 +4,5 @@ export * from "./models.js";
 export * from "./repositories.js";
 export * from "./services.js";
 export * from "./task-service.js";
+export * from "./auth-service.js";
+export * from "./resource-services.js";
