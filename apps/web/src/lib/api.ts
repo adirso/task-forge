@@ -38,6 +38,7 @@ export const api = {
   login: (email: string, password: string) => request<AuthResponse>("/auth/login", { method: "POST", body: { email, password } }),
   me: () => request<{ user: User }>("/auth/me"),
   projects: () => request<{ projects: Project[] }>("/projects"),
+  reorderProjects: (projectIds: string[]) => request<void>("/projects/order", { method: "PATCH", body: { projectIds } }),
   project: (id: string) => request<{ project: Project }>(`/projects/${id}`),
   addProjectMember: (projectId: string, userId: string) => request<void>(`/projects/${projectId}/members`, { method: "POST", body: { userId, role: "MEMBER" } }),
   removeProjectMember: (projectId: string, userId: string) => request<void>(`/projects/${projectId}/members/${userId}`, { method: "DELETE" }),

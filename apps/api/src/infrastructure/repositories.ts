@@ -23,7 +23,7 @@ function toUser(row: Row): UserEntity {
 }
 
 function toProject(row: Row): ProjectEntity {
-  return { id: text(row.id), key: text(row.key), name: text(row.name), description: text(row.description), repoUrl: nullableText(row.repo_url), color: text(row.color), ownerId: text(row.owner_id), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}) };
+  return { id: text(row.id), key: text(row.key), name: text(row.name), description: text(row.description), repoUrl: nullableText(row.repo_url), color: text(row.color), sortOrder: Number(row.sort_order ?? 0), ownerId: text(row.owner_id), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}) };
 }
 
 function toPhase(row: Row): PhaseEntity {
@@ -97,8 +97,10 @@ function createProjectRepository(db: DatabasePort): ProjectRepository {
   return {
     async findById(id) { const row = await db.prepare("SELECT * FROM projects WHERE id = ?").get(id); return row ? toProject(row) : null; },
     async findByKey(key) { const row = await db.prepare("SELECT * FROM projects WHERE `key` = ?").get(key); return row ? toProject(row) : null; },
-    async listAccessible(actorId, isAdmin) { const rows = await db.prepare(`SELECT p.*, COUNT(t.id) AS task_count FROM projects p LEFT JOIN tasks t ON t.project_id = p.id WHERE ? = 1 OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?) GROUP BY p.id ORDER BY p.updated_at DESC`).all(isAdmin ? 1 : 0, actorId); return rows.map(toProject); },
-    async create(input) { await db.prepare("INSERT INTO projects (id, `key`, name, description, repo_url, color, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.key, input.name, input.description, input.repoUrl, input.color, input.ownerId, input.createdAt, input.updatedAt); return input; },
+    async listAccessible(actorId, isAdmin) { const rows = await db.prepare(`SELECT p.*, COUNT(t.id) AS task_count FROM projects p LEFT JOIN tasks t ON t.project_id = p.id WHERE ? = 1 OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?) GROUP BY p.id ORDER BY p.sort_order ASC, p.created_at DESC`).all(isAdmin ? 1 : 0, actorId); return rows.map(toProject); },
+    async allocateSortOrder() { const row = await db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next_order FROM projects").get(); return Number(row?.next_order ?? -1); },
+    async reorder(ids) { for (const [index, id] of ids.entries()) await db.prepare("UPDATE projects SET sort_order = ? WHERE id = ?").run(index, id); },
+    async create(input) { await db.prepare("INSERT INTO projects (id, `key`, name, description, repo_url, color, sort_order, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.key, input.name, input.description, input.repoUrl, input.color, input.sortOrder, input.ownerId, input.createdAt, input.updatedAt); return input; },
     async update(id, input) { const fields: string[] = []; const values: unknown[] = []; const columns: Record<string, string> = { name: "name", description: "description", repoUrl: "repo_url", color: "color" }; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM projects WHERE id = ?").get(id); if (!row) throw new Error("Project not found after update"); return toProject(row); },
     async delete(id) { await db.prepare("DELETE FROM projects WHERE id = ?").run(id); },
   };
