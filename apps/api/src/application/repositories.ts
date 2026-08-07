@@ -1,4 +1,4 @@
-import type { ApiTokenEntity, AttachmentEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -72,6 +72,8 @@ export interface AttachmentRepository {
   delete(id: string): Promise<void>;
 }
 
+export interface AutomationRepository { listForProject(projectId: string): Promise<AutomationEntity[]>; findById(id: string): Promise<AutomationEntity | null>; create(input: AutomationEntity): Promise<AutomationEntity>; update(id: string, input: Partial<AutomationEntity>): Promise<AutomationEntity>; delete(id: string): Promise<void>; }
+
 export interface NotificationRepository {
   notify(input: { userId: string; projectId?: string | null; taskId?: string | null; type: string; title: string; message: string }): Promise<void>;
   listForUser(userId: string): Promise<NotificationEntity[]>;
@@ -104,6 +106,7 @@ export interface RepositorySet {
   dependencies: TaskDependencyRepository;
   updates: TaskUpdateRepository;
   attachments: AttachmentRepository;
+  automations: AutomationRepository;
   notifications: NotificationRepository;
   activity: ActivityRepository;
   tokens: ApiTokenRepository;

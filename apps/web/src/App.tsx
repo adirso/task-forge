@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Notification, Phase, Project, Tag, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
-import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Plus, Search, Settings, Tag as TagIcon, Trash2, X } from "lucide-react";
+import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Plus, Search, Settings, Tag as TagIcon, Trash2, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
@@ -15,10 +15,11 @@ import { SettingsPage } from "./components/SettingsPage";
 import { PhasesPage } from "./components/PhaseManager";
 import { ProjectDeleteModal } from "./components/ProjectDeleteModal";
 import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
+import { AutomationManager } from "./components/AutomationManager";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
 
 type DefaultView = "board" | "list";
-type View = DefaultView | "phases";
+type View = DefaultView | "phases" | "automations";
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -62,6 +63,7 @@ export default function App() {
     setUser(me); setProjects(projectList); setAllUsers(users); setNotifications(notificationData.notifications);
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("view") === "phases") setView("phases");
+    else if (urlParams.get("view") === "automations") setView("automations");
     else if (urlParams.get("view") === "list") setView("list");
     else if (urlParams.get("view") === "board") setView("board");
     if (urlParams.has("settings")) {
@@ -223,9 +225,9 @@ export default function App() {
               <div><span className="project-logo" style={{ background: currentProject.color }}>{currentProject.key.slice(0, 1)}</span><div><h1>{currentProject.name}</h1><p>{currentProject.description}</p></div></div>
               <div className="header-actions"><button className="mobile-settings-button" onClick={() => { setSelectedTask(null); setShowSettings(true); }} aria-label="Settings"><Settings /></button><button className="mobile-search-button" onClick={() => setShowSearch(true)} aria-label="Search all tasks"><Search /></button><button className="mobile-notification-button" onClick={() => setShowNotifications(true)} aria-label="Notifications"><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button><div className="avatar-stack">{members.slice(0, 4).map((member) => <Avatar key={member.id} user={member} size="sm" />)}{members.length > 4 && <span>+{members.length - 4}</span>}</div><button className="button button-secondary" onClick={() => copyProjectLink().catch(() => flash("Could not copy link"))}><Link2 /> Copy link</button>{(user.role === "ADMIN" || currentProject.ownerId === user.id) && <button className="button button-project-delete" onClick={() => setShowDeleteProject(true)}><Trash2 /> Delete</button>}<button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>
             </div>
-            <div className="project-tabs"><button className={view === "board" ? "active" : ""} onClick={() => changeDefaultView("board")}><Kanban /> Board</button><button className={view === "list" ? "active" : ""} onClick={() => changeDefaultView("list")}><LayoutList /> List</button><button className={view === "phases" ? "active" : ""} onClick={() => setView("phases")}><Flag /> Phases</button>{currentProject.repoUrl?.trim() && <a href={currentProject.repoUrl} target="_blank" rel="noreferrer"><Link2 /> Repository</a>}</div>
+            <div className="project-tabs"><button className={view === "board" ? "active" : ""} onClick={() => changeDefaultView("board")}><Kanban /> Board</button><button className={view === "list" ? "active" : ""} onClick={() => changeDefaultView("list")}><LayoutList /> List</button><button className={view === "phases" ? "active" : ""} onClick={() => setView("phases")}><Flag /> Phases</button><button className={view === "automations" ? "active" : ""} onClick={() => setView("automations")}><Zap /> Automations</button>{currentProject.repoUrl?.trim() && <a href={currentProject.repoUrl} target="_blank" rel="noreferrer"><Link2 /> Repository</a>}</div>
           </header>
-          {view !== "phases" && <section className="content-toolbar">
+          {view !== "phases" && view !== "automations" && <section className="content-toolbar">
             <div className="search-field"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks…" />{query && <button onClick={() => setQuery("")}><X /></button>}</div>
             <div className="toolbar-spacer" />
             <div className="select-wrap"><select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as TaskStatus | "")}><option value="">All statuses</option><option value="BACKLOG">Backlog</option><option value="TODO">To do</option><option value="IN_PROGRESS">In progress</option><option value="IN_REVIEW">In review</option><option value="DONE">Done</option></select><ChevronDown /></div>
@@ -236,7 +238,8 @@ export default function App() {
             {(statusFilter || assigneeFilter || priorityFilter || tagFilter || estimateMin || estimateMax) && <button className="clear-filters" onClick={() => { setStatusFilter(""); setAssigneeFilter(""); setPriorityFilter(""); setTagFilter(""); setEstimateMin(""); setEstimateMax(""); }}>Clear</button>}
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
-          <section className="content-area">
+          {view === "automations" && <AutomationManager project={currentProject} users={allUsers} phases={phases} />}
+          <section className={`content-area${view === "automations" ? " automations-hidden" : ""}`}>
             {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={(updated) => { setPhases(updated); setBoardPhaseId((selectedId) => updated.some((phase) => phase.id === selectedId) ? selectedId : resolveBoardPhase(updated)?.id ?? null); setTasks((items) => items.map((task) => task.phaseId && !updated.some((phase) => phase.id === task.phaseId) ? { ...task, phaseId: null } : task)); }} /> : view === "board" ? <>{selectedBoardPhase ? <><div className={`active-phase-banner${selectedBoardPhase.isActive ? "" : " viewing-phase"}`}><span className="phase-number-badge">{selectedBoardPhase.number}</span><div className="phase-banner-copy"><span>{selectedBoardPhase.isActive ? "Active phase" : "Viewing phase"}</span><strong>Phase {selectedBoardPhase.number}</strong><p>{selectedBoardPhase.goal}</p></div><label className="board-phase-selector"><span>Board phase</span><div><select aria-label="Board phase" value={selectedBoardPhase.id} onChange={(event) => setBoardPhaseId(event.target.value)}>{[...phases].sort((a, b) => a.number - b.number).map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select><ChevronDown /></div></label><small>{boardTasks.length} {boardTasks.length === 1 ? "task" : "tasks"}</small><button className="button button-secondary" onClick={() => setView("phases")}>Manage phases</button></div>{selectedPhaseHasTasks ? <BoardView tasks={boardTasks} project={currentProject} onOpen={setSelectedTask} onCreate={setNewTaskStatus} onMove={moveTask} /> : <div className="empty-board-phase"><Flag /><strong>No tasks in Phase {selectedBoardPhase.number}</strong><span>This phase is ready for its first task.</span><button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>}</> : <div className="no-active-phase"><Flag /><div><strong>No active phase</strong><span>Choose an active phase to populate the board.</span></div><button className="button button-primary" onClick={() => setView("phases")}>Manage phases</button></div>}</> : <ListView tasks={visibleTasks} phases={phases} project={currentProject} onOpen={setSelectedTask} />}
           </section>
         </> : <div className="empty-project"><h1>Create your first project</h1><p>Projects organize the shared work of people and agents.</p><button className="button button-primary" onClick={() => setShowProjectModal(true)}><Plus /> Create project</button></div>}

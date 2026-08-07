@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { ApiTokenEntity, AttachmentEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
-import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
+import type { ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
+import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 
 export interface DatabasePort {
@@ -59,6 +59,11 @@ function toAttachment(row: Row): AttachmentEntity {
 
 function toNotification(row: Row): NotificationEntity {
   return { id: text(row.id), userId: text(row.user_id), projectId: nullableText(row.project_id), taskId: nullableText(row.task_id), type: text(row.type), title: text(row.title), message: text(row.message), readAt: nullableText(row.read_at), createdAt: date(row.created_at), projectName: nullableText(row.project_name), projectKey: nullableText(row.project_key), taskNumber: row.task_number == null ? null : Number(row.task_number) };
+}
+
+function toAutomation(row: Row): AutomationEntity {
+  const parse = (value: unknown) => { try { return JSON.parse(String(value ?? "[]")); } catch { return []; } };
+  return { id: text(row.id), projectId: text(row.project_id), name: text(row.name), enabled: Boolean(row.enabled), trigger: row.trigger as AutomationEntity["trigger"], actorType: row.actor_type as AutomationEntity["actorType"], actorId: nullableText(row.actor_id), service: nullableText(row.service), conditions: parse(row.conditions), actions: parse(row.actions), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
 }
 
 async function hydrateTask(db: DatabasePort, task: TaskEntity): Promise<TaskEntity> {
@@ -154,6 +159,16 @@ function createAttachmentRepository(db: DatabasePort): AttachmentRepository {
   };
 }
 
+function createAutomationRepository(db: DatabasePort): AutomationRepository {
+  return {
+    async listForProject(projectId) { return (await db.prepare("SELECT * FROM automations WHERE project_id = ? ORDER BY created_at DESC").all(projectId)).map(toAutomation); },
+    async findById(id) { const row = await db.prepare("SELECT * FROM automations WHERE id = ?").get(id); return row ? toAutomation(row) : null; },
+    async create(input) { await db.prepare("INSERT INTO automations (id, project_id, name, enabled, trigger, actor_type, actor_id, service, conditions, actions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.projectId, input.name, input.enabled ? 1 : 0, input.trigger, input.actorType, input.actorId, input.service, JSON.stringify(input.conditions), JSON.stringify(input.actions), input.createdAt, input.updatedAt); return input; },
+    async update(id, input) { const map: Record<string, string> = { name: "name", enabled: "enabled", trigger: "trigger", actorType: "actor_type", actorId: "actor_id", service: "service", conditions: "conditions", actions: "actions" }; const fields: string[] = []; const values: unknown[] = []; for (const [key, column] of Object.entries(map)) if (key in input) { fields.push(`${column} = ?`); const value = input[key as keyof typeof input]; values.push(key === "enabled" ? (value ? 1 : 0) : key === "conditions" || key === "actions" ? JSON.stringify(value) : value ?? null); } fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE automations SET ${fields.join(", ")} WHERE id = ?`).run(...values); const row = await db.prepare("SELECT * FROM automations WHERE id = ?").get(id); if (!row) throw new Error("Automation not found after update"); return toAutomation(row); },
+    async delete(id) { await db.prepare("DELETE FROM automations WHERE id = ?").run(id); },
+  };
+}
+
 function createNotificationRepository(db: DatabasePort): NotificationRepository {
   const select = "SELECT n.*, p.name AS project_name, p.`key` AS project_key, t.number AS task_number FROM notifications n LEFT JOIN projects p ON p.id = n.project_id LEFT JOIN tasks t ON t.id = n.task_id";
   return { async notify(input) { await db.prepare("INSERT INTO notifications (id, user_id, project_id, task_id, type, title, message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), input.userId, input.projectId ?? null, input.taskId ?? null, input.type, input.title, input.message, new Date().toISOString()); }, async listForUser(userId) { return (await db.prepare(`${select} WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT 50`).all(userId)).map(toNotification); }, async markRead(userId, id) { const result = await db.prepare("UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?").run(new Date().toISOString(), id, userId); if (!result.changes) throw new Error("Notification not found after read"); const row = await db.prepare(`${select} WHERE n.id = ? AND n.user_id = ?`).get(id, userId); if (!row) throw new Error("Notification not found after read"); return toNotification(row); }, async markAllRead(userId) { return (await db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(new Date().toISOString(), userId)).changes; } };
@@ -172,5 +187,5 @@ function createSearchRepository(db: DatabasePort): SearchRepository {
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
 }
