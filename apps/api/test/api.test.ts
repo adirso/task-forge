@@ -300,6 +300,20 @@ test("task attachments persist, download, and appear in task responses", async (
   assert.equal((await app.inject({ method: "GET", url: `/api/tasks/${taskId}/attachments`, headers: { authorization: `Bearer ${jwtToken}` } })).json().attachments.length, 0);
 });
 
+test("automations can assign the actor and merge open pull requests", async () => {
+  const assignRule = await app.inject({ method: "POST", url: `/api/projects/${projectId}/automations`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Assign actioner", conditions: [{ field: "status", operator: "changed_to", value: "IN_PROGRESS" }, { field: "assigneeId", operator: "is_empty", value: null }], actions: [{ field: "assigneeId", valueType: "actor", value: null }] } });
+  assert.equal(assignRule.statusCode, 201, assignRule.body);
+  const task = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Automation assignment", status: "TODO" } });
+  const assigned = await app.inject({ method: "PATCH", url: `/api/tasks/${task.json().task.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "IN_PROGRESS" } });
+  assert.equal(assigned.statusCode, 200); assert.equal(assigned.json().task.assigneeId, adminId);
+  const mergeRule = await app.inject({ method: "POST", url: `/api/projects/${projectId}/automations`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Merge done PR", conditions: [{ field: "status", operator: "changed_to", value: "DONE" }, { field: "pullRequestState", operator: "equals", value: "OPEN" }], actions: [{ field: "pullRequestState", valueType: "static", value: "MERGED" }] } });
+  assert.equal(mergeRule.statusCode, 201, mergeRule.body);
+  const prTask = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Automation merge", status: "TODO", pullRequestState: "OPEN" } });
+  const merged = await app.inject({ method: "PATCH", url: `/api/tasks/${prTask.json().task.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "DONE" } });
+  assert.equal(merged.statusCode, 200); assert.equal(merged.json().task.pullRequestState, "MERGED");
+  const rules = await app.inject({ method: "GET", url: `/api/projects/${projectId}/automations`, headers: { authorization: `Bearer ${jwtToken}` } }); assert.equal(rules.json().automations.length, 2);
+});
+
 test("unauthenticated project access is rejected", async () => {
   const response = await app.inject({ method: "GET", url: "/api/projects" });
   assert.equal(response.statusCode, 401);
