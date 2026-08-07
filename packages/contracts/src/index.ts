@@ -28,6 +28,7 @@ export const projectCreateSchema = z.object({
 });
 
 export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).partial();
+export const projectOrderSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(500) });
 
 export const phaseCreateSchema = z.object({
   number: z.number().int().min(1).max(10000),
@@ -136,6 +137,7 @@ export interface Project {
   description: string;
   repoUrl: string | null;
   color: string;
+  sortOrder: number;
   ownerId: string;
   createdAt: string;
   updatedAt: string;

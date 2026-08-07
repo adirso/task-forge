@@ -2,9 +2,15 @@ import type { Project, User } from "@taskforge/contracts";
 import { Bell, ChevronDown, Layers3, Plus, Search, Settings } from "lucide-react";
 import { Avatar } from "./Avatar";
 
-export function Sidebar({ projects, currentId, user, unreadCount, settingsActive, onSearch, onNotifications, onSettings, onSelect, onCreate, onLogout }: {
-  projects: Project[]; currentId: string | null; user: User; unreadCount: number; settingsActive: boolean; onSearch: () => void; onNotifications: () => void; onSettings: () => void; onSelect: (id: string) => void; onCreate: () => void; onLogout: () => void;
+export function Sidebar({ projects, currentId, user, unreadCount, settingsActive, onSearch, onNotifications, onSettings, onSelect, onCreate, onLogout, onReorder }: {
+  projects: Project[]; currentId: string | null; user: User; unreadCount: number; settingsActive: boolean; onSearch: () => void; onNotifications: () => void; onSettings: () => void; onSelect: (id: string) => void; onCreate: () => void; onLogout: () => void; onReorder: (projectIds: string[]) => void;
 }) {
+  function moveProject(sourceId: string, targetId: string) {
+    if (sourceId === targetId) return;
+    const next = [...projects]; const sourceIndex = next.findIndex((project) => project.id === sourceId); const targetIndex = next.findIndex((project) => project.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const [moved] = next.splice(sourceIndex, 1); next.splice(targetIndex, 0, moved!); onReorder(next.map((project) => project.id));
+  }
   return (
     <aside className="sidebar">
       <div className="brand-lockup"><span className="brand-mark"><Layers3 /></span>TaskForge</div>
@@ -15,7 +21,7 @@ export function Sidebar({ projects, currentId, user, unreadCount, settingsActive
       <div className="nav-section-title"><span>Projects</span><button onClick={onCreate} aria-label="Create project"><Plus /></button></div>
       <nav className="project-nav">
         {projects.map((project) => (
-          <button key={project.id} className={currentId === project.id ? "active" : ""} onClick={() => onSelect(project.id)}>
+          <button key={project.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/project-id", project.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveProject(event.dataTransfer.getData("text/project-id"), project.id); }} aria-label={`${project.name}. Drag to reorder`} className={currentId === project.id ? "active" : ""} onClick={() => onSelect(project.id)}>
             <span className="project-glyph" style={{ background: project.color }}>{project.key.slice(0, 1)}</span>
             <span>{project.name}</span><small>{project.taskCount ?? 0}</small>
           </button>

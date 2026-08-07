@@ -16,6 +16,8 @@ export interface ProjectRepository {
   findById(id: string): Promise<ProjectEntity | null>;
   findByKey(key: string): Promise<ProjectEntity | null>;
   listAccessible(actorId: string, isAdmin: boolean): Promise<ProjectEntity[]>;
+  allocateSortOrder(): Promise<number>;
+  reorder(ids: string[]): Promise<void>;
   create(input: ProjectEntity): Promise<ProjectEntity>;
   update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "color">>): Promise<ProjectEntity>;
   delete(id: string): Promise<void>;
