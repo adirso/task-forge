@@ -57,6 +57,12 @@ export interface TaskEntity {
   position: number;
   createdAt: string;
   updatedAt: string;
+  assignee?: UserEntity | null;
+  tags?: TaskTagEntity[];
+  dependencies?: TaskDependencyEntity[];
+  projectName?: string;
+  projectKey?: string;
+  projectColor?: string;
 }
 
 export interface TaskDependencyEntity {
@@ -66,6 +72,8 @@ export interface TaskDependencyEntity {
   number: number;
   title: string;
   status: TaskStatus;
+  projectKey?: string;
+  isBlocking?: boolean;
 }
 
 export interface TaskTagEntity {
@@ -82,6 +90,7 @@ export interface TaskUpdateEntity {
   body: string;
   createdAt: string;
   updatedAt: string;
+  author?: UserEntity;
 }
 
 export interface ApiTokenEntity {
@@ -105,6 +114,9 @@ export interface NotificationEntity {
   message: string;
   readAt: string | null;
   createdAt: string;
+  projectName?: string | null;
+  projectKey?: string | null;
+  taskNumber?: number | null;
 }
 
 export interface Page<T> {
