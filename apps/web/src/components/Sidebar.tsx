@@ -8,7 +8,6 @@ export function Sidebar({ projects, currentId, user, unreadCount, settingsActive
   return (
     <aside className="sidebar">
       <div className="brand-lockup"><span className="brand-mark"><Layers3 /></span>TaskForge</div>
-      <button className="workspace-switch"><span className="workspace-icon">A</span><span><strong>Alex's workspace</strong><small>Team workspace</small></span><ChevronDown size={15} /></button>
       <nav className="main-nav">
         <button onClick={onSearch}><Search /><span>Search</span><kbd>⌘ K</kbd></button>
         <button onClick={onNotifications} aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}><Bell /><span>Notifications</span>{unreadCount > 0 && <i>{unreadCount > 99 ? "99+" : unreadCount}</i>}</button>
