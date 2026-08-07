@@ -6,7 +6,7 @@ import { Avatar } from "./Avatar";
 
 type SettingsTab = "account" | "appearance" | "members" | "agents";
 
-export function SettingsPage({ user, users, projects, currentProject, defaultView, textSize, onUserUpdated, onAgentCreated, onAgentDeleted, onProjectMembersChanged, onDefaultViewChange, onTextSizeChange }: {
+export function SettingsPage({ user, users, projects, currentProject, defaultView, textSize, onUserUpdated, onAgentCreated, onAgentUpdated, onAgentDeleted, onProjectMembersChanged, onDefaultViewChange, onTextSizeChange }: {
   user: User;
   users: User[];
   projects: Project[];
@@ -15,6 +15,7 @@ export function SettingsPage({ user, users, projects, currentProject, defaultVie
   textSize: "comfortable" | "large";
   onUserUpdated: (user: User) => void;
   onAgentCreated: (user: User) => void;
+  onAgentUpdated: (user: User) => void;
   onAgentDeleted: (id: string) => void;
   onProjectMembersChanged: (project: Project) => void;
   onDefaultViewChange: (view: "board" | "list") => void;
@@ -34,6 +35,7 @@ export function SettingsPage({ user, users, projects, currentProject, defaultVie
   const [expiresInDays, setExpiresInDays] = useState("90");
   const [issuedToken, setIssuedToken] = useState("");
   const [copied, setCopied] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [memberProjectId, setMemberProjectId] = useState(currentProject?.id ?? projects[0]?.id ?? "");
   const [memberProject, setMemberProject] = useState<Project | null>(currentProject);
   const [selectedMemberId, setSelectedMemberId] = useState("");
@@ -145,6 +147,25 @@ export function SettingsPage({ user, users, projects, currentProject, defaultVie
     } catch (err) { setError(err instanceof Error ? err.message : "Could not delete agent"); }
   }
 
+  async function updateAgentAvatar(file: File) {
+    if (!selectedAgent) return;
+    if (!file.type.startsWith("image/") || file.size > 2 * 1024 * 1024) { setError("Profile pictures must be images smaller than 2 MB"); return; }
+    setAvatarUploading(true); setError("");
+    try {
+      const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error("Could not read profile picture")); reader.readAsDataURL(file); });
+      const { user: updated } = await api.uploadUserAvatar(selectedAgent.id, { mimeType: file.type, data }); onAgentUpdated(updated); success("Profile picture updated");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not update profile picture"); }
+    finally { setAvatarUploading(false); }
+  }
+
+  async function removeAgentAvatar() {
+    if (!selectedAgent?.avatarUrl) return;
+    setAvatarUploading(true); setError("");
+    try { const { user: updated } = await api.deleteUserAvatar(selectedAgent.id); onAgentUpdated(updated); success("Profile picture removed"); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not remove profile picture"); }
+    finally { setAvatarUploading(false); }
+  }
+
   async function copyToken() {
     await navigator.clipboard.writeText(issuedToken); setCopied(true); window.setTimeout(() => setCopied(false), 1800);
   }
@@ -178,7 +199,7 @@ export function SettingsPage({ user, users, projects, currentProject, defaultVie
 
           {tab === "agents" && <div className="settings-section"><div className="settings-section-heading"><h2>Agents & API tokens</h2><p>Create identities for automation and manage their revocable credentials.</p></div>{user.role !== "ADMIN" ? <div className="settings-notice"><ShieldCheck /><span><strong>Administrator access required</strong><small>Ask a workspace administrator to manage agent identities and tokens.</small></span></div> : <div className="agent-settings"><form className="new-agent-form" onSubmit={addAgent}><h3><Plus /> New agent identity</h3><div><label>Name<input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Repository Builder" required /></label><label>Email <span>Optional</span><input type="email" value={agentEmail} onChange={(event) => setAgentEmail(event.target.value)} placeholder="builder@example.local" /></label><button className="button button-secondary">Create agent</button></div></form><div className="agent-manager"><div className="agent-list">{agents.map((agent) => <button key={agent.id} className={selectedAgentId === agent.id ? "active" : ""} onClick={() => { setSelectedAgentId(agent.id); setIssuedToken(""); }}><Avatar user={agent} size="md" /><span><strong>{agent.name}</strong><small>{agent.email}</small></span></button>)}</div>{selectedAgent ? <div className="token-manager"><div className="token-manager-title"><Avatar user={selectedAgent} /><span><strong>{selectedAgent.name}</strong><small>Token credentials</small></span></div><form className="token-form" onSubmit={issueToken}><label>Token name<input value={tokenName} onChange={(event) => setTokenName(event.target.value)} required /></label><label>Expires after<select value={expiresInDays} onChange={(event) => setExpiresInDays(event.target.value)}><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="">Never</option></select></label><button className="button button-primary"><KeyRound /> Issue token</button></form>{issuedToken && <div className="issued-token"><strong>Copy this token now</strong><p>It cannot be displayed again after you leave this page.</p><div><code>{issuedToken}</code><button onClick={copyToken}>{copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy"}</button></div></div>}<div className="token-list"><h3>Issued tokens</h3>{tokens.length ? tokens.map((token) => <article key={token.id} className={token.revokedAt ? "revoked" : ""}><KeyRound /><span><strong>{token.name}</strong><small>tf_{token.prefix}_… · {token.revokedAt ? "Revoked" : token.lastUsedAt ? `Used ${new Date(token.lastUsedAt).toLocaleDateString()}` : "Never used"}</small></span>{!token.revokedAt && <button onClick={() => revokeToken(token.id)} title="Revoke token"><Trash2 /></button>}</article>) : <p className="no-tokens">No tokens issued for this agent.</p>}</div></div> : <div className="select-agent-empty"><Bot /><span>Create or select an agent to manage its tokens.</span></div>}</div></div>}</div>}
           {error && <div className="form-error settings-message">{error}</div>}{message && <div className="form-success settings-message"><Check />{message}</div>}
-          {tab === "agents" && user.role === "ADMIN" && selectedAgent && <div className="agent-delete-action"><button type="button" className="button button-danger-quiet" onClick={() => deleteAgent().catch(() => undefined)}><Trash2 /> Delete selected agent</button></div>}
+          {tab === "agents" && user.role === "ADMIN" && selectedAgent && <div className="agent-delete-action"><div className="agent-avatar-actions"><label className="button button-secondary"><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void updateAgentAvatar(file); event.currentTarget.value = ""; }} />{avatarUploading ? "Uploading…" : "Change picture"}</label>{selectedAgent.avatarUrl && <button type="button" className="button button-secondary" disabled={avatarUploading} onClick={() => void removeAgentAvatar()}>Remove picture</button>}</div><button type="button" className="button button-danger-quiet" onClick={() => deleteAgent().catch(() => undefined)}><Trash2 /> Delete selected agent</button></div>}
         </section>
       </div>
     </div>
