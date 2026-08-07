@@ -39,6 +39,7 @@ export interface PhaseRepository {
 
 export interface TaskRepository {
   findById(id: string): Promise<TaskEntity | null>;
+  findByProjectNumber(projectId: string, number: number): Promise<TaskEntity | null>;
   listByProject(projectId: string, filters?: TaskFilters): Promise<TaskEntity[]>;
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   unassignForProjectMember(projectId: string, userId: string): Promise<void>;
@@ -49,6 +50,7 @@ export interface TaskRepository {
 
 export interface TaskTagRepository {
   listForTask(taskId: string): Promise<TaskTagEntity[]>;
+  listForProject(projectId: string): Promise<Array<TaskTagEntity & { taskCount: number }>>;
   replaceForTask(taskId: string, projectId: string, names: string[], createdAt: string): Promise<void>;
 }
 
@@ -72,7 +74,6 @@ export interface NotificationRepository {
 export interface ApiTokenRepository {
   create(input: { id: string; userId: string; name: string; prefix: string; hash: string; expiresAt: string | null; createdAt: string }): Promise<void>;
   listForUser(userId: string): Promise<ApiTokenEntity[]>;
-  findById(id: string): Promise<(ApiTokenEntity & { userId: string }) | null>;
   findById(id: string): Promise<(ApiTokenEntity & { userId: string }) | null>;
   revoke(id: string): Promise<void>;
 }

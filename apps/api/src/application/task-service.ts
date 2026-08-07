@@ -9,22 +9,25 @@ import type { TaskCreateInput, TaskFilters, TaskService, TaskUpdateInput } from 
 export class TaskApplicationService implements TaskService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now: () => string = () => new Date().toISOString(), private readonly newId: () => string = randomUUID) {}
 
-  async list(context: ProjectContext, filters?: TaskFilters) { return this.unitOfWork.run(async (repositories) => { await this.assertProjectAccess(repositories, context); return repositories.tasks.listByProject(context.projectId, filters); }); }
+  async list(context: ProjectContext, filters?: TaskFilters) { return this.unitOfWork.run(async (repositories) => { await this.assertProjectAccess(repositories, context); const tasks = await repositories.tasks.listByProject(context.projectId, filters); return Promise.all(tasks.map((task) => this.hydrate(repositories, task))); }); }
 
-  async get(context: RequestContext, taskId: string) { return this.unitOfWork.run(async (repositories) => { const task = await this.requireTask(repositories, taskId); await this.assertProjectAccess(repositories, context, task.projectId); return task; }); }
+  async get(context: RequestContext, taskId: string) { return this.unitOfWork.run(async (repositories) => { const task = await this.requireTask(repositories, taskId); await this.assertProjectAccess(repositories, context, task.projectId); return this.hydrate(repositories, task); }); }
 
   async create(context: ProjectContext, input: TaskCreateInput) {
     return this.unitOfWork.run(async (repositories) => {
       await this.assertProjectAccess(repositories, context);
-      await this.validateRelations(repositories, context.projectId, null, input);
-      const allocation = await repositories.tasks.allocateNumber(context.projectId, input.status);
+      const phaseId = input.phaseId === undefined ? (await repositories.phases.findActive(context.projectId))?.id ?? null : input.phaseId;
+      const normalized = { ...input, description: input.description ?? "", definitionOfDone: input.definitionOfDone ?? "", status: input.status ?? "TODO", priority: input.priority ?? "MEDIUM", assigneeId: input.assigneeId ?? null, parentId: input.parentId ?? null, branch: input.branch ?? null, dueDate: input.dueDate ?? null, estimatePoints: input.estimatePoints ?? null, phaseId, pullRequestUrl: input.pullRequestUrl ?? null, pullRequestTitle: input.pullRequestTitle ?? null, pullRequestState: input.pullRequestState ?? null };
+      await this.validateRelations(repositories, context.projectId, null, normalized);
+      const allocation = await repositories.tasks.allocateNumber(context.projectId, normalized.status);
       const now = this.now();
-      const task: TaskEntity = { ...input, id: this.newId(), projectId: context.projectId, number: allocation.number, position: allocation.position, creatorId: context.actor.userId, createdAt: now, updatedAt: now };
+      const { tags: _tags, dependencyIds: _dependencyIds, ...taskFields } = normalized;
+      const task: TaskEntity = { ...taskFields, id: this.newId(), projectId: context.projectId, number: allocation.number, position: allocation.position, creatorId: context.actor.userId, createdAt: now, updatedAt: now } as TaskEntity;
       await repositories.tasks.create(task);
-      await this.replaceMetadata(repositories, task, input.tags, input.dependencyIds, now);
+      await this.replaceMetadata(repositories, task, normalized.tags, normalized.dependencyIds, now);
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.created", metadata: { title: task.title } });
       if (task.assigneeId && task.assigneeId !== context.actor.userId) await this.notify(repositories, task.assigneeId, task, context, "TASK_ASSIGNED", "Task assigned to you");
-      return task;
+      return this.hydrate(repositories, task);
     });
   }
 
@@ -41,7 +44,7 @@ export class TaskApplicationService implements TaskService {
       await repositories.activity.record({ projectId: existing.projectId, taskId, actorId: context.actor.userId, action: "task.updated", metadata: input });
       if (input.assigneeId && input.assigneeId !== existing.assigneeId && input.assigneeId !== context.actor.userId) await this.notify(repositories, input.assigneeId, { ...existing, ...task, title: input.title ?? existing.title }, context, "TASK_ASSIGNED", "Task assigned to you");
       if (input.status === "IN_REVIEW" && existing.status !== "IN_REVIEW" && existing.creatorId !== context.actor.userId) await this.notify(repositories, existing.creatorId, { ...existing, ...task, title: input.title ?? existing.title }, context, "REVIEW_REQUESTED", "Review requested");
-      return { ...task, updatedAt: now };
+      return this.hydrate(repositories, { ...task, updatedAt: now });
     });
   }
 
@@ -59,8 +62,21 @@ export class TaskApplicationService implements TaskService {
       await repositories.activity.record({ projectId: task.projectId, taskId, actorId: context.actor.userId, action: "task.note_added" });
       const recipients = new Set([task.creatorId, task.assigneeId].filter((id): id is string => Boolean(id && id !== context.actor.userId)));
       for (const recipientId of recipients) await repositories.notifications.notify({ userId: recipientId, projectId: task.projectId, taskId, type: "TASK_UPDATED", title: "New task update", message: `${context.actor.name ?? "A teammate"} posted an update on “${task.title}”.` });
-      return update;
+      return { ...update, author: await repositories.users.findById(update.authorId) ?? undefined };
     });
+  }
+
+  async listUpdates(context: RequestContext, taskId: string) {
+    return this.unitOfWork.run(async (repositories) => { const task = await this.requireTask(repositories, taskId); await this.assertProjectAccess(repositories, context, task.projectId); const updates = await repositories.updates.listForTask(taskId); return Promise.all(updates.map(async (update) => ({ ...update, author: await repositories.users.findById(update.authorId) ?? undefined }))); });
+  }
+
+  async listTags(context: ProjectContext) {
+    return this.unitOfWork.run(async (repositories) => { await this.assertProjectAccess(repositories, context); return repositories.tags.listForProject(context.projectId); });
+  }
+
+  private async hydrate(repositories: RepositorySet, task: TaskEntity) {
+    const [tags, dependencies, assignee] = await Promise.all([repositories.tags.listForTask ? repositories.tags.listForTask(task.id) : Promise.resolve([]), repositories.dependencies.listForTask ? repositories.dependencies.listForTask(task.id) : Promise.resolve([]), task.assigneeId && repositories.users.findById ? repositories.users.findById(task.assigneeId) : Promise.resolve(null)]);
+    return { ...task, tags, dependencies: dependencies.map((dependency) => ({ ...dependency, isBlocking: dependency.status !== "DONE" })), assignee };
   }
 
   private async assertProjectAccess(repositories: RepositorySet, context: RequestContext, projectId?: string) {
