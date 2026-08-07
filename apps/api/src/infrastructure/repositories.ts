@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { ApiTokenEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
-import type { ApiTokenRepository, ActivityRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
+import type { ApiTokenEntity, AttachmentEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
+import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 
 export interface DatabasePort {
@@ -53,6 +53,10 @@ function toUpdate(row: Row): TaskUpdateEntity {
   return { id: text(row.id), taskId: text(row.task_id), authorId: text(row.author_id), body: text(row.body), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
 }
 
+function toAttachment(row: Row): AttachmentEntity {
+  return { id: text(row.id), taskId: text(row.task_id), fileName: text(row.file_name), mimeType: text(row.mime_type), size: Number(row.file_size), storageKey: text(row.storage_key), uploadedById: text(row.uploaded_by_id), createdAt: date(row.created_at) };
+}
+
 function toNotification(row: Row): NotificationEntity {
   return { id: text(row.id), userId: text(row.user_id), projectId: nullableText(row.project_id), taskId: nullableText(row.task_id), type: text(row.type), title: text(row.title), message: text(row.message), readAt: nullableText(row.read_at), createdAt: date(row.created_at), projectName: nullableText(row.project_name), projectKey: nullableText(row.project_key), taskNumber: row.task_number == null ? null : Number(row.task_number) };
 }
@@ -63,7 +67,8 @@ async function hydrateTask(db: DatabasePort, task: TaskEntity): Promise<TaskEnti
     db.prepare("SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.`key` AS project_key, dep.number, dep.title, dep.status FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id JOIN projects p ON p.id = dep.project_id WHERE td.task_id = ? ORDER BY dep.number").all(task.id),
     task.assigneeId ? db.prepare("SELECT * FROM users WHERE id = ?").get(task.assigneeId) : Promise.resolve(undefined),
   ]);
-  return { ...task, tags: tags.map(toTag), dependencies: dependencies.map(toDependency), assignee: assignee ? toUser(assignee) : null };
+  const attachments = await db.prepare("SELECT a.*, u.id AS uploaded_user_id, u.email AS uploaded_email, u.name AS uploaded_name, u.kind AS uploaded_kind, u.role AS uploaded_role, u.avatar_url AS uploaded_avatar_url, u.created_at AS uploaded_created_at FROM task_attachments a JOIN users u ON u.id = a.uploaded_by_id WHERE a.task_id = ? ORDER BY a.created_at DESC").all(task.id);
+  return { ...task, tags: tags.map(toTag), dependencies: dependencies.map(toDependency), attachments: attachments.map((row) => ({ ...toAttachment(row), uploadedBy: { id: text(row.uploaded_user_id), email: nullableText(row.uploaded_email), name: text(row.uploaded_name), kind: row.uploaded_kind as UserEntity["kind"], role: row.uploaded_role as UserEntity["role"], avatarUrl: nullableText(row.uploaded_avatar_url), createdAt: date(row.uploaded_created_at) } })), assignee: assignee ? toUser(assignee) : null };
 }
 
 function toToken(row: Row): ApiTokenEntity {
@@ -139,6 +144,15 @@ function createUpdateRepository(db: DatabasePort): TaskUpdateRepository {
   return { async listForTask(taskId) { return (await db.prepare("SELECT * FROM task_updates WHERE task_id = ? ORDER BY created_at DESC").all(taskId)).map(toUpdate); }, async create(input) { await db.prepare("INSERT INTO task_updates (id, task_id, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.authorId, input.body, input.createdAt, input.updatedAt); return input; } };
 }
 
+function createAttachmentRepository(db: DatabasePort): AttachmentRepository {
+  return {
+    async listForTask(taskId) { const rows = await db.prepare("SELECT a.*, u.id AS uploaded_user_id, u.email AS uploaded_email, u.name AS uploaded_name, u.kind AS uploaded_kind, u.role AS uploaded_role, u.avatar_url AS uploaded_avatar_url, u.created_at AS uploaded_created_at FROM task_attachments a JOIN users u ON u.id = a.uploaded_by_id WHERE a.task_id = ? ORDER BY a.created_at DESC").all(taskId); return rows.map((row) => ({ ...toAttachment(row), uploadedBy: { id: text(row.uploaded_user_id), email: nullableText(row.uploaded_email), name: text(row.uploaded_name), kind: row.uploaded_kind as UserEntity["kind"], role: row.uploaded_role as UserEntity["role"], avatarUrl: nullableText(row.uploaded_avatar_url), createdAt: date(row.uploaded_created_at) } })); },
+    async findById(id) { const row = await db.prepare("SELECT * FROM task_attachments WHERE id = ?").get(id); return row ? toAttachment(row) : null; },
+    async create(input) { await db.prepare("INSERT INTO task_attachments (id, task_id, file_name, mime_type, file_size, storage_key, uploaded_by_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.fileName, input.mimeType, input.size, input.storageKey, input.uploadedById, input.createdAt); return input; },
+    async delete(id) { await db.prepare("DELETE FROM task_attachments WHERE id = ?").run(id); },
+  };
+}
+
 function createNotificationRepository(db: DatabasePort): NotificationRepository {
   const select = "SELECT n.*, p.name AS project_name, p.`key` AS project_key, t.number AS task_number FROM notifications n LEFT JOIN projects p ON p.id = n.project_id LEFT JOIN tasks t ON t.id = n.task_id";
   return { async notify(input) { await db.prepare("INSERT INTO notifications (id, user_id, project_id, task_id, type, title, message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), input.userId, input.projectId ?? null, input.taskId ?? null, input.type, input.title, input.message, new Date().toISOString()); }, async listForUser(userId) { return (await db.prepare(`${select} WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT 50`).all(userId)).map(toNotification); }, async markRead(userId, id) { const result = await db.prepare("UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?").run(new Date().toISOString(), id, userId); if (!result.changes) throw new Error("Notification not found after read"); const row = await db.prepare(`${select} WHERE n.id = ? AND n.user_id = ?`).get(id, userId); if (!row) throw new Error("Notification not found after read"); return toNotification(row); }, async markAllRead(userId) { return (await db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(new Date().toISOString(), userId)).changes; } };
@@ -157,5 +171,5 @@ function createSearchRepository(db: DatabasePort): SearchRepository {
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
 }

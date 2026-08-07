@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { ContextApplicationService } from "../application/cross-cutting-services.js";
+import { taskResponse } from "../lib/task-response.js";
 
 type ContextQuery = { project?: string; task?: string };
 const service = new ContextApplicationService(createUnitOfWork(db));
@@ -9,5 +10,5 @@ const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; rol
 
 export async function contextRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
-  app.get<{ Querystring: ContextQuery }>("/", { schema: { tags: ["Context"], summary: "Resolve shareable project and task query parameters" } }, async (request) => service.resolve(context(request), request.query));
+  app.get<{ Querystring: ContextQuery }>("/", { schema: { tags: ["Context"], summary: "Resolve shareable project and task query parameters" } }, async (request) => { const result = await service.resolve(context(request), request.query); return { ...result, task: result.task ? taskResponse(result.task) : null }; });
 }
