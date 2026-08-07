@@ -3,6 +3,7 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import Fastify from "fastify";
 import { ZodError } from "zod";
+import { ApplicationError } from "./application/errors.js";
 import { config } from "./config.js";
 import "./db/database.js";
 import { installAuth } from "./lib/auth.js";
@@ -38,6 +39,13 @@ export async function buildApp() {
   await app.register(phaseRoutes, { prefix: "/api" });
 
   app.setErrorHandler((error, _request, reply) => {
+    const applicationStatuses = { UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, VALIDATION: 400, INTERNAL: 500 } as const;
+    if (error instanceof ApplicationError || (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" && error.code in applicationStatuses)) {
+      const code = (error as { code: keyof typeof applicationStatuses }).code;
+      const message = error instanceof Error ? error.message : "Request failed";
+      const issues = error instanceof ApplicationError ? error.issues : undefined;
+      return reply.code(applicationStatuses[code]).send({ error: message, ...(issues ? { issues } : {}) });
+    }
     if (error instanceof ZodError) {
       return reply.code(400).send({ error: "Validation failed", issues: error.issues });
     }
