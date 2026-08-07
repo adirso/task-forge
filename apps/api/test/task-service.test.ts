@@ -34,6 +34,7 @@ test("task service allocates task identity and records cross-cutting effects", a
   });
   assert.equal(task.id, "task-7");
   assert.equal(task.number, 7);
+  assert.equal(task.type, "FEATURE");
   assert.deepEqual(calls, ["create", "tags", "dependencies", "activity"]);
 });
 

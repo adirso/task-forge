@@ -30,18 +30,6 @@ export async function buildApp() {
   await app.register(swaggerUi, { routePrefix: "/docs" });
   installAuth(app);
 
-  app.get("/health", { schema: { tags: ["System"], summary: "Health check" } }, async () => ({ status: "ok" }));
-  await app.register(authRoutes, { prefix: "/api/auth" });
-  await app.register(projectRoutes, { prefix: "/api/projects" });
-  await app.register(taskRoutes, { prefix: "/api" });
-  await app.register(userRoutes, { prefix: "/api/users" });
-  await app.register(notificationRoutes, { prefix: "/api/notifications" });
-  await app.register(searchRoutes, { prefix: "/api/search" });
-  await app.register(contextRoutes, { prefix: "/api/context" });
-  await app.register(phaseRoutes, { prefix: "/api" });
-  await app.register(attachmentRoutes, { prefix: "/api" });
-  await app.register(automationRoutes, { prefix: "/api" });
-
   app.setErrorHandler((error, _request, reply) => {
     const applicationStatuses = { UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, VALIDATION: 400, INTERNAL: 500 } as const;
     if (error instanceof ApplicationError || (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" && error.code in applicationStatuses)) {
@@ -60,6 +48,18 @@ export async function buildApp() {
     app.log.error(error);
     return reply.code(500).send({ error: "Internal server error" });
   });
+
+  app.get("/health", { schema: { tags: ["System"], summary: "Health check" } }, async () => ({ status: "ok" }));
+  await app.register(authRoutes, { prefix: "/api/auth" });
+  await app.register(projectRoutes, { prefix: "/api/projects" });
+  await app.register(taskRoutes, { prefix: "/api" });
+  await app.register(userRoutes, { prefix: "/api/users" });
+  await app.register(notificationRoutes, { prefix: "/api/notifications" });
+  await app.register(searchRoutes, { prefix: "/api/search" });
+  await app.register(contextRoutes, { prefix: "/api/context" });
+  await app.register(phaseRoutes, { prefix: "/api" });
+  await app.register(attachmentRoutes, { prefix: "/api" });
+  await app.register(automationRoutes, { prefix: "/api" });
 
   return app;
 }

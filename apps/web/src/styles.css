@@ -145,13 +145,18 @@ svg { flex: 0 0 auto; }
 .task-card { background: white; border: 1px solid #e1e3e7; border-radius: 7px; padding: 11px 11px 9px; margin-bottom: 7px; box-shadow: 0 1px 2px rgba(9,30,66,.08); cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s; }
 .task-card:hover { transform: translateY(-1px); border-color: #b9b3dd; box-shadow: 0 5px 14px rgba(9,30,66,.11); }
 .task-card:active { cursor: grabbing; }
-.card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.card-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
+.card-top .task-key { margin-left: auto; }
 .task-key { font-size: 10px; letter-spacing: .035em; color: #8993a4; font-weight: 650; white-space: nowrap; }
 .task-card h3 { margin: 0 0 12px; color: #253858; font-size: 13px; line-height: 1.45; font-weight: 620; }
 .task-tag-list { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; vertical-align: middle; }.task-card > .task-tag-list { display: flex; margin: -4px 0 10px; }.task-tag { flex: 0 1 auto; max-width: 110px; border-radius: 10px; background: #eae6ff; color: #403294; padding: 3px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 700; line-height: 1.2; }.task-tag-more { flex: 0 0 auto; color: #7a869a; font-size: 9px; font-weight: 700; }
 .task-dependency-list { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-width: 100%; vertical-align: middle; }.task-card > .task-dependency-list { display: flex; margin: -4px 0 10px; }.task-dependency-pill { display: inline-flex; align-items: center; gap: 3px; max-width: 170px; border-radius: 10px; padding: 3px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 700; line-height: 1.2; }.task-dependency-pill svg { width: 11px; flex: 0 0 auto; }.task-dependency-pill.is-blocking { background: #ffebe6; color: #bf2600; }.task-dependency-pill.is-resolved { background: #e3fcef; color: #006644; }.task-dependency-more { color: #7a869a; font-size: 9px; font-weight: 700; }
 .priority { font-size: 10px; font-weight: 680; }
 .priority-low { color: #6b778c; }.priority-medium { color: #2684ff; }.priority-high { color: #ff8b00; }.priority-urgent { color: #de350b; }
+.type-pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 4px; padding: 3px 6px; font-size: 10px; font-weight: 650; white-space: nowrap; }
+.type-pill svg { width: 11px; height: 11px; flex: 0 0 11px; }
+.type-feature { color: #0747a6; background: #deebff; }.type-bug { color: #bf2600; background: #ffebe6; }.type-infra { color: #403294; background: #eae6ff; }.type-update { color: #006644; background: #e3fcef; }
+.type-security { color: #974f0c; background: #fff0d3; }.type-docs { color: #505f79; background: #ebecf0; }.type-chore { color: #164555; background: #e0f4f8; }
 .subtask-label { display: inline-flex; align-items: center; gap: 4px; color: #6554c0; background: #efecff; font-size: 10px; padding: 3px 5px; border-radius: 4px; margin: -4px 0 9px; }
 .subtask-label svg { width: 10px; }
 .card-meta { min-height: 24px; border-top: 1px solid #f1f2f4; padding-top: 8px; display: flex; align-items: center; gap: 9px; color: #8993a4; font-size: 10px; }

@@ -18,7 +18,7 @@ export class TaskApplicationService implements TaskService {
     return this.unitOfWork.run(async (repositories) => {
       await this.assertProjectAccess(repositories, context);
       const phaseId = input.phaseId === undefined ? (await repositories.phases.findActive(context.projectId))?.id ?? null : input.phaseId;
-      const normalized = { ...input, description: input.description ?? "", definitionOfDone: input.definitionOfDone ?? "", status: input.status ?? "TODO", priority: input.priority ?? "MEDIUM", assigneeId: input.assigneeId ?? null, parentId: input.parentId ?? null, branch: input.branch ?? null, dueDate: input.dueDate ?? null, estimatePoints: input.estimatePoints ?? null, phaseId, pullRequestUrl: input.pullRequestUrl ?? null, pullRequestTitle: input.pullRequestTitle ?? null, pullRequestState: input.pullRequestState ?? null };
+      const normalized = { ...input, description: input.description ?? "", definitionOfDone: input.definitionOfDone ?? "", status: input.status ?? "TODO", priority: input.priority ?? "MEDIUM", type: input.type ?? "FEATURE", assigneeId: input.assigneeId ?? null, parentId: input.parentId ?? null, branch: input.branch ?? null, dueDate: input.dueDate ?? null, estimatePoints: input.estimatePoints ?? null, phaseId, pullRequestUrl: input.pullRequestUrl ?? null, pullRequestTitle: input.pullRequestTitle ?? null, pullRequestState: input.pullRequestState ?? null };
       await this.validateRelations(repositories, context.projectId, null, normalized);
       const allocation = await repositories.tasks.allocateNumber(context.projectId, normalized.status);
       const now = this.now();

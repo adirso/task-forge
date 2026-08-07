@@ -49,6 +49,7 @@ export async function toTask(row: Row): Promise<Task> {
     definitionOfDone: String(row.definition_of_done),
     status: row.status as Task["status"],
     priority: row.priority as Task["priority"],
+    type: (row.type as Task["type"]) ?? "FEATURE",
     assigneeId: (row.assignee_id as string | null) ?? null,
     creatorId: String(row.creator_id),
     parentId: (row.parent_id as string | null) ?? null,

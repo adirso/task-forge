@@ -42,21 +42,21 @@ await db.transaction(async () => {
   await insertPhase.run(phases.next, ids.project, 3, "Improve collaboration, notifications, and planning workflows.", 0, now, now);
 
   const insertTask = await db.prepare(`INSERT OR IGNORE INTO tasks
-    (id, project_id, number, title, description, definition_of_done, status, priority, assignee_id, creator_id,
+    (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id,
       parent_id, branch, due_date, estimate_points, position, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
   const tasks = [
-    ["00000001-0000-4000-8000-000000000001", 1, "Design authentication flow", "Define sign-in and API-token behavior for people and agents.", "JWT sessions expire; agent tokens can be revoked; API returns consistent 401 responses.", "DONE", "HIGH", ids.maya, ids.admin, null, "feature/auth-flow", null, 5, 0],
-    ["00000002-0000-4000-8000-000000000002", 2, "Create project dashboard", "Build the primary workspace and navigation shell.", "Board and list views are responsive and share the same task data.", "IN_PROGRESS", "HIGH", ids.admin, ids.admin, null, "feature/project-dashboard", null, 8, 0],
-    ["00000003-0000-4000-8000-000000000003", 3, "Add task filters", "Filter by assignee, priority, and free-text search.", "Filters can be combined and cleared without reloading.", "TODO", "MEDIUM", ids.agent, ids.admin, "00000002-0000-4000-8000-000000000002", "feature/task-filters", null, 3, 0],
-    ["00000004-0000-4000-8000-000000000004", 4, "Document agent API", "Provide examples for authentication and task lifecycle operations.", "README includes copy-paste curl examples and token safety guidance.", "IN_REVIEW", "MEDIUM", ids.agent, ids.maya, null, "docs/agent-api", null, 3, 0],
-    ["00000005-0000-4000-8000-000000000005", 5, "Plan notification rules", "Decide which task events should notify project members.", "Event matrix covers assignment, mentions, due dates, and status changes.", "BACKLOG", "LOW", null, ids.admin, null, null, null, 2, 0],
-    ["00000006-0000-4000-8000-000000000006", 6, "Database migration strategy", "Add a safe path for future schema migrations.", "Migrations are ordered, transactional, and documented.", "TODO", "URGENT", ids.admin, ids.admin, null, "chore/migrations", null, 5, 1],
-    ["00000007-0000-4000-8000-000000000007", 7, "Polish empty states", "Make first-run and filtered-empty screens useful.", "Each empty state offers a clear next action.", "BACKLOG", "LOW", ids.maya, ids.admin, null, null, null, 2, 1],
-    ["00000008-0000-4000-8000-000000000008", 8, "API error envelope", "Normalize validation and authorization error responses.", "All client errors use a stable JSON shape.", "DONE", "MEDIUM", ids.agent, ids.admin, null, "fix/error-envelope", null, 3, 1],
-    ["00000009-0000-4000-8000-000000000009", 9, "Responsive list layout", "Keep the task table readable on laptop and tablet widths.", "Primary columns remain visible and overflow is accessible.", "IN_PROGRESS", "MEDIUM", ids.maya, ids.admin, "00000002-0000-4000-8000-000000000002", "feature/responsive-list", null, 5, 1],
-    ["00000010-0000-4000-8000-000000000010", 10, "Add API health check", "Expose service health for local orchestration.", "GET /health returns HTTP 200 and a stable payload.", "DONE", "LOW", ids.agent, ids.admin, null, null, null, 1, 2],
+    ["00000001-0000-4000-8000-000000000001", 1, "Design authentication flow", "Define sign-in and API-token behavior for people and agents.", "JWT sessions expire; agent tokens can be revoked; API returns consistent 401 responses.", "DONE", "HIGH", "SECURITY", ids.maya, ids.admin, null, "feature/auth-flow", null, 5, 0],
+    ["00000002-0000-4000-8000-000000000002", 2, "Create project dashboard", "Build the primary workspace and navigation shell.", "Board and list views are responsive and share the same task data.", "IN_PROGRESS", "HIGH", "FEATURE", ids.admin, ids.admin, null, "feature/project-dashboard", null, 8, 0],
+    ["00000003-0000-4000-8000-000000000003", 3, "Add task filters", "Filter by assignee, priority, and free-text search.", "Filters can be combined and cleared without reloading.", "TODO", "MEDIUM", "FEATURE", ids.agent, ids.admin, "00000002-0000-4000-8000-000000000002", "feature/task-filters", null, 3, 0],
+    ["00000004-0000-4000-8000-000000000004", 4, "Document agent API", "Provide examples for authentication and task lifecycle operations.", "README includes copy-paste curl examples and token safety guidance.", "IN_REVIEW", "MEDIUM", "DOCS", ids.agent, ids.maya, null, "docs/agent-api", null, 3, 0],
+    ["00000005-0000-4000-8000-000000000005", 5, "Plan notification rules", "Decide which task events should notify project members.", "Event matrix covers assignment, mentions, due dates, and status changes.", "BACKLOG", "LOW", "FEATURE", null, ids.admin, null, null, null, 2, 0],
+    ["00000006-0000-4000-8000-000000000006", 6, "Database migration strategy", "Add a safe path for future schema migrations.", "Migrations are ordered, transactional, and documented.", "TODO", "URGENT", "INFRA", ids.admin, ids.admin, null, "chore/migrations", null, 5, 1],
+    ["00000007-0000-4000-8000-000000000007", 7, "Polish empty states", "Make first-run and filtered-empty screens useful.", "Each empty state offers a clear next action.", "BACKLOG", "LOW", "CHORE", ids.maya, ids.admin, null, null, null, 2, 1],
+    ["00000008-0000-4000-8000-000000000008", 8, "API error envelope", "Normalize validation and authorization error responses.", "All client errors use a stable JSON shape.", "DONE", "MEDIUM", "BUG", ids.agent, ids.admin, null, "fix/error-envelope", null, 3, 1],
+    ["00000009-0000-4000-8000-000000000009", 9, "Responsive list layout", "Keep the task table readable on laptop and tablet widths.", "Primary columns remain visible and overflow is accessible.", "IN_PROGRESS", "MEDIUM", "UPDATE", ids.maya, ids.admin, "00000002-0000-4000-8000-000000000002", "feature/responsive-list", null, 5, 1],
+    ["00000010-0000-4000-8000-000000000010", 10, "Add API health check", "Expose service health for local orchestration.", "GET /health returns HTTP 200 and a stable payload.", "DONE", "LOW", "INFRA", ids.agent, ids.admin, null, null, null, 1, 2],
   ] as const;
 
   for (const task of tasks) {
