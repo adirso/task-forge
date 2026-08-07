@@ -20,6 +20,8 @@ export interface ProjectEntity {
   ownerId: string;
   createdAt: string;
   updatedAt: string;
+  members?: Array<UserEntity & { projectRole: "OWNER" | "MEMBER" }>;
+  taskCount?: number;
 }
 
 export interface PhaseEntity {
@@ -30,6 +32,7 @@ export interface PhaseEntity {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  taskCount?: number;
 }
 
 export interface TaskEntity {
