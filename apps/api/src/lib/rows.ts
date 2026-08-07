@@ -23,6 +23,7 @@ export function toProject(row: Row): Project {
     description: String(row.description),
     repoUrl: (row.repo_url as string | null) ?? null,
     color: String(row.color),
+    sortOrder: Number(row.sort_order ?? 0),
     ownerId: String(row.owner_id),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),

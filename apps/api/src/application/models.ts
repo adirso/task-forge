@@ -21,6 +21,7 @@ export interface ProjectEntity {
   description: string;
   repoUrl: string | null;
   color: string;
+  sortOrder: number;
   ownerId: string;
   createdAt: string;
   updatedAt: string;

@@ -99,6 +99,18 @@ test("duplicate project keys return a conflict instead of an internal error", as
   assert.equal(duplicate.json().error, "Project key API is already in use");
 });
 
+test("project ordering persists and new projects prepend", async () => {
+  const second = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "ORD", name: "Ordered project", description: "", color: "#123456" } });
+  assert.equal(second.statusCode, 201);
+  const secondId = second.json().project.id as string;
+  const reorder = await app.inject({ method: "PATCH", url: "/api/projects/order", headers: { authorization: `Bearer ${jwtToken}` }, payload: { projectIds: [secondId, projectId] } });
+  assert.equal(reorder.statusCode, 204, reorder.body);
+  const newest = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "NEW", name: "Newest project", description: "", color: "#654321" } });
+  assert.equal(newest.statusCode, 201);
+  const listed = await app.inject({ method: "GET", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.deepEqual(listed.json().projects.slice(0, 3).map((project: { id: string }) => project.id), [newest.json().project.id, secondId, projectId]);
+});
+
 test("task lifecycle supports assignment and status changes", async () => {
   const addMember = await app.inject({
     method: "POST", url: `/api/projects/${projectId}/members`, headers: { authorization: `Bearer ${jwtToken}` },
