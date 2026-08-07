@@ -16,6 +16,7 @@ import { searchRoutes } from "./routes/search.js";
 import { contextRoutes } from "./routes/context.js";
 import { phaseRoutes } from "./routes/phases.js";
 import { attachmentRoutes } from "./routes/attachments.js";
+import { automationRoutes } from "./routes/automations.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: !process.env.TEST });
@@ -39,6 +40,7 @@ export async function buildApp() {
   await app.register(contextRoutes, { prefix: "/api/context" });
   await app.register(phaseRoutes, { prefix: "/api" });
   await app.register(attachmentRoutes, { prefix: "/api" });
+  await app.register(automationRoutes, { prefix: "/api" });
 
   app.setErrorHandler((error, _request, reply) => {
     const applicationStatuses = { UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, VALIDATION: 400, INTERNAL: 500 } as const;

@@ -1,4 +1,4 @@
-import type { ApiTokenMetadata, Attachment, AuthResponse, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
+import type { ApiTokenMetadata, Attachment, AuthResponse, Automation, AutomationCreate, AutomationUpdate, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
@@ -42,6 +42,10 @@ export const api = {
   addProjectMember: (projectId: string, userId: string) => request<void>(`/projects/${projectId}/members`, { method: "POST", body: { userId, role: "MEMBER" } }),
   removeProjectMember: (projectId: string, userId: string) => request<void>(`/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
   phases: (projectId: string) => request<{ phases: Phase[] }>(`/projects/${projectId}/phases`),
+  automations: (projectId: string) => request<{ automations: Automation[] }>(`/projects/${projectId}/automations`),
+  createAutomation: (projectId: string, input: AutomationCreate) => request<{ automation: Automation }>(`/projects/${projectId}/automations`, { method: "POST", body: input }),
+  updateAutomation: (id: string, input: AutomationUpdate) => request<{ automation: Automation }>(`/automations/${id}`, { method: "PATCH", body: input }),
+  deleteAutomation: (id: string) => request<void>(`/automations/${id}`, { method: "DELETE" }),
   createPhase: (projectId: string, input: { number: number; goal: string; isActive: boolean }) => request<{ phase: Phase }>(`/projects/${projectId}/phases`, { method: "POST", body: input }),
   updatePhase: (id: string, input: Partial<{ number: number; goal: string; isActive: boolean }>) => request<{ phase: Phase }>(`/phases/${id}`, { method: "PATCH", body: input }),
   deletePhase: (id: string) => request<void>(`/phases/${id}`, { method: "DELETE" }),
