@@ -8,6 +8,7 @@ export interface UserRepository {
   saveProfile(id: string, input: { name: string; email: string }): Promise<UserEntity>;
   createAgent(input: { id: string; name: string; email: string; createdAt: string }): Promise<UserEntity>;
   deleteAgent(id: string): Promise<void>;
+  hasAgentHistory(id: string): Promise<boolean>;
 }
 
 export interface ProjectRepository {
@@ -30,6 +31,7 @@ export interface PhaseRepository {
   list(projectId: string): Promise<PhaseEntity[]>;
   findById(id: string): Promise<PhaseEntity | null>;
   findActive(projectId: string): Promise<PhaseEntity | null>;
+  deactivateOthers(projectId: string, phaseId?: string): Promise<void>;
   create(input: PhaseEntity): Promise<PhaseEntity>;
   update(id: string, input: Partial<Pick<PhaseEntity, "number" | "goal" | "isActive">>): Promise<PhaseEntity>;
   delete(id: string): Promise<void>;
@@ -39,6 +41,7 @@ export interface TaskRepository {
   findById(id: string): Promise<TaskEntity | null>;
   listByProject(projectId: string, filters?: TaskFilters): Promise<TaskEntity[]>;
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
+  unassignForProjectMember(projectId: string, userId: string): Promise<void>;
   create(input: TaskEntity): Promise<TaskEntity>;
   update(id: string, input: Partial<TaskEntity>): Promise<TaskEntity>;
   delete(id: string): Promise<void>;
@@ -69,6 +72,8 @@ export interface NotificationRepository {
 export interface ApiTokenRepository {
   create(input: { id: string; userId: string; name: string; prefix: string; hash: string; expiresAt: string | null; createdAt: string }): Promise<void>;
   listForUser(userId: string): Promise<ApiTokenEntity[]>;
+  findById(id: string): Promise<(ApiTokenEntity & { userId: string }) | null>;
+  findById(id: string): Promise<(ApiTokenEntity & { userId: string }) | null>;
   revoke(id: string): Promise<void>;
 }
 

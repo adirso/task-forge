@@ -8,8 +8,11 @@ export type ApplicationErrorCode =
 
 /** Stable errors for use cases. HTTP adapters can map these to status codes. */
 export class ApplicationError extends Error {
+  readonly issues?: readonly unknown[];
+  readonly statusCode: number;
   constructor(public readonly code: ApplicationErrorCode, message: string, options?: { cause?: unknown }) {
     super(message, options);
+    this.statusCode = { UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, VALIDATION: 400, INTERNAL: 500 }[code];
     this.name = "ApplicationError";
   }
 }
