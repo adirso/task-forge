@@ -46,7 +46,7 @@ export async function buildApp() {
     const applicationStatuses = { UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, VALIDATION: 400, INTERNAL: 500 } as const;
     if (error instanceof ApplicationError || (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" && error.code in applicationStatuses)) {
       const code = (error as { code: keyof typeof applicationStatuses }).code;
-      const message = error instanceof Error ? error.message : "Request failed";
+      const message = typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "Request failed";
       const issues = error instanceof ApplicationError ? error.issues : undefined;
       return reply.code(applicationStatuses[code]).send({ error: message, ...(issues ? { issues } : {}) });
     }
