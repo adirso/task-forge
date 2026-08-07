@@ -5,9 +5,10 @@ import type { ProjectContext, RequestContext } from "./context.js";
 import type { TaskDependencyEntity, TaskEntity, TaskUpdateEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
 import type { TaskCreateInput, TaskFilters, TaskService, TaskUpdateInput } from "./services.js";
+import { AutomationEngine } from "./automation-service.js";
 
 export class TaskApplicationService implements TaskService {
-  constructor(private readonly unitOfWork: UnitOfWork, private readonly now: () => string = () => new Date().toISOString(), private readonly newId: () => string = randomUUID) {}
+  constructor(private readonly unitOfWork: UnitOfWork, private readonly now: () => string = () => new Date().toISOString(), private readonly newId: () => string = randomUUID, private readonly automationEngine = new AutomationEngine()) {}
 
   async list(context: ProjectContext, filters?: TaskFilters) { return this.unitOfWork.run(async (repositories) => { await this.assertProjectAccess(repositories, context); const tasks = await repositories.tasks.listByProject(context.projectId, filters); return Promise.all(tasks.map((task) => this.hydrate(repositories, task))); }); }
 
@@ -27,7 +28,8 @@ export class TaskApplicationService implements TaskService {
       await this.replaceMetadata(repositories, task, normalized.tags, normalized.dependencyIds, now);
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.created", metadata: { title: task.title } });
       if (task.assigneeId && task.assigneeId !== context.actor.userId) await this.notify(repositories, task.assigneeId, task, context, "TASK_ASSIGNED", "Task assigned to you");
-      return this.hydrate(repositories, task);
+      const automated = await this.automationEngine.apply(repositories, context, null, task, "TASK_CREATED");
+      return this.hydrate(repositories, automated);
     });
   }
 
@@ -44,7 +46,8 @@ export class TaskApplicationService implements TaskService {
       await repositories.activity.record({ projectId: existing.projectId, taskId, actorId: context.actor.userId, action: "task.updated", metadata: input });
       if (input.assigneeId && input.assigneeId !== existing.assigneeId && input.assigneeId !== context.actor.userId) await this.notify(repositories, input.assigneeId, { ...existing, ...task, title: input.title ?? existing.title }, context, "TASK_ASSIGNED", "Task assigned to you");
       if (input.status === "IN_REVIEW" && existing.status !== "IN_REVIEW" && existing.creatorId !== context.actor.userId) await this.notify(repositories, existing.creatorId, { ...existing, ...task, title: input.title ?? existing.title }, context, "REVIEW_REQUESTED", "Review requested");
-      return this.hydrate(repositories, { ...task, updatedAt: now });
+      const automated = await this.automationEngine.apply(repositories, context, existing, { ...task, updatedAt: now }, "TASK_UPDATED");
+      return this.hydrate(repositories, automated);
     });
   }
 

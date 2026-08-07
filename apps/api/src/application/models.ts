@@ -10,6 +10,10 @@ export interface UserEntity {
   createdAt: string;
 }
 
+export interface AutomationConditionEntity { field: "status" | "priority" | "assigneeId" | "pullRequestState" | "phaseId" | "branch" | "estimatePoints"; operator: "equals" | "not_equals" | "changed_to" | "is_empty" | "is_not_empty"; value: string | null; }
+export interface AutomationActionEntity { field: AutomationConditionEntity["field"]; valueType: "static" | "actor" | "user" | "service" | "null"; value: string | null; }
+export interface AutomationEntity { id: string; projectId: string; name: string; enabled: boolean; trigger: "TASK_CREATED" | "TASK_UPDATED"; actorType: "ANY" | "USER" | "SERVICE"; actorId: string | null; service: string | null; conditions: AutomationConditionEntity[]; actions: AutomationActionEntity[]; createdAt: string; updatedAt: string; }
+
 export interface ProjectEntity {
   id: string;
   key: string;
