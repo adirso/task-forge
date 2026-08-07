@@ -1,40 +1,13 @@
 import type { FastifyInstance } from "fastify";
-import type { TaskSearchResult } from "@taskforge/contracts";
 import { db } from "../db/database.js";
-import { toTask } from "../lib/rows.js";
+import { createUnitOfWork } from "../infrastructure/database.js";
+import { SearchApplicationService } from "../application/cross-cutting-services.js";
 
 type SearchQuery = { q?: string };
+const service = new SearchApplicationService(createUnitOfWork(db));
+const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name } });
 
 export async function searchRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
-
-  app.get<{ Querystring: SearchQuery }>("/", { schema: { tags: ["Search"], summary: "Search accessible tasks across projects" } }, async (request) => {
-    const query = request.query.q?.trim();
-    if (!query) return { results: [] };
-    const pattern = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
-    const like = (column: string) => `${column} LIKE ?${db.dialect === "sqlite" ? " ESCAPE '\\'" : ""}`;
-    const taskKey = db.dialect === "mysql" ? "CONCAT(p.`key`, '-', t.number)" : "(p.`key` || '-' || t.number)";
-    const rows = await db.prepare(`
-      SELECT t.*, u.name AS assignee_name, u.email AS assignee_email,
-        u.kind AS assignee_kind, u.role AS assignee_role,
-        u.avatar_url AS assignee_avatar_url, u.created_at AS assignee_created_at,
-        p.name AS project_name, p.\`key\` AS project_key, p.color AS project_color
-      FROM tasks t
-      JOIN projects p ON p.id = t.project_id
-      LEFT JOIN users u ON u.id = t.assignee_id
-      WHERE (? = 'ADMIN' OR EXISTS (
-        SELECT 1 FROM project_members pm WHERE pm.project_id = t.project_id AND pm.user_id = ?
-      )) AND (${like("t.title")} OR ${like("t.description")}
-        OR ${like("t.definition_of_done")} OR ${like(taskKey)})
-      ORDER BY CASE WHEN ${like("t.title")} THEN 0 ELSE 1 END, t.updated_at DESC
-      LIMIT 40
-    `).all(request.authUser.role, request.authUser.id, pattern, pattern, pattern, pattern, pattern) as Record<string, unknown>[];
-    const results: TaskSearchResult[] = await Promise.all(rows.map(async (row) => ({
-      ...await toTask(row),
-      projectName: String(row.project_name),
-      projectKey: String(row.project_key),
-      projectColor: String(row.project_color),
-    })));
-    return { results };
-  });
+  app.get<{ Querystring: SearchQuery }>("/", { schema: { tags: ["Search"], summary: "Search accessible tasks across projects" } }, async (request) => ({ results: request.query.q?.trim() ? await service.search(context(request), request.query.q.trim()) : [] }));
 }
