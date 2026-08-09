@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { taskCreateSchema, taskStatusSchema, taskTagNameSchema, taskTypeSchema, taskUpdateCreateSchema, taskUpdateSchema } from "@taskforge/contracts";
+import { taskCreateSchema, taskDependencyUpdateSchema, taskStatusSchema, taskTagNameSchema, taskTypeSchema, taskUpdateCreateSchema, taskUpdateSchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { TaskApplicationService } from "../application/task-service.js";
@@ -23,6 +23,7 @@ export async function taskRoutes(app: FastifyInstance) {
   app.post<{ Params: ProjectParams }>("/projects/:projectId/tasks", { schema: { tags: ["Tasks"], summary: "Create a task" } }, async (request, reply) => { const parsed = taskCreateSchema.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ error: "Validation failed", issues: parsed.error.issues }); return reply.code(201).send({ task: taskResponse(await service.create(projectContext(request, request.params.projectId), parsed.data)) }); });
   app.get<{ Params: TaskParams }>("/tasks/:id", { schema: { tags: ["Tasks"], summary: "Get a task" } }, async (request) => ({ task: taskResponse(await service.get(context(request), request.params.id)) }));
   app.patch<{ Params: TaskParams }>("/tasks/:id", { schema: { tags: ["Tasks"], summary: "Update a task" } }, async (request, reply) => { const parsed = taskUpdateSchema.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ error: "Validation failed", issues: parsed.error.issues }); return { task: taskResponse(await service.update(context(request), request.params.id, parsed.data)) }; });
+  app.post<{ Params: TaskParams }>("/tasks/:id/dependencies", { schema: { tags: ["Tasks"], summary: "Replace a task's dependencies" } }, async (request, reply) => { const parsed = taskDependencyUpdateSchema.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ error: "Validation failed", issues: parsed.error.issues }); return { task: taskResponse(await service.update(context(request), request.params.id, parsed.data)) }; });
   app.delete<{ Params: TaskParams }>("/tasks/:id", { schema: { tags: ["Tasks"], summary: "Delete a task and its subtasks" } }, async (request, reply) => { await service.delete(context(request), request.params.id); return reply.code(204).send(); });
   app.get<{ Params: ProjectParams }>("/projects/:projectId/tags", { schema: { tags: ["Tasks"], summary: "List reusable project tags" } }, async (request) => ({ tags: await service.listTags(projectContext(request, request.params.projectId)) }));
   app.get<{ Params: TaskParams }>("/tasks/:id/updates", { schema: { tags: ["Task updates"], summary: "List notes and updates on a task" } }, async (request) => ({ updates: await service.listUpdates(context(request), request.params.id) }));
