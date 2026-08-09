@@ -1,166 +1,255 @@
-# Agent API guide
+# TaskForge Agent API
 
-Agents use revocable bearer tokens. The token is shown once when issued, stored only as a SHA-256 hash, and can be revoked without changing the agent identity or other credentials.
+This guide documents the current HTTP API for people and software agents. The examples assume the API is running at `http://127.0.0.1:4000`.
 
-The examples assume the API runs at `http://127.0.0.1:4000`.
+All protected endpoints require:
 
-## Resolve a link shared by a person
-
-TaskForge URLs carry readable context, for example:
-
-```text
-http://127.0.0.1:5173/?project=TF&task=TF-4
+```http
+Authorization: Bearer <JWT-or-agent-token>
 ```
 
-An agent can pass the same query parameters to the API instead of resolving internal UUIDs itself:
+Agent tokens are opaque, revocable bearer credentials. They are shown only once when issued. Never commit a token or place it in task text.
 
-```bash
-curl -sS "$TASKFORGE_URL/api/context?project=TF&task=TF-4" \
-  -H "Authorization: Bearer $TASKFORGE_TOKEN"
-```
+## Authentication and project access
 
-The response contains the project and complete task, including assignment, definition of done, branch, and pull-request metadata. `project` accepts a project key or UUID; `task` accepts a readable task key or UUID.
-
-## 1. Create an agent and issue a token
-
-An administrator first signs in as a human:
+Humans sign in to receive a short-lived JWT:
 
 ```bash
 JWT=$(curl -sS http://127.0.0.1:4000/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"demo@taskforge.local","password":"demo1234"}' \
-  | jq -r .token)
+  -d '{"email":"demo@taskforge.local","password":"demo1234"}' | jq -r .token)
 ```
 
-Create a stable identity for the automation:
+Administrators create an agent identity and issue its token:
 
 ```bash
 AGENT_ID=$(curl -sS http://127.0.0.1:4000/api/users/agents \
-  -H "Authorization: Bearer $JWT" \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Repository Builder","email":"builder@example.local"}' \
-  | jq -r .user.id)
-```
+  -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -d '{"name":"Repository Builder","email":"builder@example.local"}' | jq -r .user.id)
 
-Issue a token. `expiresInDays` may be `null` for a non-expiring credential, although rotation with an expiration is recommended.
-
-```bash
 AGENT_TOKEN=$(curl -sS "http://127.0.0.1:4000/api/users/$AGENT_ID/tokens" \
-  -H "Authorization: Bearer $JWT" \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Local Codex token","expiresInDays":90}' \
-  | jq -r .token)
+  -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -d '{"name":"Local Codex token","expiresInDays":90}' | jq -r .token)
 ```
 
-Store `AGENT_TOKEN` in a secret manager or environment variable. It cannot be retrieved again.
-
-## 2. Add the agent to a project
-
-Get a project ID and add the identity as a member:
+Add the agent to every project it should access:
 
 ```bash
 PROJECT_ID=$(curl -sS http://127.0.0.1:4000/api/projects \
   -H "Authorization: Bearer $JWT" | jq -r '.projects[0].id')
 
 curl -sS -X POST "http://127.0.0.1:4000/api/projects/$PROJECT_ID/members" \
-  -H "Authorization: Bearer $JWT" \
-  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d "{\"userId\":\"$AGENT_ID\",\"role\":\"MEMBER\"}"
 ```
 
-Project membership is the authorization boundary. A non-admin identity cannot list or mutate projects it has not joined.
+Membership is the authorization boundary. Administrators can access all projects; other users and agents must be members. A project owner or administrator manages membership, phases, and automations.
 
-## 3. Read and update tasks
+## Shareable project/task context
 
-List accessible projects and tasks:
+People can share readable URLs such as:
+
+```text
+http://127.0.0.1:5173/?project=TAS&task=TAS-4
+```
+
+Agents can resolve the same context without knowing internal UUIDs:
 
 ```bash
-curl -sS http://127.0.0.1:4000/api/projects \
-  -H "Authorization: Bearer $AGENT_TOKEN"
-
-curl -sS "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks?status=TODO" \
+curl -sS "http://127.0.0.1:4000/api/context?project=TAS&task=TAS-4" \
   -H "Authorization: Bearer $AGENT_TOKEN"
 ```
 
-Read the project's phases to identify the active planning window:
+`project` accepts a project key or UUID. `task` accepts a readable key such as `TAS-4` or a task UUID. The response includes the project and the complete task, including tags, dependencies, attachments, assignment, branch, and pull-request metadata.
 
-```bash
-curl -sS "http://127.0.0.1:4000/api/projects/$PROJECT_ID/phases" \
-  -H "Authorization: Bearer $AGENT_TOKEN"
+## Projects
+
+```http
+GET    /api/projects
+POST   /api/projects
+GET    /api/projects/:id
+PATCH  /api/projects/:id
+DELETE /api/projects/:id
+PATCH  /api/projects/order
 ```
 
-The task list also supports `assigneeId`, `priority`, `type`, `phaseId`, `minPoints`, `maxPoints`, and `q` query parameters. New tasks default to the project's active phase when `phaseId` is omitted.
-
-Create a task:
+Create a project with `key`, `name`, `description`, optional `repoUrl`, and `color`:
 
 ```bash
-curl -sS "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks" \
-  -H "Authorization: Bearer $AGENT_TOKEN" \
-  -H 'Content-Type: application/json' \
+curl -sS -X POST http://127.0.0.1:4000/api/projects \
+  -H "Authorization: Bearer $AGENT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"key":"WEB","name":"Website","description":"Public site","repoUrl":"https://github.com/acme/site","color":"#6554C0"}'
+```
+
+Project keys are case-insensitive and unique. A duplicate returns `409` with a message such as `Project key WEB is already in use`. Updateable fields are `name`, `description`, `repoUrl` (or `null` to remove it), and `color`; the key cannot be changed.
+
+The project list is ordered by persisted sidebar order. New projects are inserted first. To persist a drag-and-drop order, send every accessible project ID exactly once:
+
+```bash
+curl -sS -X PATCH http://127.0.0.1:4000/api/projects/order \
+  -H "Authorization: Bearer $AGENT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"projectIds":["newest-project-uuid","older-project-uuid"]}'
+```
+
+Project membership:
+
+```http
+POST   /api/projects/:id/members        {"userId":"...","role":"MEMBER"}
+DELETE /api/projects/:id/members/:userId
+```
+
+## Tasks
+
+```http
+GET    /api/projects/:projectId/tasks
+POST   /api/projects/:projectId/tasks
+GET    /api/tasks/:id
+PATCH  /api/tasks/:id
+DELETE /api/tasks/:id
+```
+
+Task creation and update fields include:
+
+| Field | Values/notes |
+| --- | --- |
+| `title` | Required string |
+| `description`, `definitionOfDone` | Optional text |
+| `status` | `BACKLOG`, `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE` |
+| `priority` | `LOW`, `MEDIUM`, `HIGH`, `URGENT` |
+| `type` | `FEATURE`, `BUG`, `INFRA`, `UPDATE`, `SECURITY`, `DOCS`, `CHORE` |
+| `assigneeId` | Project-member UUID or `null` |
+| `parentId` | Same-project task UUID; cycles are rejected |
+| `branch` | Nullable branch string |
+| `dueDate` | Nullable ISO date |
+| `estimatePoints` | Nullable integer from 0 to 100 |
+| `phaseId` | Same-project phase UUID; omitted creation defaults to the active phase |
+| `pullRequestUrl`, `pullRequestTitle` | Nullable PR metadata |
+| `pullRequestState` | `DRAFT`, `OPEN`, `MERGED`, `CLOSED` |
+| `tags` | Array of reusable tag names |
+| `dependencyIds` | Same-project task UUIDs; self/cyclic dependencies are rejected |
+
+Example:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks" \
+  -H "Authorization: Bearer $AGENT_TOKEN" -H 'Content-Type: application/json' \
   -d '{
     "title":"Add retry logic",
-    "description":"Retry transient upstream failures with bounded backoff.",
-    "definitionOfDone":"Integration tests cover 429 and 503 responses.",
+    "description":"Retry transient upstream failures.",
+    "definitionOfDone":"Tests cover 429 and 503 responses.",
     "status":"IN_PROGRESS",
     "priority":"HIGH",
     "type":"INFRA",
     "branch":"agent/retry-logic",
-    "pullRequestUrl":"https://github.com/example/repo/pull/17",
-    "pullRequestTitle":"Add bounded retry logic",
     "pullRequestState":"OPEN",
-    "estimatePoints":3
+    "estimatePoints":3,
+    "tags":["backend","reliability"],
+    "dependencyIds":["dependency-task-uuid"]
   }'
 ```
 
-Update only the fields that changed:
+List filters are query parameters: `status`, `assigneeId`, `priority`, `type`, `phaseId`, `tag`, `minPoints`, `maxPoints`, and `q` (searches title/description). Task responses include `tags`, `dependencies` (with `isBlocking`), `attachments`, and the hydrated `assignee`.
 
-```bash
-curl -sS -X PATCH "http://127.0.0.1:4000/api/tasks/$TASK_ID" \
-  -H "Authorization: Bearer $AGENT_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"status":"IN_REVIEW"}'
+## Notes, dependencies, tags, and attachments
+
+Task notes/updates:
+
+```http
+GET  /api/tasks/:id/updates
+POST /api/tasks/:id/updates   {"body":"Implementation is ready for review."}
 ```
 
-Statuses are `BACKLOG`, `TODO`, `IN_PROGRESS`, `IN_REVIEW`, and `DONE`. Priorities are `LOW`, `MEDIUM`, `HIGH`, and `URGENT`. Types are `FEATURE`, `BUG`, `INFRA`, `UPDATE`, `SECURITY`, `DOCS`, and `CHORE`; a task without an explicit `type` is created as `FEATURE`. Classify the work you create or pick up so boards stay readable — report a defect as `BUG`, deployment and tooling work as `INFRA`, and a documentation-only change as `DOCS`.
+Reusable project tags:
 
-To create a subtask, pass the parent task's UUID as `parentId`. The API rejects cross-project parents and cycles.
-
-Post a progress update that will appear in the task timeline:
-
-```bash
-curl -sS "http://127.0.0.1:4000/api/tasks/$TASK_ID/updates" \
-  -H "Authorization: Bearer $AGENT_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"body":"Implementation is complete and PR #17 is ready for review."}'
+```http
+GET /api/projects/:projectId/tags
 ```
 
-Read the timeline with `GET /api/tasks/:id/updates`. Pull request states are `DRAFT`, `OPEN`, `MERGED`, and `CLOSED`.
+Attachments use base64 payloads and support PDFs, documents, images, and other validated MIME types:
 
-## 4. Revoke a token
-
-List token metadata (never the secret itself), then revoke by token ID:
-
-```bash
-curl -sS "http://127.0.0.1:4000/api/users/$AGENT_ID/tokens" \
-  -H "Authorization: Bearer $JWT"
-
-curl -sS -X DELETE "http://127.0.0.1:4000/api/users/tokens/$TOKEN_ID" \
-  -H "Authorization: Bearer $JWT"
+```http
+GET    /api/tasks/:id/attachments
+POST   /api/tasks/:id/attachments
+GET    /api/attachments/:id/download
+DELETE /api/attachments/:id
 ```
 
-The next request made with the revoked token receives HTTP `401`.
+Upload body:
 
-## Error contract
+```json
+{"fileName":"design.pdf","mimeType":"application/pdf","data":"<base64>"}
+```
 
-Errors always include an `error` string. Validation failures also contain structured Zod `issues`:
+Dependencies are managed through the task `dependencyIds` array on create/update. The API rejects cross-project, self, and cyclic relationships. Dependency responses include the dependency task key/number, title, status, and whether it is blocking.
+
+## Phases
+
+```http
+GET    /api/projects/:projectId/phases
+POST   /api/projects/:projectId/phases
+PATCH  /api/phases/:id
+DELETE /api/phases/:id
+```
+
+Phase creation accepts `{ "number": 2, "goal": "Ship the API", "isActive": true }`. Only one phase per project is active. The board defaults to the active phase; a selected phase can be shared through the web URL's `phase` query parameter.
+
+## Automations
+
+Project owners/admins manage generic task rules:
+
+```http
+GET    /api/projects/:projectId/automations
+POST   /api/projects/:projectId/automations
+PATCH  /api/automations/:id
+DELETE /api/automations/:id
+```
+
+An automation has a `name`, `enabled` flag, `trigger` (`TASK_CREATED` or `TASK_UPDATED`), optional actor filter (`ANY`, `USER`, or `SERVICE`), `conditions`, and `actions`.
+
+Supported condition/action fields are `status`, `priority`, `type`, `assigneeId`, `pullRequestState`, `phaseId`, `branch`, and `estimatePoints`. Condition operators are `equals`, `not_equals`, `changed_to`, `is_empty`, and `is_not_empty`. Action value types are `static`, `actor` (the user who triggered the task change), `user`, `service`, and `null`.
+
+Example: assign a task to the changer when it enters progress and has no assignee:
 
 ```json
 {
-  "error": "Validation failed",
-  "issues": [
-    { "path": ["title"], "message": "String must contain at least 1 character(s)" }
-  ]
+  "name":"Assign task to changer",
+  "trigger":"TASK_UPDATED",
+  "conditions":[
+    {"field":"status","operator":"changed_to","value":"IN_PROGRESS"},
+    {"field":"assigneeId","operator":"is_empty","value":null}
+  ],
+  "actions":[{"field":"assigneeId","valueType":"actor","value":null}]
 }
 ```
 
-Use `401` to refresh or replace credentials, `403` for missing project membership, `404` for absent resources, `409` for unique-key conflicts, and `400` for invalid input or relationships.
+Rules execute as part of task create/update and can update any supported task field.
+
+## Users, agents, tokens, notifications, and search
+
+```http
+GET    /api/users
+PATCH  /api/users/me
+POST   /api/users/:id/avatar       {"mimeType":"image/png","data":"<base64>"}
+DELETE /api/users/:id/avatar
+POST   /api/users/agents           (administrator)
+DELETE /api/users/:id              (administrator)
+POST   /api/users/:id/tokens       (administrator or token owner)
+GET    /api/users/:id/tokens
+DELETE /api/users/tokens/:id
+GET    /api/notifications
+PATCH  /api/notifications/:id/read
+POST   /api/notifications/read-all
+GET    /api/search?q=retry
+```
+
+Agent token metadata can be listed, but the secret itself is never returned after issuance. Profile pictures accept PNG, JPEG, GIF, or WebP data URLs and are visible on assignees and task updates.
+
+## Errors
+
+Errors include an `error` string. Validation errors additionally include structured `issues`:
+
+```json
+{"error":"Validation failed","issues":[{"path":["title"],"message":"String must contain at least 1 character(s)"}]}
+```
+
+Use `401` for missing/expired credentials, `403` for project authorization failures, `404` for missing resources, `409` for conflicts such as duplicate project keys, and `400` for invalid input or task relationships.
