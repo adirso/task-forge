@@ -64,6 +64,7 @@ export interface TaskEntity {
   createdAt: string;
   updatedAt: string;
   assignee?: UserEntity | null;
+  phase?: PhaseEntity | null;
   tags?: TaskTagEntity[];
   dependencies?: TaskDependencyEntity[];
   attachments?: AttachmentEntity[];

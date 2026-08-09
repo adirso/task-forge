@@ -149,7 +149,7 @@ curl -sS -X POST "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks" \
   }'
 ```
 
-List filters are query parameters: `status`, `assigneeId`, `priority`, `type`, `phaseId`, `tag`, `minPoints`, `maxPoints`, and `q` (searches title/description). Task responses include `tags`, `dependencies` (with `isBlocking`), `attachments`, and the hydrated `assignee`.
+List filters are query parameters: `status`, `assigneeId`, `priority`, `type`, `phaseId`, `tag`, `minPoints`, `maxPoints`, and `q` (searches title/description). Task responses include `phaseId` plus a `phase` object (`id`, `number`, `goal`, and `isActive`), as well as `tags`, `dependencies` (with `isBlocking`), `attachments`, and the hydrated `assignee`.
 
 To replace dependencies without changing any other task fields, use the dedicated endpoint. The request replaces the full set atomically at the application level; send an empty array to remove all dependencies:
 
@@ -202,7 +202,7 @@ PATCH  /api/phases/:id
 DELETE /api/phases/:id
 ```
 
-Phase creation accepts `{ "number": 2, "goal": "Ship the API", "isActive": true }`. Only one phase per project is active. The board defaults to the active phase; a selected phase can be shared through the web URL's `phase` query parameter.
+Phase creation accepts `{ "number": 2, "goal": "Ship the API", "isActive": true }`. Phase numbers are unique within a project and only one phase can be active. New tasks without an explicit `phaseId` are assigned to the active phase. Deleting an active phase promotes the highest-numbered remaining phase; deleting the final phase leaves tasks unassigned. The board defaults to the active phase; a selected phase can be shared through the web URL's `phase` query parameter.
 
 ## Automations
 

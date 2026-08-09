@@ -60,6 +60,8 @@ await db.transaction(async () => {
   ] as const;
 
   for (const task of tasks) {
+    const existingTask = await db.prepare("SELECT id FROM tasks WHERE project_id = ? AND title = ?").get(ids.project, task[2]);
+    if (existingTask) continue;
     await insertTask.run(task[0], ids.project, ...task.slice(1), now, now);
   }
   await db.prepare(`UPDATE tasks SET phase_id = CASE

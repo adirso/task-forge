@@ -203,6 +203,7 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   assignee?: User | null;
+  phase?: Phase | null;
   creator?: User;
   subtasks?: Task[];
   tags: Tag[];

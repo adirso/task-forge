@@ -81,6 +81,18 @@ test("human can log in and create a project", async () => {
   assert.equal(nextPhase.statusCode, 201);
   assert.equal(nextPhase.json().phase.isActive, true);
   phaseId = nextPhase.json().phase.id;
+  const duplicatePhase = await app.inject({ method: "POST", url: `/api/projects/${projectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { number: 2, goal: "Duplicate", isActive: false } });
+  assert.equal(duplicatePhase.statusCode, 409);
+  const emptyPhase = await app.inject({ method: "POST", url: `/api/projects/${projectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { number: 3, goal: "A future empty phase", isActive: false } });
+  assert.equal(emptyPhase.statusCode, 201);
+  const emptyPhaseId = emptyPhase.json().phase.id as string;
+  const listedWithEmpty = await app.inject({ method: "GET", url: `/api/projects/${projectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(listedWithEmpty.json().phases.find((phase: { id: string }) => phase.id === emptyPhaseId).taskCount, 0);
+  const updatedEmpty = await app.inject({ method: "PATCH", url: `/api/phases/${emptyPhaseId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { goal: "Updated future phase" } });
+  assert.equal(updatedEmpty.statusCode, 200);
+  assert.equal(updatedEmpty.json().phase.goal, "Updated future phase");
+  const deletedEmpty = await app.inject({ method: "DELETE", url: `/api/phases/${emptyPhaseId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deletedEmpty.statusCode, 204);
 });
 
 test("project owners can update project details", async () => {
@@ -125,6 +137,7 @@ test("task lifecycle supports assignment and status changes", async () => {
   assert.equal(created.statusCode, 201);
   assert.equal(created.json().task.number, 1);
   assert.equal(created.json().task.phaseId, phaseId);
+  assert.deepEqual(created.json().task.phase, { id: phaseId, projectId, number: 2, goal: "Deliver the integration", isActive: true, createdAt: created.json().task.phase.createdAt, updatedAt: created.json().task.phase.updatedAt });
   assert.deepEqual(created.json().task.tags.map((tag: { name: string }) => tag.name), ["backend", "frontend"]);
   taskId = created.json().task.id;
 
@@ -299,6 +312,9 @@ test("an issued agent token authenticates and is scoped by membership", async ()
   assert.equal(context.statusCode, 200);
   assert.equal(context.json().project.id, projectId);
   assert.equal(context.json().task.id, taskId);
+  assert.equal(context.json().task.phase.id, phaseId);
+  assert.equal(context.json().task.phase.number, 2);
+  assert.equal(context.json().task.phase.goal, "Deliver the integration");
 });
 
 test("only owners and administrators can manage project membership", async () => {
