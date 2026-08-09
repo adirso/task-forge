@@ -105,6 +105,7 @@ GET    /api/projects/:projectId/tasks
 POST   /api/projects/:projectId/tasks
 GET    /api/tasks/:id
 PATCH  /api/tasks/:id
+POST   /api/tasks/:id/dependencies
 DELETE /api/tasks/:id
 ```
 
@@ -149,6 +150,16 @@ curl -sS -X POST "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks" \
 ```
 
 List filters are query parameters: `status`, `assigneeId`, `priority`, `type`, `phaseId`, `tag`, `minPoints`, `maxPoints`, and `q` (searches title/description). Task responses include `tags`, `dependencies` (with `isBlocking`), `attachments`, and the hydrated `assignee`.
+
+To replace dependencies without changing any other task fields, use the dedicated endpoint. The request replaces the full set atomically at the application level; send an empty array to remove all dependencies:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:4000/api/tasks/$TASK_ID/dependencies" \
+  -H "Authorization: Bearer $AGENT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"dependencyIds":["dependency-task-uuid"]}'
+```
+
+Each returned dependency includes its task key (`projectKey` plus `number`), title, current status, and `isBlocking` (`false` once the dependency reaches `DONE`). Self-dependencies, cross-project dependencies, and cycles return validation errors.
 
 ## Notes, dependencies, tags, and attachments
 

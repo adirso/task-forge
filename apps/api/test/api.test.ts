@@ -157,7 +157,21 @@ test("task lifecycle supports assignment and status changes", async () => {
   assert.equal(updated.json().task.pullRequestState, "OPEN");
   assert.deepEqual(updated.json().task.tags.map((tag: { name: string }) => tag.name), ["api", "backend"]);
   assert.deepEqual(updated.json().task.dependencies.map((dependency: { dependsOnTaskId: string }) => dependency.dependsOnTaskId), [blockerId]);
+  assert.equal(updated.json().task.dependencies[0].projectKey, "API");
   assert.equal(updated.json().task.dependencies[0].isBlocking, true);
+
+  const postedDependencies = await app.inject({
+    method: "POST", url: `/api/tasks/${taskId}/dependencies`, headers: { authorization: `Bearer ${jwtToken}` },
+    payload: { dependencyIds: [blockerId] },
+  });
+  assert.equal(postedDependencies.statusCode, 200, postedDependencies.body);
+  assert.deepEqual(postedDependencies.json().task.dependencies.map((dependency: { dependsOnTaskId: string }) => dependency.dependsOnTaskId), [blockerId]);
+
+  const invalidDependencyPayload = await app.inject({
+    method: "POST", url: `/api/tasks/${taskId}/dependencies`, headers: { authorization: `Bearer ${jwtToken}` },
+    payload: { dependencyIds: ["not-a-uuid"] },
+  });
+  assert.equal(invalidDependencyPayload.statusCode, 400);
 
   const persisted = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(persisted.statusCode, 200);
