@@ -14,6 +14,7 @@ export const taskTagsSchema = z.array(taskTagNameSchema).max(20)
   .transform((values) => [...new Set(values)]);
 export const taskDependencyIdsSchema = z.array(z.string().uuid()).max(50)
   .transform((values) => [...new Set(values)]);
+export const taskDependencyUpdateSchema = z.object({ dependencyIds: taskDependencyIdsSchema });
 
 export const loginSchema = z.object({
   email: z.string().email(),
