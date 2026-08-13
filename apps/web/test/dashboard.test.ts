@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findNextSlot, normalizeLayout } from "../src/lib/dashboard.js";
+import { defaultLayout, findNextSlot, normalizeLayout } from "../src/lib/dashboard.js";
 
 test("finds the first empty slot on an empty canvas", () => {
   assert.deepEqual(findNextSlot([], 6, 4), { x: 0, y: 0 });
@@ -41,9 +41,7 @@ test("migrates old pixel layouts to the default grid layout", () => {
     ],
   });
   assert.equal(layout.version, 2);
-  assert.equal(layout.widgets[0]?.type, "project_status");
-  assert.equal(layout.widgets[0]?.w, 6);
-  assert.equal(layout.widgets[1]?.type, "my_tasks");
+  assert.deepEqual(layout.widgets.map((widget) => widget.type), ["project_status", "my_tasks", "stuck_tasks", "activity"]);
   assert.ok((layout.widgets[0]?.x ?? 99) < 12);
 });
 
@@ -53,4 +51,23 @@ test("keeps a valid grid layout", () => {
     widgets: [{ id: "w1", type: "activity", x: 0, y: 2, w: 4, h: 5 }],
   });
   assert.deepEqual(layout.widgets, [{ id: "w1", type: "activity", x: 0, y: 2, w: 4, h: 5 }]);
+});
+
+test("default layout includes stuck tasks and activity for everyone", () => {
+  const types = defaultLayout(false).widgets.map((widget) => widget.type);
+  assert.deepEqual(types, ["project_status", "my_tasks", "stuck_tasks", "activity"]);
+  assert.equal(types.includes("agent_ops"), false);
+});
+
+test("default layout adds agent ops for admins", () => {
+  const types = defaultLayout(true).widgets.map((widget) => widget.type);
+  assert.deepEqual(types, ["project_status", "my_tasks", "stuck_tasks", "activity", "agent_ops"]);
+});
+
+test("does not overwrite a saved custom layout", () => {
+  const saved = {
+    version: 2 as const,
+    widgets: [{ id: "only_mine", type: "my_tasks" as const, x: 0, y: 0, w: 6, h: 5 }],
+  };
+  assert.deepEqual(normalizeLayout(saved, true), saved);
 });
