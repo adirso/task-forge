@@ -1,21 +1,34 @@
 import { randomUUID } from "node:crypto";
 import type { TaskStatus } from "@taskforge/contracts";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
-import type { ProjectContext, RequestContext } from "./context.js";
+import type { ProjectContext, RequestContext, TokenScope } from "./context.js";
 import type { TaskDependencyEntity, TaskEntity, TaskUpdateEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
 import type { TaskCreateInput, TaskFilters, TaskService, TaskUpdateInput } from "./services.js";
 import { AutomationEngine } from "./automation-service.js";
+import { dispatchWebhook } from "../lib/webhook.js";
 
 export class TaskApplicationService implements TaskService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now: () => string = () => new Date().toISOString(), private readonly newId: () => string = randomUUID, private readonly automationEngine = new AutomationEngine()) {}
 
   async list(context: ProjectContext, filters?: TaskFilters) { return this.unitOfWork.run(async (repositories) => { await this.assertProjectAccess(repositories, context); const tasks = await repositories.tasks.listByProject(context.projectId, filters); return Promise.all(tasks.map((task) => this.hydrate(repositories, task))); }); }
 
+  private assertScope(context: RequestContext, scope: TokenScope) {
+    const { tokenScopes } = context.actor;
+    if (tokenScopes !== null && tokenScopes !== undefined && !tokenScopes.includes(scope)) {
+      throw new ForbiddenError(`This token does not have the '${scope}' permission. Required to perform this action.`);
+    }
+  }
+
+  private BRANCH_FIELDS = new Set(["branch", "pullRequestUrl", "pullRequestTitle", "pullRequestState"] as const);
+  private META_FIELDS = new Set(["title", "description", "definitionOfDone", "priority", "type", "assigneeId", "parentId", "dueDate", "estimatePoints", "phaseId", "tags", "dependencyIds"] as const);
+
+
   async get(context: RequestContext, taskId: string) { return this.unitOfWork.run(async (repositories) => { const task = await this.requireTask(repositories, taskId); await this.assertProjectAccess(repositories, context, task.projectId); return this.hydrate(repositories, task); }); }
 
   async create(context: ProjectContext, input: TaskCreateInput) {
     return this.unitOfWork.run(async (repositories) => {
+      this.assertScope(context, "task:create");
       await this.assertProjectAccess(repositories, context);
       const phaseId = input.phaseId === undefined ? (await repositories.phases.findActive(context.projectId))?.id ?? null : input.phaseId;
       const normalized = { ...input, description: input.description ?? "", definitionOfDone: input.definitionOfDone ?? "", status: input.status ?? "TODO", priority: input.priority ?? "MEDIUM", type: input.type ?? "FEATURE", assigneeId: input.assigneeId ?? null, parentId: input.parentId ?? null, branch: input.branch ?? null, dueDate: input.dueDate ?? null, estimatePoints: input.estimatePoints ?? null, phaseId, pullRequestUrl: input.pullRequestUrl ?? null, pullRequestTitle: input.pullRequestTitle ?? null, pullRequestState: input.pullRequestState ?? null };
@@ -37,6 +50,11 @@ export class TaskApplicationService implements TaskService {
     return this.unitOfWork.run(async (repositories) => {
       const existing = await this.requireTask(repositories, taskId);
       await this.assertProjectAccess(repositories, context, existing.projectId);
+      // Check field-level scopes when token has an explicit scope list
+      const hasField = (keys: ReadonlySet<string>) => Object.keys(input).some((k) => keys.has(k));
+      if ("status" in input) this.assertScope(context, "task:update:status");
+      if (hasField(this.BRANCH_FIELDS)) this.assertScope(context, "task:update:branch");
+      if (hasField(this.META_FIELDS)) this.assertScope(context, "task:update:meta");
       await this.validateRelations(repositories, existing.projectId, taskId, input);
       const { tags, dependencyIds, ...fields } = input;
       const now = this.now();
@@ -44,19 +62,38 @@ export class TaskApplicationService implements TaskService {
       if (!Object.keys(fields).length) await repositories.tasks.update(taskId, { updatedAt: now });
       await this.replaceMetadata(repositories, { ...task, updatedAt: now }, tags, dependencyIds, now);
       await repositories.activity.record({ projectId: existing.projectId, taskId, actorId: context.actor.userId, action: "task.updated", metadata: input });
-      if (input.assigneeId && input.assigneeId !== existing.assigneeId && input.assigneeId !== context.actor.userId) await this.notify(repositories, input.assigneeId, { ...existing, ...task, title: input.title ?? existing.title }, context, "TASK_ASSIGNED", "Task assigned to you");
+      const assigneeChanged = input.assigneeId !== undefined && input.assigneeId !== existing.assigneeId;
+      if (assigneeChanged && input.assigneeId && input.assigneeId !== context.actor.userId) await this.notify(repositories, input.assigneeId, { ...existing, ...task, title: input.title ?? existing.title }, context, "TASK_ASSIGNED", "Task assigned to you");
       if (input.status === "IN_REVIEW" && existing.status !== "IN_REVIEW" && existing.creatorId !== context.actor.userId) await this.notify(repositories, existing.creatorId, { ...existing, ...task, title: input.title ?? existing.title }, context, "REVIEW_REQUESTED", "Review requested");
       const automated = await this.automationEngine.apply(repositories, context, existing, { ...task, updatedAt: now }, "TASK_UPDATED");
+      if (assigneeChanged && input.assigneeId) await this.dispatchWebhookIfNeeded(repositories, { ...task, assigneeId: input.assigneeId }, context);
       return this.hydrate(repositories, automated);
     });
   }
 
+  async claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string }) {
+    return this.unitOfWork.run(async (repositories) => {
+      this.assertScope(context, "task:claim");
+      await this.assertProjectAccess(repositories, context);
+      const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, options);
+      if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
+      await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
+      return this.hydrate(repositories, task);
+    });
+  }
+
   async delete(context: RequestContext, taskId: string) {
-    return this.unitOfWork.run(async (repositories) => { const task = await this.requireTask(repositories, taskId); await this.assertProjectAccess(repositories, context, task.projectId); await repositories.tasks.delete(taskId); });
+    return this.unitOfWork.run(async (repositories) => {
+      this.assertScope(context, "task:delete");
+      const task = await this.requireTask(repositories, taskId);
+      await this.assertProjectAccess(repositories, context, task.projectId);
+      await repositories.tasks.delete(taskId);
+    });
   }
 
   async addUpdate(context: RequestContext, taskId: string, body: string): Promise<TaskUpdateEntity> {
     return this.unitOfWork.run(async (repositories) => {
+      this.assertScope(context, "task:update:notes");
       const task = await this.requireTask(repositories, taskId);
       await this.assertProjectAccess(repositories, context, task.projectId);
       const now = this.now();
@@ -105,4 +142,24 @@ export class TaskApplicationService implements TaskService {
   private async replaceMetadata(repositories: RepositorySet, task: TaskEntity, tags: string[] | undefined, dependencyIds: string[] | undefined, now: string) { if (tags !== undefined) await repositories.tags.replaceForTask(task.id, task.projectId, tags, now); if (dependencyIds !== undefined) await repositories.dependencies.replaceForTask(task.id, dependencyIds, now); }
 
   private async notify(repositories: RepositorySet, userId: string, task: TaskEntity, context: RequestContext, type: string, title: string) { await repositories.notifications.notify({ userId, projectId: task.projectId, taskId: task.id, type, title, message: `${context.actor.name ?? "A teammate"} updated “${task.title}”.` }); }
+
+  private async dispatchWebhookIfNeeded(repositories: RepositorySet, task: TaskEntity, context: RequestContext) {
+    if (!task.assigneeId) return;
+    const assignee = await repositories.users.findById(task.assigneeId);
+    if (!assignee || assignee.kind !== "AGENT" || !assignee.webhookUrl) return;
+    const project = await repositories.projects.findById(task.projectId);
+    dispatchWebhook(assignee.webhookUrl, {
+      event: "task.assigned",
+      task: {
+        id: task.id, number: task.number, title: task.title,
+        description: task.description, definitionOfDone: task.definitionOfDone,
+        status: task.status, priority: task.priority, type: task.type,
+        branch: task.branch, projectId: task.projectId,
+        projectKey: project?.key, projectName: project?.name,
+        assigneeId: task.assigneeId,
+      },
+      assignedBy: { id: context.actor.userId, name: context.actor.name },
+      timestamp: new Date().toISOString(),
+    });
+  }
 }

@@ -74,14 +74,36 @@ export const agentCreateSchema = z.object({
   email: z.string().email().optional(),
 });
 
+export const agentWebhookSchema = z.object({
+  webhookUrl: z.string().url().nullable(),
+});
+
+export const taskClaimSchema = z.object({
+  phaseId: z.string().uuid().nullable().optional(),
+  priority: taskPrioritySchema.optional(),
+});
+
 export const profileUpdateSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().email(),
 });
 
+export const TOKEN_SCOPES = [
+  "task:read",
+  "task:create",
+  "task:delete",
+  "task:claim",
+  "task:update:status",
+  "task:update:notes",
+  "task:update:branch",
+  "task:update:meta",
+] as const;
+export type TokenScope = typeof TOKEN_SCOPES[number];
+
 export const tokenCreateSchema = z.object({
   name: z.string().trim().min(2).max(120),
   expiresInDays: z.number().int().min(1).max(3650).nullable().default(null),
+  permissions: z.array(z.enum(TOKEN_SCOPES)).nullable().optional(),
 });
 
 export const taskUpdateCreateSchema = z.object({
@@ -127,6 +149,7 @@ export interface User {
   kind: UserKind;
   role: UserRole;
   avatarUrl: string | null;
+  webhookUrl?: string | null;
   createdAt: string;
 }
 
@@ -262,6 +285,45 @@ export interface TaskSearchResult extends Task {
   projectColor: string;
 }
 
+export interface ActivityEvent {
+  id: string;
+  projectId: string;
+  taskId: string | null;
+  actorId: string;
+  actorName: string;
+  actorKind: UserKind;
+  actorAvatarUrl: string | null;
+  action: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AgentOpsTask {
+  id: string;
+  title: string;
+  number: number;
+  projectId: string;
+  projectName: string;
+  projectKey: string;
+  updatedAt: string;
+  isStuck: boolean;
+}
+
+export interface AgentOpsEntry {
+  id: string;
+  name: string;
+  email: string | null;
+  kind: UserKind;
+  role: UserRole;
+  avatarUrl: string | null;
+  webhookUrl: string | null;
+  createdAt: string;
+  lastActiveAt: string | null;
+  openTaskCount: number;
+  stuckTaskCount: number;
+  inProgressTasks: AgentOpsTask[];
+}
+
 export interface ApiTokenMetadata {
   id: string;
   name: string;
@@ -271,4 +333,5 @@ export interface ApiTokenMetadata {
   revokedAt: string | null;
   createdAt: string;
   revealable: boolean;
+  permissions: TokenScope[] | null;
 }

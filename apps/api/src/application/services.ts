@@ -53,6 +53,7 @@ export interface TaskService {
   addUpdate(context: RequestContext, taskId: string, body: string): Promise<TaskUpdateEntity>;
   listUpdates(context: RequestContext, taskId: string): Promise<TaskUpdateEntity[]>;
   listTags(context: ProjectContext): Promise<Array<{ id: string; projectId: string; name: string; createdAt: string; taskCount: number }>>;
+  claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string }): Promise<TaskEntity>;
 }
 
 export interface AttachmentService {
@@ -66,10 +67,11 @@ export interface UserService {
   list(context: RequestContext): Promise<UserEntity[]>;
   updateProfile(context: RequestContext, input: { name: string; email: string }): Promise<UserEntity>;
   updateAvatar(context: RequestContext, userId: string, avatarUrl: string | null): Promise<UserEntity>;
+  updateAgentWebhook(context: RequestContext, agentId: string, webhookUrl: string | null): Promise<UserEntity>;
   createAgent(context: RequestContext, input: { name: string; email?: string }): Promise<UserEntity>;
   deleteAgent(context: RequestContext, agentId: string): Promise<void>;
   listTokens(context: RequestContext, userId: string): Promise<ApiTokenEntity[]>;
-  issueToken(context: RequestContext, userId: string, input: { name: string; expiresInDays: number | null }): Promise<{ token: string; prefix: string; expiresAt: string | null }>;
+  issueToken(context: RequestContext, userId: string, input: { name: string; expiresInDays: number | null; permissions?: string[] | null }): Promise<{ token: string; prefix: string; expiresAt: string | null }>;
   revealToken(context: RequestContext, userId: string, tokenId: string): Promise<{ token: string }>;
   revokeToken(context: RequestContext, tokenId: string): Promise<void>;
 }

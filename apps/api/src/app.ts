@@ -17,6 +17,7 @@ import { contextRoutes } from "./routes/context.js";
 import { phaseRoutes } from "./routes/phases.js";
 import { attachmentRoutes } from "./routes/attachments.js";
 import { automationRoutes } from "./routes/automations.js";
+import { activityRoutes } from "./routes/activity.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: !process.env.TEST });
@@ -60,6 +61,7 @@ export async function buildApp() {
   await app.register(phaseRoutes, { prefix: "/api" });
   await app.register(attachmentRoutes, { prefix: "/api" });
   await app.register(automationRoutes, { prefix: "/api" });
+  await app.register(activityRoutes, { prefix: "/api/activity" });
 
   return app;
 }

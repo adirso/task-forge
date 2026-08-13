@@ -154,8 +154,8 @@ async function runStatements(executor: Executor, statements: string[]) {
 }
 
 const sqliteSchema = [
-  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT NOT NULL, password_hash TEXT, kind TEXT NOT NULL CHECK (kind IN ('HUMAN', 'AGENT')), role TEXT NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('ADMIN', 'MEMBER')), avatar_url TEXT, created_at TEXT NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS api_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, token_prefix TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_ciphertext TEXT, expires_at TEXT, last_used_at TEXT, revoked_at TEXT, created_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT NOT NULL, password_hash TEXT, kind TEXT NOT NULL CHECK (kind IN ('HUMAN', 'AGENT')), role TEXT NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('ADMIN', 'MEMBER')), avatar_url TEXT, webhook_url TEXT, created_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS api_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, token_prefix TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_ciphertext TEXT, permissions TEXT, expires_at TEXT, last_used_at TEXT, revoked_at TEXT, created_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash)`,
   `CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', repo_url TEXT, color TEXT NOT NULL DEFAULT '#6554C0', sort_order INTEGER NOT NULL DEFAULT 0, owner_id TEXT NOT NULL REFERENCES users(id), next_task_number INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS project_members (project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, role TEXT NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('OWNER', 'MEMBER')), created_at TEXT NOT NULL, PRIMARY KEY (project_id, user_id))`,
@@ -181,8 +181,8 @@ const sqliteSchema = [
 ];
 
 const mysqlSchema = [
-  `CREATE TABLE IF NOT EXISTS users (id CHAR(36) PRIMARY KEY, email VARCHAR(320) UNIQUE, name VARCHAR(120) NOT NULL, password_hash VARCHAR(255), kind VARCHAR(16) NOT NULL CHECK (kind IN ('HUMAN', 'AGENT')), role VARCHAR(16) NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('ADMIN', 'MEMBER')), avatar_url TEXT, created_at VARCHAR(30) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-  `CREATE TABLE IF NOT EXISTS api_tokens (id CHAR(36) PRIMARY KEY, user_id CHAR(36) NOT NULL, name VARCHAR(120) NOT NULL, token_prefix VARCHAR(32) NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, token_ciphertext TEXT, expires_at VARCHAR(30), last_used_at VARCHAR(30), revoked_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, INDEX idx_api_tokens_hash (token_hash), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS users (id CHAR(36) PRIMARY KEY, email VARCHAR(320) UNIQUE, name VARCHAR(120) NOT NULL, password_hash VARCHAR(255), kind VARCHAR(16) NOT NULL CHECK (kind IN ('HUMAN', 'AGENT')), role VARCHAR(16) NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('ADMIN', 'MEMBER')), avatar_url TEXT, webhook_url TEXT, created_at VARCHAR(30) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS api_tokens (id CHAR(36) PRIMARY KEY, user_id CHAR(36) NOT NULL, name VARCHAR(120) NOT NULL, token_prefix VARCHAR(32) NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, token_ciphertext TEXT, permissions TEXT, expires_at VARCHAR(30), last_used_at VARCHAR(30), revoked_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, INDEX idx_api_tokens_hash (token_hash), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS projects (id CHAR(36) PRIMARY KEY, \`key\` VARCHAR(8) NOT NULL UNIQUE, name VARCHAR(120) NOT NULL, description TEXT NOT NULL, repo_url TEXT, color CHAR(7) NOT NULL DEFAULT '#6554C0', sort_order INT NOT NULL DEFAULT 0, owner_id CHAR(36) NOT NULL, next_task_number INT NOT NULL DEFAULT 1, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_projects_sort_order (sort_order), FOREIGN KEY (owner_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS project_members (project_id CHAR(36) NOT NULL, user_id CHAR(36) NOT NULL, role VARCHAR(16) NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('OWNER', 'MEMBER')), created_at VARCHAR(30) NOT NULL, PRIMARY KEY (project_id, user_id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS phases (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, number INT NOT NULL, goal TEXT NOT NULL, is_active TINYINT(1) NOT NULL DEFAULT 0, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_phase_number (project_id, number), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -204,6 +204,8 @@ async function migrate(adapter: Adapter, dialect: DatabaseDriver) {
     if (!(await hasColumn("projects", "sort_order"))) await adapter.run("ALTER TABLE projects ADD COLUMN sort_order INT NOT NULL DEFAULT 0, ADD INDEX idx_projects_sort_order (sort_order)", []);
     if (!(await hasColumn("tasks", "type"))) await adapter.run("ALTER TABLE tasks ADD COLUMN type VARCHAR(16) NOT NULL DEFAULT 'FEATURE'", []);
     if (!(await hasColumn("api_tokens", "token_ciphertext"))) await adapter.run("ALTER TABLE api_tokens ADD COLUMN token_ciphertext TEXT", []);
+    if (!(await hasColumn("users", "webhook_url"))) await adapter.run("ALTER TABLE users ADD COLUMN webhook_url TEXT", []);
+    if (!(await hasColumn("api_tokens", "permissions"))) await adapter.run("ALTER TABLE api_tokens ADD COLUMN permissions TEXT", []);
   }
   if (dialect === "sqlite") {
     const projectColumns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(projects)", [])).map((column) => column.name));
@@ -216,6 +218,9 @@ async function migrate(adapter: Adapter, dialect: DatabaseDriver) {
     if (!columns.has("type")) await adapter.run("ALTER TABLE tasks ADD COLUMN type TEXT NOT NULL DEFAULT 'FEATURE'", []);
     const tokenColumns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(api_tokens)", [])).map((column) => column.name));
     if (!tokenColumns.has("token_ciphertext")) await adapter.run("ALTER TABLE api_tokens ADD COLUMN token_ciphertext TEXT", []);
+    const userColumns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(users)", [])).map((column) => column.name));
+    if (!userColumns.has("webhook_url")) await adapter.run("ALTER TABLE users ADD COLUMN webhook_url TEXT", []);
+    if (!tokenColumns.has("permissions")) await adapter.run("ALTER TABLE api_tokens ADD COLUMN permissions TEXT", []);
   }
 }
 

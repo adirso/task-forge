@@ -7,6 +7,20 @@ export interface UserEntity {
   kind: UserKind;
   role: UserRole;
   avatarUrl: string | null;
+  webhookUrl?: string | null;
+  createdAt: string;
+}
+
+export interface ActivityEntity {
+  id: string;
+  projectId: string;
+  taskId: string | null;
+  actorId: string;
+  actorName: string;
+  actorKind: UserKind;
+  actorAvatarUrl: string | null;
+  action: string;
+  metadata: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -124,6 +138,7 @@ export interface ApiTokenEntity {
   createdAt: string;
   revealable: boolean;
   ciphertext?: string | null;
+  permissions: string[] | null;
 }
 
 export interface NotificationEntity {

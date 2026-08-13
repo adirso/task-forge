@@ -7,7 +7,7 @@ import { PhaseApplicationService } from "../application/resource-services.js";
 type ProjectParams = { projectId: string };
 type PhaseParams = { id: string };
 const service = new PhaseApplicationService(createUnitOfWork(db));
-const requestContext = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name } });
+const requestContext = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: (request.authUser.tokenScopes ?? null) as import("../application/context.js").TokenScope[] | null } });
 const projectContext = (request: Parameters<typeof requestContext>[0], projectId: string) => ({ ...requestContext(request), projectId });
 
 export async function phaseRoutes(app: FastifyInstance) {

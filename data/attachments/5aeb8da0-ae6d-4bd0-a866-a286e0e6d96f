@@ -1,0 +1,317 @@
+# ExSuperior Mobile Application — Technical Design
+
+Status: Proposed  
+Target platforms: iOS and Android  
+Product language/direction: Hebrew, right-to-left  
+Web application source: `/Users/adirsolomon/Development/PHP/exsuperior`
+
+## 1. Purpose
+
+Build a production-grade mobile application that provides feature parity with the existing non-dashboard ExSuperior experience on iPhone and Android. The existing Laravel application remains the system of record. A new versioned JSON API exposes the same domain behavior to a native cross-platform client.
+
+This design is based on the current routes, controllers, requests, policies, models, React pages, and feature tests in the repository. The README's statement that the product uses static demo content is outdated and is not used as the scope definition.
+
+## 2. Goals
+
+- Deliver one shared TypeScript codebase producing native iOS and Android binaries.
+- Preserve the current Hebrew RTL experience, permissions, privacy modes, moderation rules, and authorization policies.
+- Cover all user-facing capabilities outside `/dashboard`.
+- Keep the web and mobile clients behaviorally consistent through shared Laravel domain services and API Resources.
+- Support secure device authentication, media capture/upload, push notifications, universal/app links, resilient reads, local drafts, accessibility, observability, and store delivery.
+- Add contract, backend, application, and end-to-end tests so parity is measurable.
+
+## 3. Non-goals
+
+- Rebuilding the administrator dashboard in the mobile application.
+- Replacing the existing Laravel/Inertia web application.
+- Sharing web React UI components with React Native. Domain terminology and contracts are shared; UI implementations are native.
+- Reproducing web-only SEO, sitemap, robots, service-worker installation, or browser cookie-banner behavior.
+- Making server-authoritative writes fully offline. The app may preserve a draft and retry explicitly, but it must not silently replay non-idempotent social actions.
+
+## 4. Existing product inventory
+
+### Public and guest experiences
+
+- Home/discovery stream, hero slides, announcements, trending content, and community highlights.
+- Feed list/detail, authenticated media delivery, privacy-aware posts, comments, and likes.
+- Questions list/detail, categories, filters, create/edit, comments, comment votes, and polls.
+- Confessions list/detail, categories, create, comments, likes, hot scoring, and anonymous behavior.
+- Blog list/detail, categories, tags, paragraph media, related posts, and authenticated comments.
+- Games hub, would-you-rather, this-or-that, trivia, personality quiz, fortune teller, Sudoku, and multiplayer XO.
+- Horoscope.
+- Public profiles and follow state.
+- Advertising information and inquiry submission.
+- Regulations, cookie policy, and accessibility statement.
+- Invitation acceptance and guest email confirmation.
+- Wedding home, forum, listings, and recommendations on the configured wedding domain.
+
+### Authenticated experiences
+
+- Email/password login, email OTP login, registration, invite-only registration behavior, email verification, password reset, and two-factor challenge.
+- Profile overview and profile editing.
+- Birthday/gender fields and identity verification video capture/upload/status.
+- Security settings: password, two-factor authentication/recovery codes, active sessions, and session revocation.
+- Invitations and reward/referral state.
+- Bookmarks and following.
+- Content creation, deletion where currently supported, anonymous/privacy controls, reactions, comments, reports, and polls.
+- Notifications, unread state, and notification targets.
+- Contact/support conversations and close action.
+- Current-regulations acceptance gate.
+- “Miss” AI chat threads/messages/polling/feedback for users who satisfy the existing administrator entitlement. This is not an admin-dashboard screen, so the mobile API preserves the entitlement rather than exposing it to all users.
+
+### Explicitly excluded administrator surface
+
+Everything below `/dashboard`, including user/group management, moderation queues, content management, analytics, audit logs, site settings, mail, security administration, verification approval, wedding moderation, AI content generation, and chat administration.
+
+## 5. Architecture decision
+
+### Mobile client
+
+Use React Native with Expo and TypeScript in a new `mobile/` workspace inside the repository. Use Expo Router for file-based navigation and automatic deep-link routing, development builds for native integration testing, and EAS Build/Submit for signed iOS and Android delivery.
+
+Reasons:
+
+- The product team already works in React and TypeScript.
+- One implementation can ship native Android and iOS applications.
+- Expo provides maintained modules for secure storage, notifications, camera/media, linking, application metadata, and update delivery.
+- Development builds retain access to custom native modules if the managed SDK is insufficient.
+
+The exact Expo SDK and library versions must be selected from the current stable release when implementation begins and committed through the lockfile. SDK upgrades are deliberate work, not floating dependencies.
+
+### Backend
+
+Add a versioned API under `/api/mobile/v1`. Mobile endpoints return JSON only and never expose Inertia responses, redirects, flash messages, or HTML validation behavior.
+
+Controllers remain thin. Existing policies, request rules, models, notification services, classifiers, media storage, and domain behavior should be reused or extracted into application services when web controllers currently contain the business logic. The web application and API must not implement competing rules.
+
+Use Laravel API Resources for stable response shapes. Publish an OpenAPI document and generate the mobile TypeScript transport types/client from it. Backward-incompatible response changes require a new API version; additive fields remain compatible.
+
+### High-level flow
+
+```text
+Expo mobile app
+  -> HTTPS /api/mobile/v1
+  -> authentication + rate limits + regulation/access gates
+  -> API controllers
+  -> shared application/domain services + policies
+  -> Eloquent/MySQL + queues + media storage
+
+Laravel domain events / UserNotificationService
+  -> persisted in-app notification
+  -> queued push notification outbox
+  -> Expo/APNs/FCM delivery
+  -> universal/app link
+  -> Expo Router screen
+```
+
+## 6. Mobile application structure
+
+```text
+mobile/
+  app/                    Expo Router route tree
+    (public)/
+    (auth)/
+    (tabs)/
+    content/
+    games/
+    wedding/
+    settings/
+  src/
+    api/                  generated client, transport, errors, pagination
+    auth/                 session bootstrap and secure token lifecycle
+    components/           reusable native UI primitives
+    design-system/        colors, typography, spacing, icons, motion
+    features/             domain-oriented screens, hooks, models
+    notifications/        device registration and notification routing
+    storage/              cache, drafts, migrations
+    telemetry/            privacy-aware crash and performance reporting
+    testing/              fixtures and test helpers
+  app.config.ts
+  eas.json
+```
+
+Recommended navigation:
+
+- Bottom tabs: Home, Community, Create, Games, Profile.
+- Community contains Feed, Questions, and Confessions.
+- Wedding is a dedicated nested experience reachable from Home/navigation and deep links.
+- Blog, Horoscope, Bookmarks, Notifications, Contact, Invitations, and Settings are stacks/sheets reached from the relevant tab or account menu.
+- Authentication and mandatory-regulation acceptance are route guards, not duplicated checks in each screen.
+- Miss appears only when the bootstrap/capabilities response grants access.
+
+## 7. API conventions
+
+### Envelope and errors
+
+- Single resource: `{ "data": { ... }, "meta": { ... } }`.
+- Collection: `{ "data": [ ... ], "links": { ... }, "meta": { ... } }`.
+- Validation error: stable machine code plus field-keyed messages.
+- Authorization, authentication, conflict, throttle, maintenance, and regulation-required errors use distinct machine-readable codes.
+- Every response includes a request/correlation ID.
+- Dates are ISO 8601 UTC; presentation strings such as Hebrew relative time are generated by the client.
+- Resource identifiers are opaque. The client never infers authorization from IDs or URLs.
+
+### Pagination and freshness
+
+- Use cursor pagination for growing social streams and chat messages.
+- Use page/limit pagination for bounded/searchable collections where stable page navigation matters.
+- Return `updated_at` and cache validators for read-heavy resources.
+- Support an idempotency key on content creation, contact messages, verification submissions, and game/session creation.
+
+### Bootstrap and capabilities
+
+`GET /api/mobile/v1/bootstrap` returns:
+
+- current user or guest state;
+- site access/maintenance state;
+- registration mode and invitation requirements;
+- current regulations version and acceptance requirement;
+- active announcement and remote feature flags;
+- capability/permission list, including Miss entitlement;
+- unread notification count;
+- public asset/media base information;
+- minimum supported app version and recommended upgrade state.
+
+The application renders features from server capabilities rather than hardcoding administrator/group assumptions.
+
+## 8. Authentication and device security
+
+- Use Laravel Sanctum device-scoped bearer tokens as the base mobile authentication mechanism.
+- Exchange password or verified email OTP plus a human-readable device name for a token.
+- Store the token only in the platform keychain/keystore through Expo SecureStore; never in AsyncStorage, logs, analytics, crash breadcrumbs, URLs, or task text.
+- Make token expiration configurable. Support safe rotation and revoke the current token on logout.
+- Represent mobile device sessions alongside browser sessions in Security settings and allow remote revocation.
+- Preserve email verification, registration-mode/invite gates, regulations acceptance, two-factor challenges, password reset, and failed-login throttling.
+- On `401`, clear the local session and route to login without losing a locally saved draft.
+- Redact credentials, OTPs, recovery codes, private media URLs, and personal fields from logs.
+- Optional biometric app unlock protects the locally stored session but does not replace server authentication.
+- Add an authenticated account-deletion flow before store release because the app supports account creation. The server owns confirmation, retention/anonymization, and cascading behavior.
+
+## 9. Data and offline behavior
+
+- The server remains authoritative.
+- Persist a bounded read cache and user drafts locally using a migration-aware native database/storage layer.
+- Cache home, feed, questions, confessions, blog, games configuration, horoscope, wedding lists, profiles, and bookmarks with per-feature freshness rules.
+- Show cached data with a clear stale/offline state and refresh when connectivity returns.
+- Store composition drafts, selected privacy/category options, and pending media references locally.
+- Likes, votes, follows, reports, comments, and submissions require network confirmation. Optimistic UI must roll back on rejection.
+- Use idempotency keys for retryable creates. Never auto-retry a destructive operation.
+- Clear user-scoped cached data on logout/account switch while retaining non-sensitive public cache.
+
+## 10. Media
+
+- Use multipart uploads with explicit MIME, size, and duration limits shared by web and mobile validation.
+- Feed photos can use library or camera input, local compression, upload progress, cancellation, and retry.
+- Verification uses in-app camera recording, a pre-upload review, explicit consent copy, authenticated upload, and private storage.
+- Return authenticated or short-lived signed media URLs; do not expose private storage paths.
+- Generate thumbnails/optimized variants asynchronously where appropriate.
+- Strip unnecessary metadata from user images and never place sensitive media in application logs or analytics.
+- Define cleanup for abandoned uploads and revoked verification submissions.
+
+## 11. Notifications and deep links
+
+- Add a `mobile_devices`/push-subscription model keyed by user, platform, installation, environment, token, app version, locale, last-seen time, and revocation state.
+- Register or rotate the push token after authentication and remove/revoke it on logout or provider rejection.
+- Extend the existing persisted notification flow with a queued push outbox. Persistence succeeds independently of provider delivery.
+- Use normal visible notification messages for social and support events; background delivery is not a correctness dependency.
+- Push payloads contain only a notification ID and safe route target, not private content.
+- Configure iOS Universal Links and Android App Links for existing web URLs, plus a custom scheme for controlled internal use.
+- Map feed, question, confession, blog, profile, notification, invitation, wedding, game/XO, contact, regulation, and Miss targets to Expo Router routes.
+- If content is unavailable or unauthorized, land on a safe explanatory screen rather than Home silently.
+
+## 12. RTL, localization, and accessibility
+
+- Hebrew is the initial locale and the entire app is RTL-aware from bootstrap.
+- Enable platform RTL support and use logical start/end layout semantics. Do not force RTL as a production workaround.
+- Centralize user-facing copy in localization files even before another language is offered.
+- Mirror directional icons and transitions intentionally; do not mirror neutral icons or media.
+- Support Dynamic Type/font scaling, screen readers, sufficient contrast, reduced motion, meaningful focus order, large touch targets, and accessible form errors.
+- Automated tests run with RTL and increased font size. Manual acceptance covers VoiceOver and TalkBack.
+
+## 13. Feature/API workstreams
+
+### Platform and account
+
+- Bootstrap/configuration, authentication, registration/invitations, verification, password reset, OTP/2FA, regulations acceptance, profile, security/sessions, identity verification, and account deletion.
+
+### Community
+
+- Home/discovery; feed; questions; confessions; profiles/follows; bookmarks; reactions/likes; comments; polls; reports; privacy/anonymous behavior; notifications.
+
+### Content and support
+
+- Blog, horoscope, announcements, legal/accessibility pages, advertising/inquiry, and support conversations.
+
+### Games
+
+- Game configuration and polls, personality quiz, fortune teller, Sudoku progress/completion, and multiplayer XO lobby/session/join/moves.
+
+### Wedding
+
+- Wedding home content, forum and comments, listings, recommendations, filters, creation forms, moderation state, and domain-compatible deep links.
+
+### Entitled AI chat
+
+- Capability-gated thread list/create/rename/delete, messages, server processing/polling, image attachment where supported, feedback, daily cap, and safe notification behavior.
+
+## 14. Testing strategy
+
+### Backend
+
+- API feature tests for every endpoint: guest/authenticated, validation, authorization, privacy, throttling, regulation gating, state transitions, and error contracts.
+- Resource/contract snapshot tests and OpenAPI validation.
+- Tests proving web and mobile operations use the same policies/domain rules.
+- Push outbox, token rotation/revocation, idempotency, and media privacy tests.
+
+### Application
+
+- Unit tests for mapping, validation, route/deep-link parsing, cache migrations, and session state.
+- Component/integration tests for every feature's loading, empty, error, offline, permission-denied, and success states.
+- Automated iOS and Android critical journeys: register/login, accept regulations, browse, create/comment/react/report, upload media, receive/open notification, manage profile/security, and logout.
+- Visual RTL regression coverage for core screens and font scaling.
+- Real-device coverage for camera, video verification, push, universal/app links, background/foreground transitions, and poor networks.
+
+### Contract parity gate
+
+Maintain a non-admin feature checklist mapped to at least one backend test and one application test. A feature is not considered mobile-complete until both sides pass and its authorization/privacy behavior matches the web product.
+
+## 15. Delivery and operations
+
+- Environments: local, development, preview/beta, and production, each with separate API base URLs, push credentials, bundle/application IDs, and telemetry projects.
+- EAS development builds for engineers, internal distribution for QA, TestFlight for iOS beta, and Play internal testing for Android beta.
+- CI gates: formatting, lint, TypeScript, unit/integration tests, generated-client drift, backend tests, dependency/security checks, and signed preview builds on release candidates.
+- Use EAS Update only for JavaScript/assets compatible with the installed native runtime. Native dependency changes require a new binary. Use runtime-version policy and staged rollout/rollback.
+- Add server request correlation, API latency/error metrics, queue/push health, app crash reporting, release identifiers, and privacy-safe breadcrumbs.
+- Define minimum supported app version and forced-upgrade behavior before the first public release.
+- Prepare App Store/Play metadata, screenshots, privacy declarations, permission copy, data safety forms, support URL, privacy policy, content-reporting explanation, and reviewer test credentials.
+
+## 16. Rollout phases
+
+1. **Architecture and platform foundation** — API contract, authentication, mobile shell/design system, bootstrap, secure networking/storage, CI, and core native integrations.
+2. **Core community parity** — Home, feed, questions, confessions, profiles, follows, bookmarks, notifications, and reporting.
+3. **Extended parity and native integrations** — Blog, horoscope, support/advertising/legal, games, wedding, Miss, media capture, identity verification, push, and deep links.
+4. **Quality, security, and release** — contract parity, accessibility/RTL, performance/offline resilience, security review, observability, beta, and store submission.
+
+## 17. Release acceptance criteria
+
+- Every non-dashboard feature in section 4 is implemented or explicitly feature-flagged with an owner-approved reason.
+- iOS and Android pass the same critical journey suite.
+- No admin-dashboard route or privileged management capability is exposed.
+- Authentication tokens and private media pass security review.
+- RTL, VoiceOver, TalkBack, and large-font acceptance pass on supported devices.
+- Push notifications and all supported deep links open the correct authorized screen.
+- Store privacy/account-deletion requirements are satisfied.
+- Backend and client dashboards show release health, and rollback procedures are tested.
+
+## 18. Decisions required before implementation reaches release
+
+These do not block foundation work but must be recorded before beta:
+
+- Final public app name, icon, splash assets, iOS bundle ID, Android application ID, and store accounts.
+- Minimum iOS/Android versions and supported device classes.
+- Whether Miss remains administrator-entitled or gains a separate product entitlement.
+- Whether the wedding experience uses the same app branding/navigation or a visibly distinct sub-brand.
+- Push provider route (Expo Push Service initially versus direct APNs/FCM) and telemetry/crash provider.
+- Data retention/anonymization policy for account deletion, chat, contact, reports, and verification video.
+- Analytics consent policy and exact events allowed in the mobile application.
+

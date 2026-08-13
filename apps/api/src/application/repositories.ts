@@ -1,4 +1,4 @@
-import type { ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -7,6 +7,7 @@ export interface UserRepository {
   list(): Promise<UserEntity[]>;
   saveProfile(id: string, input: { name: string; email: string }): Promise<UserEntity>;
   updateAvatar(id: string, avatarUrl: string | null): Promise<UserEntity>;
+  updateWebhookUrl(id: string, webhookUrl: string | null): Promise<UserEntity>;
   createAgent(input: { id: string; name: string; email: string; createdAt: string }): Promise<UserEntity>;
   deleteAgent(id: string): Promise<void>;
   hasAgentHistory(id: string): Promise<boolean>;
@@ -44,6 +45,8 @@ export interface TaskRepository {
   findById(id: string): Promise<TaskEntity | null>;
   findByProjectNumber(projectId: string, number: number): Promise<TaskEntity | null>;
   listByProject(projectId: string, filters?: TaskFilters): Promise<TaskEntity[]>;
+  listForAssignee(assigneeId: string, status?: string): Promise<TaskEntity[]>;
+  claimNext(projectId: string, claimantId: string, options?: { phaseId?: string | null; priority?: string }): Promise<TaskEntity | null>;
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   unassignForProjectMember(projectId: string, userId: string): Promise<void>;
   create(input: TaskEntity): Promise<TaskEntity>;
@@ -84,7 +87,7 @@ export interface NotificationRepository {
 }
 
 export interface ApiTokenRepository {
-  create(input: { id: string; userId: string; name: string; prefix: string; hash: string; ciphertext: string; expiresAt: string | null; createdAt: string }): Promise<void>;
+  create(input: { id: string; userId: string; name: string; prefix: string; hash: string; ciphertext: string; permissions: string[] | null; expiresAt: string | null; createdAt: string }): Promise<void>;
   listForUser(userId: string): Promise<ApiTokenEntity[]>;
   findById(id: string): Promise<(ApiTokenEntity & { userId: string; ciphertext: string | null }) | null>;
   revoke(id: string): Promise<void>;
@@ -96,6 +99,7 @@ export interface SearchRepository {
 
 export interface ActivityRepository {
   record(input: { projectId: string; taskId?: string | null; actorId: string; action: string; metadata?: unknown }): Promise<void>;
+  list(filters: { projectId?: string; taskId?: string; actorId?: string; limit?: number }): Promise<ActivityEntity[]>;
 }
 
 export interface RepositorySet {

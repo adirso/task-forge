@@ -9,7 +9,7 @@ type TaskParams = { id: string };
 type AttachmentParams = { id: string };
 const storage = new LocalAttachmentStorage();
 const service = new AttachmentApplicationService(createUnitOfWork(db), storage);
-const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name } });
+const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: (request.authUser.tokenScopes ?? null) as import("../application/context.js").TokenScope[] | null } });
 const response = (attachment: Awaited<ReturnType<AttachmentApplicationService["list"]>>[number]) => ({ id: attachment.id, taskId: attachment.taskId, fileName: attachment.fileName, mimeType: attachment.mimeType, size: attachment.size, createdAt: attachment.createdAt, uploadedBy: attachment.uploadedBy, downloadUrl: `/api/attachments/${attachment.id}/download` });
 
 export async function attachmentRoutes(app: FastifyInstance) {

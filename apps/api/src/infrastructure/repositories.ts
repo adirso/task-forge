@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
+import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
 import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 
@@ -19,7 +19,7 @@ const nullableText = (value: unknown) => (value == null ? null : String(value));
 const date = (value: unknown) => String(value);
 
 function toUser(row: Row): UserEntity {
-  return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), createdAt: date(row.created_at) };
+  return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), webhookUrl: nullableText(row.webhook_url), createdAt: date(row.created_at) };
 }
 
 function toProject(row: Row): ProjectEntity {
@@ -79,7 +79,9 @@ async function hydrateTask(db: DatabasePort, task: TaskEntity): Promise<TaskEnti
 
 function toToken(row: Row): ApiTokenEntity {
   const ciphertext = nullableText(row.token_ciphertext ?? row.ciphertext);
-  return { id: text(row.id), userId: text(row.user_id), name: text(row.name), prefix: text(row.token_prefix ?? row.prefix), expiresAt: nullableText(row.expires_at ?? row.expiresAt), lastUsedAt: nullableText(row.last_used_at ?? row.lastUsedAt), revokedAt: nullableText(row.revoked_at ?? row.revokedAt), createdAt: date(row.created_at ?? row.createdAt), revealable: Boolean(ciphertext), ciphertext };
+  let permissions: string[] | null = null;
+  if (row.permissions) { try { permissions = JSON.parse(String(row.permissions)); } catch { permissions = null; } }
+  return { id: text(row.id), userId: text(row.user_id), name: text(row.name), prefix: text(row.token_prefix ?? row.prefix), expiresAt: nullableText(row.expires_at ?? row.expiresAt), lastUsedAt: nullableText(row.last_used_at ?? row.lastUsedAt), revokedAt: nullableText(row.revoked_at ?? row.revokedAt), createdAt: date(row.created_at ?? row.createdAt), revealable: Boolean(ciphertext), ciphertext, permissions };
 }
 
 function createUserRepository(db: DatabasePort): UserRepository {
@@ -89,6 +91,7 @@ function createUserRepository(db: DatabasePort): UserRepository {
     async list() { return (await db.prepare("SELECT * FROM users ORDER BY kind, name").all()).map(toUser); },
     async saveProfile(id, input) { await db.prepare("UPDATE users SET name = ?, email = ? WHERE id = ?").run(input.name, input.email.toLowerCase(), id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after update"); return toUser(row); },
     async updateAvatar(id, avatarUrl) { await db.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(avatarUrl, id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after avatar update"); return toUser(row); },
+    async updateWebhookUrl(id, webhookUrl) { await db.prepare("UPDATE users SET webhook_url = ? WHERE id = ?").run(webhookUrl, id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after webhook update"); return toUser(row); },
     async createAgent(input) { await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)").run(input.id, input.email.toLowerCase(), input.name, input.createdAt); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(input.id); if (!row) throw new Error("Agent not found after create"); return toUser(row); },
     async hasAgentHistory(id) { const row = await db.prepare("SELECT (SELECT COUNT(*) FROM projects WHERE owner_id = ?) + (SELECT COUNT(*) FROM tasks WHERE creator_id = ?) + (SELECT COUNT(*) FROM task_updates WHERE author_id = ?) + (SELECT COUNT(*) FROM activity WHERE actor_id = ?) AS total").get(id, id, id, id) as { total: number }; return Number(row.total) > 0; },
     async deleteAgent(id) { await db.prepare("DELETE FROM users WHERE id = ?").run(id); },
@@ -139,6 +142,27 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
     async create(input) { await db.prepare(`INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.id, input.projectId, input.number, input.title, input.description, input.definitionOfDone, input.status, input.priority, input.type, input.assigneeId, input.creatorId, input.parentId, input.branch, input.dueDate, input.estimatePoints, input.phaseId, input.pullRequestUrl, input.pullRequestTitle, input.pullRequestState, input.position, input.createdAt, input.updatedAt); return input; },
     async update(id, input) { const columns: Record<string, string> = { title: "title", description: "description", definitionOfDone: "definition_of_done", status: "status", priority: "priority", type: "type", assigneeId: "assignee_id", parentId: "parent_id", branch: "branch", dueDate: "due_date", estimatePoints: "estimate_points", phaseId: "phase_id", pullRequestUrl: "pull_request_url", pullRequestTitle: "pull_request_title", pullRequestState: "pull_request_state", position: "position" }; const fields: string[] = []; const values: unknown[] = []; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); if (!row) throw new Error("Task not found after update"); return hydrateTask(db, toTask(row)); },
     async delete(id) { await db.prepare("DELETE FROM tasks WHERE id = ?").run(id); },
+    async listForAssignee(assigneeId, status) {
+      const where = ["t.assignee_id = ?"];
+      const params: unknown[] = [assigneeId];
+      if (status) { where.push("t.status = ?"); params.push(status); }
+      const rows = await db.prepare(`SELECT t.*, p.name AS project_name, p.\`key\` AS project_key FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${where.join(" AND ")} ORDER BY t.updated_at DESC`).all(...params);
+      return rows.map((row) => ({ ...toTask(row), projectName: text(row.project_name), projectKey: text(row.project_key) }));
+    },
+    async claimNext(projectId, claimantId, options = {}) {
+      const where = ["project_id = ?", "status IN ('BACKLOG', 'TODO')", "assignee_id IS NULL"];
+      const params: unknown[] = [projectId];
+      if (options.phaseId !== undefined && options.phaseId !== null) { where.push("phase_id = ?"); params.push(options.phaseId); }
+      if (options.priority) { where.push("priority = ?"); params.push(options.priority); }
+      const orderExpr = "CASE priority WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, position";
+      const candidate = await db.prepare(`SELECT id FROM tasks WHERE ${where.join(" AND ")} ORDER BY ${orderExpr} LIMIT 1`).get(...params);
+      if (!candidate) return null;
+      const now = new Date().toISOString();
+      const result = await db.prepare("UPDATE tasks SET assignee_id = ?, status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND status IN ('BACKLOG', 'TODO') AND assignee_id IS NULL").run(claimantId, now, candidate.id);
+      if (!result.changes) return null;
+      const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(candidate.id);
+      return row ? hydrateTask(db, toTask(row)) : null;
+    },
   };
 }
 
@@ -179,11 +203,27 @@ function createNotificationRepository(db: DatabasePort): NotificationRepository 
 }
 
 function createTokenRepository(db: DatabasePort): ApiTokenRepository {
-  return { async create(input) { await db.prepare("INSERT INTO api_tokens (id, user_id, name, token_prefix, token_hash, token_ciphertext, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.userId, input.name, input.prefix, input.hash, input.ciphertext, input.expiresAt, input.createdAt); }, async listForUser(userId) { return (await db.prepare("SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC").all(userId)).map((row) => { const token = toToken(row); const { ciphertext: _ciphertext, ...metadata } = token; return metadata; }); }, async findById(id) { const row = await db.prepare("SELECT * FROM api_tokens WHERE id = ?").get(id); return row ? { ...toToken(row), userId: String(row.user_id), ciphertext: nullableText(row.token_ciphertext) } : null; }, async revoke(id) { await db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE id = ?").run(new Date().toISOString(), id); } };
+  return { async create(input) { await db.prepare("INSERT INTO api_tokens (id, user_id, name, token_prefix, token_hash, token_ciphertext, permissions, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.userId, input.name, input.prefix, input.hash, input.ciphertext, input.permissions ? JSON.stringify(input.permissions) : null, input.expiresAt, input.createdAt); }, async listForUser(userId) { return (await db.prepare("SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC").all(userId)).map((row) => { const token = toToken(row); const { ciphertext: _ciphertext, ...metadata } = token; return metadata; }); }, async findById(id) { const row = await db.prepare("SELECT * FROM api_tokens WHERE id = ?").get(id); return row ? { ...toToken(row), userId: String(row.user_id), ciphertext: nullableText(row.token_ciphertext) } : null; }, async revoke(id) { await db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE id = ?").run(new Date().toISOString(), id); } };
 }
 
 function createActivityRepository(db: DatabasePort): ActivityRepository {
-  return { async record(input) { await db.prepare("INSERT INTO activity (id, project_id, task_id, actor_id, action, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), input.projectId, input.taskId ?? null, input.actorId, input.action, JSON.stringify(input.metadata ?? {}), new Date().toISOString()); } };
+  return {
+    async record(input) { await db.prepare("INSERT INTO activity (id, project_id, task_id, actor_id, action, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), input.projectId, input.taskId ?? null, input.actorId, input.action, JSON.stringify(input.metadata ?? {}), new Date().toISOString()); },
+    async list(filters) {
+      const where: string[] = [];
+      const params: unknown[] = [];
+      if (filters.projectId) { where.push("a.project_id = ?"); params.push(filters.projectId); }
+      if (filters.taskId) { where.push("a.task_id = ?"); params.push(filters.taskId); }
+      if (filters.actorId) { where.push("a.actor_id = ?"); params.push(filters.actorId); }
+      const limit = filters.limit ?? 50;
+      const rows = await db.prepare(`SELECT a.*, u.name AS actor_name, u.kind AS actor_kind, u.avatar_url AS actor_avatar_url FROM activity a JOIN users u ON u.id = a.actor_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY a.created_at DESC LIMIT ?`).all(...params, limit);
+      return rows.map((row) => {
+        let metadata: Record<string, unknown> = {};
+        try { metadata = JSON.parse(String(row.metadata ?? "{}")); } catch { /* empty */ }
+        return { id: text(row.id), projectId: text(row.project_id), taskId: nullableText(row.task_id), actorId: text(row.actor_id), actorName: text(row.actor_name), actorKind: row.actor_kind as UserEntity["kind"], actorAvatarUrl: nullableText(row.actor_avatar_url), action: text(row.action), metadata, createdAt: date(row.created_at) };
+      });
+    },
+  };
 }
 
 function createSearchRepository(db: DatabasePort): SearchRepository {

@@ -10,9 +10,10 @@ type AuthRow = {
   email: string | null;
   kind: "HUMAN" | "AGENT";
   role: "ADMIN" | "MEMBER";
+  tokenScopes: string[] | null;
 };
 
-export function createJwt(user: AuthRow) {
+export function createJwt(user: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER" }) {
   return jwt.sign({ sub: user.id, kind: user.kind, role: user.role }, config.jwtSecret, { expiresIn: "8h" });
 }
 
@@ -39,19 +40,24 @@ export function installAuth(app: FastifyInstance) {
 
     if (token.startsWith("tf_")) {
       const row = await db.prepare(`
-        SELECT u.id, u.name, u.email, u.kind, u.role, t.id AS token_id
+        SELECT u.id, u.name, u.email, u.kind, u.role, t.id AS token_id, t.permissions AS token_permissions
         FROM api_tokens t JOIN users u ON u.id = t.user_id
         WHERE t.token_hash = ? AND t.revoked_at IS NULL
           AND (t.expires_at IS NULL OR t.expires_at > ?)
-      `).get(hashToken(token), new Date().toISOString()) as (AuthRow & { token_id: string }) | undefined;
+      `).get(hashToken(token), new Date().toISOString()) as (AuthRow & { token_id: string; token_permissions: string | null }) | undefined;
       if (row) {
-        user = row;
+        let tokenScopes: string[] | null = null;
+        if (row.token_permissions) {
+          try { tokenScopes = JSON.parse(row.token_permissions); } catch { tokenScopes = null; }
+        }
+        user = { id: row.id, name: row.name, email: row.email, kind: row.kind, role: row.role, tokenScopes };
         await db.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").run(new Date().toISOString(), row.token_id);
       }
     } else {
       try {
         const payload = jwt.verify(token, config.jwtSecret) as jwt.JwtPayload;
-        user = await db.prepare("SELECT id, name, email, kind, role FROM users WHERE id = ?").get(payload.sub) as AuthRow | undefined;
+        const row = await db.prepare("SELECT id, name, email, kind, role FROM users WHERE id = ?").get(payload.sub) as Omit<AuthRow, "tokenScopes"> | undefined;
+        if (row) user = { ...row, tokenScopes: null };
       } catch {
         user = undefined;
       }
