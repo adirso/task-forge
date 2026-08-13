@@ -80,7 +80,7 @@ function renderWidgetContent(type: WidgetType, currentUser: User) {
 
 export function DashboardPage({ currentUser }: { currentUser: User }) {
   const { width, containerRef, mounted } = useContainerWidth();
-  const [layout, setLayout] = useState(loadLayout);
+  const [layout, setLayout] = useState(() => loadLayout(currentUser.role === "ADMIN"));
   const [showPicker, setShowPicker] = useState(false);
 
   const gridLayout = useMemo<Layout>(

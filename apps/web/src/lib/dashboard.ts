@@ -36,13 +36,17 @@ export const DEFAULT_WIDGET_SIZE: Record<WidgetType, { w: number; h: number; min
   agent_ops: { w: 8, h: 4, minW: 4, minH: 3 },
 };
 
-const DEFAULT_LAYOUT: DashboardLayout = {
-  version: 2,
-  widgets: [
-    { id: "default_project_status", type: "project_status", x: 0, y: 0, w: 6, h: 4 },
-    { id: "default_my_tasks", type: "my_tasks", x: 6, y: 0, w: 6, h: 5 },
-  ],
-};
+const DEFAULT_TYPES: WidgetType[] = ["project_status", "my_tasks", "stuck_tasks", "activity"];
+
+export function defaultLayout(isAdmin = false): DashboardLayout {
+  const types: WidgetType[] = isAdmin ? [...DEFAULT_TYPES, "agent_ops"] : DEFAULT_TYPES;
+  const widgets: WidgetInstance[] = [];
+  for (const type of types) {
+    const size = DEFAULT_WIDGET_SIZE[type];
+    widgets.push({ id: `default_${type}`, type, ...size, ...findNextSlot(widgets, size.w, size.h) });
+  }
+  return { version: 2, widgets };
+}
 
 const WIDGET_TYPES = new Set<WidgetType>([
   "project_status",
@@ -101,24 +105,24 @@ function isGridWidget(value: unknown): value is WidgetInstance {
   );
 }
 
-export function normalizeLayout(raw: unknown): DashboardLayout {
+export function normalizeLayout(raw: unknown, isAdmin = false): DashboardLayout {
   if (!raw || typeof raw !== "object" || !("widgets" in raw) || !Array.isArray((raw as DashboardLayout).widgets)) {
-    return DEFAULT_LAYOUT;
+    return defaultLayout(isAdmin);
   }
   const widgets = (raw as { widgets: unknown[] }).widgets.filter(isGridWidget);
   if (widgets.length === 0 && (raw as { widgets: unknown[] }).widgets.length > 0) {
-    return DEFAULT_LAYOUT;
+    return defaultLayout(isAdmin);
   }
   return { version: 2, widgets };
 }
 
-export function loadLayout(): DashboardLayout {
+export function loadLayout(isAdmin = false): DashboardLayout {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_LAYOUT;
-    return normalizeLayout(JSON.parse(raw) as unknown);
+    if (!raw) return defaultLayout(isAdmin);
+    return normalizeLayout(JSON.parse(raw) as unknown, isAdmin);
   } catch {
-    return DEFAULT_LAYOUT;
+    return defaultLayout(isAdmin);
   }
 }
 
