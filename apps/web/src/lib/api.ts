@@ -75,6 +75,7 @@ export const api = {
   deleteAgent: (userId: string) => request<void>(`/users/${userId}`, { method: "DELETE" }),
   agentTokens: (userId: string) => request<{ tokens: ApiTokenMetadata[] }>(`/users/${userId}/tokens`),
   createAgentToken: (userId: string, input: { name: string; expiresInDays: number | null }) => request<{ token: string; prefix: string; expiresAt: string | null; warning: string }>(`/users/${userId}/tokens`, { method: "POST", body: input }),
+  revealAgentToken: (userId: string, tokenId: string) => request<{ token: string }>(`/users/${userId}/tokens/${tokenId}/reveal`, { method: "POST" }),
   revokeAgentToken: (id: string) => request<void>(`/users/tokens/${id}`, { method: "DELETE" }),
   notifications: () => request<{ notifications: Notification[]; unreadCount: number }>("/notifications"),
   readNotification: (id: string) => request<{ notification: Notification }>(`/notifications/${id}/read`, { method: "PATCH" }),

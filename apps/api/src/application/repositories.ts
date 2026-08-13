@@ -84,9 +84,9 @@ export interface NotificationRepository {
 }
 
 export interface ApiTokenRepository {
-  create(input: { id: string; userId: string; name: string; prefix: string; hash: string; expiresAt: string | null; createdAt: string }): Promise<void>;
+  create(input: { id: string; userId: string; name: string; prefix: string; hash: string; ciphertext: string; expiresAt: string | null; createdAt: string }): Promise<void>;
   listForUser(userId: string): Promise<ApiTokenEntity[]>;
-  findById(id: string): Promise<(ApiTokenEntity & { userId: string }) | null>;
+  findById(id: string): Promise<(ApiTokenEntity & { userId: string; ciphertext: string | null }) | null>;
   revoke(id: string): Promise<void>;
 }
 

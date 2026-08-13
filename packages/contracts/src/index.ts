@@ -270,4 +270,5 @@ export interface ApiTokenMetadata {
   lastUsedAt: string | null;
   revokedAt: string | null;
   createdAt: string;
+  revealable: boolean;
 }

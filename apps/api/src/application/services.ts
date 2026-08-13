@@ -70,6 +70,7 @@ export interface UserService {
   deleteAgent(context: RequestContext, agentId: string): Promise<void>;
   listTokens(context: RequestContext, userId: string): Promise<ApiTokenEntity[]>;
   issueToken(context: RequestContext, userId: string, input: { name: string; expiresInDays: number | null }): Promise<{ token: string; prefix: string; expiresAt: string | null }>;
+  revealToken(context: RequestContext, userId: string, tokenId: string): Promise<{ token: string }>;
   revokeToken(context: RequestContext, tokenId: string): Promise<void>;
 }
 

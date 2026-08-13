@@ -122,6 +122,8 @@ export interface ApiTokenEntity {
   lastUsedAt: string | null;
   revokedAt: string | null;
   createdAt: string;
+  revealable: boolean;
+  ciphertext?: string | null;
 }
 
 export interface NotificationEntity {

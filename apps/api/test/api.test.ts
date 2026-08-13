@@ -252,6 +252,15 @@ test("an issued agent token authenticates and is scoped by membership", async ()
   assert.match(issued.json().token, /^tf_/);
   agentToken = issued.json().token;
 
+  const listed = await app.inject({ method: "GET", url: `/api/users/${agentId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json().tokens[0].revealable, true);
+  const tokenId = listed.json().tokens[0].id as string;
+
+  const revealed = await app.inject({ method: "POST", url: `/api/users/${agentId}/tokens/${tokenId}/reveal`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(revealed.statusCode, 200, revealed.body);
+  assert.equal(revealed.json().token, agentToken);
+
   const postedUpdate = await app.inject({
     method: "POST", url: `/api/tasks/${taskId}/updates`, headers: { authorization: `Bearer ${issued.json().token}` },
     payload: { body: "Implementation is complete and the PR is ready for review." },
