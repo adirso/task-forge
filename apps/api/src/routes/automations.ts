@@ -4,7 +4,7 @@ import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { AutomationApplicationService } from "../application/automation-service.js";
 const service = new AutomationApplicationService(createUnitOfWork(db));
-const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name } });
+const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: (request.authUser.tokenScopes ?? null) as import("../application/context.js").TokenScope[] | null } });
 export async function automationRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
   app.get<{ Params: { projectId: string } }>("/projects/:projectId/automations", async (request) => ({ automations: await service.list({ ...context(request), projectId: request.params.projectId }) }));

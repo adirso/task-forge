@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { taskCreateSchema, taskDependencyUpdateSchema, taskStatusSchema, taskTagNameSchema, taskTypeSchema, taskUpdateCreateSchema, taskUpdateSchema } from "@taskforge/contracts";
+import { taskClaimSchema, taskCreateSchema, taskDependencyUpdateSchema, taskStatusSchema, taskTagNameSchema, taskTypeSchema, taskUpdateCreateSchema, taskUpdateSchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { TaskApplicationService } from "../application/task-service.js";
@@ -9,7 +9,7 @@ type ProjectParams = { projectId: string };
 type TaskParams = { id: string };
 type TaskQuery = { status?: string; assigneeId?: string; priority?: string; type?: string; phaseId?: string; tag?: string; minPoints?: string; maxPoints?: string; q?: string };
 const service = new TaskApplicationService(createUnitOfWork(db));
-const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name } });
+const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: (request.authUser.tokenScopes ?? null) as import("../application/context.js").TokenScope[] | null } });
 const projectContext = (request: Parameters<typeof context>[0], projectId: string) => ({ ...context(request), projectId });
 const numberParam = (value: string | undefined) => value === undefined ? undefined : Number(value);
 
@@ -26,6 +26,11 @@ export async function taskRoutes(app: FastifyInstance) {
   app.post<{ Params: TaskParams }>("/tasks/:id/dependencies", { schema: { tags: ["Tasks"], summary: "Replace a task's dependencies" } }, async (request, reply) => { const parsed = taskDependencyUpdateSchema.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ error: "Validation failed", issues: parsed.error.issues }); return { task: taskResponse(await service.update(context(request), request.params.id, parsed.data)) }; });
   app.delete<{ Params: TaskParams }>("/tasks/:id", { schema: { tags: ["Tasks"], summary: "Delete a task and its subtasks" } }, async (request, reply) => { await service.delete(context(request), request.params.id); return reply.code(204).send(); });
   app.get<{ Params: ProjectParams }>("/projects/:projectId/tags", { schema: { tags: ["Tasks"], summary: "List reusable project tags" } }, async (request) => ({ tags: await service.listTags(projectContext(request, request.params.projectId)) }));
+  app.post<{ Params: ProjectParams }>("/projects/:projectId/tasks/claim", { schema: { tags: ["Tasks"], summary: "Atomically claim the next unassigned task in a project" } }, async (request, reply) => {
+    const parsed = taskClaimSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "Validation failed", issues: parsed.error.issues });
+    return reply.code(200).send({ task: taskResponse(await service.claimTask(projectContext(request, request.params.projectId), parsed.data ?? {})) });
+  });
   app.get<{ Params: TaskParams }>("/tasks/:id/updates", { schema: { tags: ["Task updates"], summary: "List notes and updates on a task" } }, async (request) => ({ updates: await service.listUpdates(context(request), request.params.id) }));
   app.post<{ Params: TaskParams }>("/tasks/:id/updates", { schema: { tags: ["Task updates"], summary: "Post a note or progress update" } }, async (request, reply) => reply.code(201).send({ update: await service.addUpdate(context(request), request.params.id, taskUpdateCreateSchema.parse(request.body).body) }));
 }

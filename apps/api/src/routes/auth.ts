@@ -7,7 +7,7 @@ import { AuthApplicationService } from "../application/auth-service.js";
 import { createJwt } from "../lib/auth.js";
 
 const service = new AuthApplicationService(createUnitOfWork(db), { compare: bcrypt.compare }, { issue: createJwt });
-const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name } });
+const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: (request.authUser.tokenScopes ?? null) as import("../application/context.js").TokenScope[] | null } });
 
 export async function authRoutes(app: FastifyInstance) {
   app.post("/login", { schema: { tags: ["Auth"], summary: "Sign in as a human user" } }, async (_request, reply) => {

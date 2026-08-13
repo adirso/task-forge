@@ -9,6 +9,7 @@ declare module "fastify" {
       email: string | null;
       kind: UserKind;
       role: UserRole;
+      tokenScopes: string[] | null;
     };
   }
 

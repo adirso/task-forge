@@ -1,4 +1,4 @@
-import type { ApiTokenMetadata, Attachment, AuthResponse, Automation, AutomationCreate, AutomationUpdate, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
+import type { ActivityEvent, AgentOpsEntry, ApiTokenMetadata, Attachment, AuthResponse, Automation, AutomationCreate, AutomationUpdate, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
@@ -74,7 +74,7 @@ export const api = {
   deleteUserAvatar: (userId: string) => request<{ user: User }>(`/users/${userId}/avatar`, { method: "DELETE" }),
   deleteAgent: (userId: string) => request<void>(`/users/${userId}`, { method: "DELETE" }),
   agentTokens: (userId: string) => request<{ tokens: ApiTokenMetadata[] }>(`/users/${userId}/tokens`),
-  createAgentToken: (userId: string, input: { name: string; expiresInDays: number | null }) => request<{ token: string; prefix: string; expiresAt: string | null; warning: string }>(`/users/${userId}/tokens`, { method: "POST", body: input }),
+  createAgentToken: (userId: string, input: { name: string; expiresInDays: number | null; permissions?: string[] | null }) => request<{ token: string; prefix: string; expiresAt: string | null; warning: string }>(`/users/${userId}/tokens`, { method: "POST", body: input }),
   revealAgentToken: (userId: string, tokenId: string) => request<{ token: string }>(`/users/${userId}/tokens/${tokenId}/reveal`, { method: "POST" }),
   revokeAgentToken: (id: string) => request<void>(`/users/tokens/${id}`, { method: "DELETE" }),
   notifications: () => request<{ notifications: Notification[]; unreadCount: number }>("/notifications"),
@@ -82,4 +82,9 @@ export const api = {
   readAllNotifications: () => request<{ updated: number }>("/notifications/read-all", { method: "POST" }),
   search: (query: string) => request<{ results: TaskSearchResult[] }>(`/search?q=${encodeURIComponent(query)}`),
   context: (params: { project?: string; task?: string }) => request<{ project: Project; task: Task | null }>(`/context?${new URLSearchParams(Object.entries(params).filter((entry): entry is [string, string] => Boolean(entry[1]))).toString()}`),
+  taskActivity: (taskId: string, limit = 30) => request<{ activity: ActivityEvent[] }>(`/activity?taskId=${taskId}&limit=${limit}`),
+  projectActivity: (projectId: string, limit = 50) => request<{ activity: ActivityEvent[] }>(`/activity?projectId=${projectId}&limit=${limit}`),
+  agentOps: () => request<{ agents: AgentOpsEntry[] }>("/users/agents/ops"),
+  updateAgentWebhook: (agentId: string, webhookUrl: string | null) => request<{ user: User }>(`/users/${agentId}/webhook`, { method: "PATCH", body: { webhookUrl } }),
+  claimTask: (projectId: string, opts?: { phaseId?: string | null; priority?: string }) => request<{ task: Task }>(`/projects/${projectId}/tasks/claim`, { method: "POST", body: opts ?? {} }),
 };

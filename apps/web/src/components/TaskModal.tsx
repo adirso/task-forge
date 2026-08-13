@@ -1,5 +1,5 @@
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
-import type { Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
+import type { ActivityEvent, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
 import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
 import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
 import { api } from "../lib/api";
@@ -16,6 +16,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [updates, setUpdates] = useState<TaskNote[]>([]);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [updateBody, setUpdateBody] = useState("");
   const [postingUpdate, setPostingUpdate] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -29,7 +30,8 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
       setForm({ title: task.title, description: task.description, definitionOfDone: task.definitionOfDone, status: task.status, priority: task.priority, type: task.type, assigneeId: task.assigneeId, parentId: task.parentId, branch: task.branch, dueDate: task.dueDate, estimatePoints: task.estimatePoints, phaseId: task.phaseId, pullRequestUrl: task.pullRequestUrl, pullRequestTitle: task.pullRequestTitle, pullRequestState: task.pullRequestState, tags: task.tags.map((tag) => tag.name), dependencyIds: task.dependencies.map((dependency) => dependency.dependsOnTaskId) });
       api.taskUpdates(task.id).then(({ updates: taskUpdates }) => setUpdates(taskUpdates)).catch(() => setUpdates([]));
       api.taskAttachments(task.id).then(({ attachments: taskAttachments }) => setAttachments(taskAttachments)).catch(() => setAttachments(task.attachments ?? []));
-    } else { setUpdates([]); setAttachments([]); }
+      api.taskActivity(task.id).then(({ activity: events }) => setActivity(events)).catch(() => setActivity([]));
+    } else { setUpdates([]); setAttachments([]); setActivity([]); }
   }, [task]);
 
   const set = <K extends keyof TaskCreate>(key: K, value: TaskCreate[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -105,6 +107,10 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
           <div className="update-composer"><Avatar user={currentUser} size="md" /><textarea value={updateBody} onChange={(e) => setUpdateBody(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void postUpdate(); } }} rows={2} placeholder="Share progress, a decision, or a blocker…" /><button type="button" className="button button-primary" disabled={!updateBody.trim() || postingUpdate} onClick={postUpdate}><Send /> {postingUpdate ? "Posting…" : "Post update"}</button></div>
           <div className="update-list">{updates.length ? updates.map((update) => <article className="task-update" key={update.id}><Avatar user={update.author} size="md" /><div><header><strong>{update.author.name}{update.author.kind === "AGENT" && <em>Agent</em>}</strong><time>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(update.createdAt))}</time></header><p>{update.body}</p></div></article>) : <p className="updates-empty">No updates yet. Add the first progress note above.</p>}</div>
         </section>}
+        {task && activity.length > 0 && <section className="task-activity">
+          <div className="section-heading"><span>Activity log <b>{activity.length}</b></span></div>
+          <div className="activity-list">{activity.map((event) => <div className="activity-event" key={event.id}><span className="activity-dot" /><span className="activity-body"><strong>{event.actorName}</strong>{event.actorKind === "AGENT" && <em>Agent</em>}<span>{activityLabel(event.action, event.metadata)}</span><time>{new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(event.createdAt))}</time></span></div>)}</div>
+        </section>}
         {error && <div className="form-error">{error}</div>}
         <footer>{onDelete ? <button type="button" className="button button-danger-quiet" onClick={onDelete}><Trash2 /> Delete</button> : <span />}<div><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving}>{saving ? "Saving…" : task ? "Save changes" : "Create task"}</button></div></footer>
         {showSendToAI && task && <SendToAI project={project} task={task} phaseNumber={phases.find((phase) => phase.id === task.phaseId)?.number ?? null} onClose={() => setShowSendToAI(false)} />}
@@ -114,3 +120,21 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
 }
 
 function formatBytes(bytes: number) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`; return `${(bytes / (1024 * 1024)).toFixed(1)} MB`; }
+
+function activityLabel(action: string, metadata: Record<string, unknown>): string {
+  switch (action) {
+    case "task.created": return "created this task";
+    case "task.claimed": return "claimed this task";
+    case "task.note_added": return "posted an update";
+    case "task.updated": {
+      const keys = Object.keys(metadata).filter((k) => k !== "updatedAt");
+      if (keys.length === 1) {
+        const key = keys[0]!;
+        const labels: Record<string, string> = { status: "changed status", assigneeId: "changed assignee", priority: "changed priority", title: "renamed this task", branch: "set the branch", pullRequestUrl: "linked a PR", phaseId: "changed phase" };
+        return labels[key] ?? `updated ${key}`;
+      }
+      return `updated ${keys.length} fields`;
+    }
+    default: return action.replace("task.", "").replace(/_/g, " ");
+  }
+}

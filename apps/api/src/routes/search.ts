@@ -6,7 +6,7 @@ import { taskResponse } from "../lib/task-response.js";
 
 type SearchQuery = { q?: string };
 const service = new SearchApplicationService(createUnitOfWork(db));
-const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name } });
+const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: (request.authUser.tokenScopes ?? null) as import("../application/context.js").TokenScope[] | null } });
 
 export async function searchRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
