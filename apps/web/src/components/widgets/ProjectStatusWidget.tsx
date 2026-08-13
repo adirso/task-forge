@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DashboardSummary } from "@taskforge/contracts";
 import { api } from "../../lib/api";
+import { openProject } from "../../lib/dashboardNav";
 
 export function ProjectStatusWidget() {
   const [data, setData] = useState<DashboardSummary | null>(null);
@@ -19,7 +20,7 @@ export function ProjectStatusWidget() {
       {data.projects.map((p) => {
         const active = p.counts.TODO + p.counts.IN_PROGRESS + p.counts.IN_REVIEW;
         return (
-          <div key={p.id} className="wps-row">
+          <button key={p.id} type="button" className="wps-row" onClick={() => openProject(p.key)}>
             <div className="wps-name" title={p.name}>
               <span className="wps-dot" style={{ background: p.color }} />
               {p.name}
@@ -37,7 +38,7 @@ export function ProjectStatusWidget() {
               )}
             </div>
             <div className="wps-count">{active} active</div>
-          </div>
+          </button>
         );
       })}
       <div className="wps-legend">

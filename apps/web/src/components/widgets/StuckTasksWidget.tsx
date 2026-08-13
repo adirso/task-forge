@@ -2,14 +2,7 @@ import { useEffect, useState } from "react";
 import type { DashboardSummary } from "@taskforge/contracts";
 import { AlertTriangle } from "lucide-react";
 import { api } from "../../lib/api";
-
-function openTask(projectKey: string, number: number) {
-  const url = new URL(window.location.href);
-  url.search = "";
-  url.searchParams.set("project", projectKey);
-  url.searchParams.set("task", `${projectKey}-${number}`);
-  window.location.href = url.toString();
-}
+import { openTask } from "../../lib/dashboardNav";
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();

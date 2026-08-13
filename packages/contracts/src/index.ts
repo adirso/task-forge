@@ -288,7 +288,9 @@ export interface TaskSearchResult extends Task {
 export interface ActivityEvent {
   id: string;
   projectId: string;
+  projectKey: string;
   taskId: string | null;
+  taskNumber: number | null;
   actorId: string;
   actorName: string;
   actorKind: UserKind;

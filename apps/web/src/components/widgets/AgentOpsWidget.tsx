@@ -2,16 +2,9 @@ import { useEffect, useState } from "react";
 import type { AgentOpsEntry } from "@taskforge/contracts";
 import { AlertTriangle, Bot, ShieldCheck } from "lucide-react";
 import { api } from "../../lib/api";
+import { openTask } from "../../lib/dashboardNav";
 import type { User } from "@taskforge/contracts";
 import { Avatar } from "../Avatar";
-
-function openTask(projectKey: string, number: number) {
-  const url = new URL(window.location.href);
-  url.search = "";
-  url.searchParams.set("project", projectKey);
-  url.searchParams.set("task", `${projectKey}-${number}`);
-  window.location.href = url.toString();
-}
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
