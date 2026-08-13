@@ -1,4 +1,4 @@
-import type { ActivityEvent, AgentOpsEntry, ApiTokenMetadata, Attachment, AuthResponse, Automation, AutomationCreate, AutomationUpdate, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
+import type { ActivityEvent, AgentOpsEntry, ApiTokenMetadata, Attachment, AuthResponse, Automation, AutomationCreate, AutomationUpdate, DashboardSummary, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
@@ -84,7 +84,9 @@ export const api = {
   context: (params: { project?: string; task?: string }) => request<{ project: Project; task: Task | null }>(`/context?${new URLSearchParams(Object.entries(params).filter((entry): entry is [string, string] => Boolean(entry[1]))).toString()}`),
   taskActivity: (taskId: string, limit = 30) => request<{ activity: ActivityEvent[] }>(`/activity?taskId=${taskId}&limit=${limit}`),
   projectActivity: (projectId: string, limit = 50) => request<{ activity: ActivityEvent[] }>(`/activity?projectId=${projectId}&limit=${limit}`),
+  activityFeed: (limit = 50) => request<{ activity: ActivityEvent[] }>(`/activity?limit=${limit}`),
   agentOps: () => request<{ agents: AgentOpsEntry[] }>("/users/agents/ops"),
   updateAgentWebhook: (agentId: string, webhookUrl: string | null) => request<{ user: User }>(`/users/${agentId}/webhook`, { method: "PATCH", body: { webhookUrl } }),
   claimTask: (projectId: string, opts?: { phaseId?: string | null; priority?: string }) => request<{ task: Task }>(`/projects/${projectId}/tasks/claim`, { method: "POST", body: opts ?? {} }),
+  dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
 };
