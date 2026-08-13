@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
 import type { DashboardSummary } from "@taskforge/contracts";
 import { api } from "../../lib/api";
 import { openTask } from "../../lib/dashboardNav";
+import { useWidgetQuery } from "../../lib/widgetQuery";
+import { WidgetError } from "../WidgetShell";
 
 const STATUS_LABELS: Record<string, string> = {
   TODO: "Todo",
@@ -10,15 +11,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export function MyTasksWidget() {
-  const [data, setData] = useState<DashboardSummary | null>(null);
-  const [error, setError] = useState("");
+  const { data, error, loading, reload } = useWidgetQuery<DashboardSummary>(() => api.dashboardSummary());
 
-  useEffect(() => {
-    api.dashboardSummary().then(setData).catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load"));
-  }, []);
-
-  if (error) return <div className="widget-error">{error}</div>;
-  if (!data) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
+  if (error) return <WidgetError message={error} onRetry={reload} />;
+  if (loading || !data) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
   if (data.myTasks.length === 0) return <div className="widget-empty">No open tasks assigned to you.</div>;
 
   return (

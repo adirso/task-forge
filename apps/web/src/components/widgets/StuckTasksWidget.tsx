@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
 import type { DashboardSummary } from "@taskforge/contracts";
 import { AlertTriangle } from "lucide-react";
 import { api } from "../../lib/api";
 import { openTask } from "../../lib/dashboardNav";
+import { useWidgetQuery } from "../../lib/widgetQuery";
+import { WidgetError } from "../WidgetShell";
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -12,15 +13,10 @@ function formatRelative(iso: string) {
 }
 
 export function StuckTasksWidget() {
-  const [data, setData] = useState<DashboardSummary | null>(null);
-  const [error, setError] = useState("");
+  const { data, error, loading, reload } = useWidgetQuery<DashboardSummary>(() => api.dashboardSummary());
 
-  useEffect(() => {
-    api.dashboardSummary().then(setData).catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load"));
-  }, []);
-
-  if (error) return <div className="widget-error">{error}</div>;
-  if (!data) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
+  if (error) return <WidgetError message={error} onRetry={reload} />;
+  if (loading || !data) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
   if (data.stuckTasks.length === 0) return <div className="widget-empty"><AlertTriangle style={{ width: 18, opacity: 0.4 }} /> No stuck tasks — nice!</div>;
 
   return (
