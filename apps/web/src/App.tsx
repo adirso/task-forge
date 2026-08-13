@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Notification, Phase, Project, Tag, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
-import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Pencil, Plus, Search, Settings, Tag as TagIcon, Trash2, X, Zap } from "lucide-react";
+import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Pencil, Plus, Search, Settings, Tag as TagIcon, Trash2, UsersRound, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
@@ -14,6 +14,7 @@ import { SearchPalette } from "./components/SearchPalette";
 import { SettingsPage } from "./components/SettingsPage";
 import { PhasesPage } from "./components/PhaseManager";
 import { ProjectDeleteModal } from "./components/ProjectDeleteModal";
+import { ProjectMembersModal } from "./components/ProjectMembersModal";
 import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
 import { AutomationManager } from "./components/AutomationManager";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
@@ -50,7 +51,15 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [textSize, setTextSize] = useState<"comfortable" | "large">(() => localStorage.getItem("taskforge_text_size") === "large" ? "large" : "comfortable");
   const [showDeleteProject, setShowDeleteProject] = useState(false);
+  const [showMembersModal, setShowMembersModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  function applyProjectMembers(updated: Project) {
+    if (currentProject?.id !== updated.id) return;
+    const memberIds = new Set(updated.members?.map((member) => member.id) ?? []);
+    setCurrentProject(updated);
+    setTasks((items) => items.map((task) => task.assigneeId && !memberIds.has(task.assigneeId) ? { ...task, assigneeId: null, assignee: null } : task));
+  }
 
   const loadProject = useCallback(async (id: string, phaseRef?: string | null) => {
     const [{ project }, taskData, phaseData, tagData] = await Promise.all([api.project(id), api.tasks(id), api.phases(id), api.tags(id)]);
@@ -232,12 +241,12 @@ export default function App() {
     <div className="app-shell">
       <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} />
       <main className="workspace">
-        {showSettings ? <SettingsPage user={user} users={allUsers} projects={projects} currentProject={currentProject} defaultView={localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board"} textSize={textSize} onUserUpdated={(updated) => { setUser(updated); setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); }} onAgentCreated={(created) => setAllUsers((items) => [...items, created])} onAgentUpdated={(updated) => { setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); setTasks((items) => items.map((task) => task.assigneeId === updated.id ? { ...task, assignee: updated } : task)); }} onAgentDeleted={(id) => setAllUsers((items) => items.filter((item) => item.id !== id))} onProjectMembersChanged={(updated) => { if (currentProject?.id === updated.id) { const memberIds = new Set(updated.members?.map((member) => member.id) ?? []); setCurrentProject(updated); setTasks((items) => items.map((task) => task.assigneeId && !memberIds.has(task.assigneeId) ? { ...task, assigneeId: null, assignee: null } : task)); } }} onDefaultViewChange={changeDefaultView} onTextSizeChange={changeTextSize} /> : currentProject ? <>
+        {showSettings ? <SettingsPage user={user} users={allUsers} projects={projects} currentProject={currentProject} defaultView={localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board"} textSize={textSize} onUserUpdated={(updated) => { setUser(updated); setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); }} onAgentCreated={(created) => setAllUsers((items) => [...items, created])} onAgentUpdated={(updated) => { setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); setTasks((items) => items.map((task) => task.assigneeId === updated.id ? { ...task, assignee: updated } : task)); }} onAgentDeleted={(id) => setAllUsers((items) => items.filter((item) => item.id !== id))} onProjectMembersChanged={applyProjectMembers} onDefaultViewChange={changeDefaultView} onTextSizeChange={changeTextSize} /> : currentProject ? <>
           <header className="project-header">
             <div className="breadcrumbs"><span>Projects</span><span>/</span><strong>{currentProject.name}</strong></div>
             <div className="project-title-row">
               <div><span className="project-logo" style={{ background: currentProject.color }}>{currentProject.key.slice(0, 1)}</span><div><h1>{currentProject.name}</h1><p>{currentProject.description}</p></div></div>
-              <div className="header-actions"><button className="mobile-settings-button" onClick={() => { setSelectedTask(null); setShowSettings(true); }} aria-label="Settings"><Settings /></button><button className="mobile-search-button" onClick={() => setShowSearch(true)} aria-label="Search all tasks"><Search /></button><button className="mobile-notification-button" onClick={() => setShowNotifications(true)} aria-label="Notifications"><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button><div className="avatar-stack">{members.slice(0, 4).map((member) => <Avatar key={member.id} user={member} size="sm" />)}{members.length > 4 && <span>+{members.length - 4}</span>}</div><button className="button button-secondary" onClick={() => copyProjectLink().catch(() => flash("Could not copy link"))}><Link2 /> Copy link</button>{(user.role === "ADMIN" || currentProject.ownerId === user.id) && <><button className="button button-secondary" onClick={() => setShowEditProject(true)}><Pencil /> Edit</button><button className="button button-project-delete" onClick={() => setShowDeleteProject(true)}><Trash2 /> Delete</button></>}<button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>
+              <div className="header-actions"><button className="mobile-settings-button" onClick={() => { setSelectedTask(null); setShowSettings(true); }} aria-label="Settings"><Settings /></button><button className="mobile-search-button" onClick={() => setShowSearch(true)} aria-label="Search all tasks"><Search /></button><button className="mobile-notification-button" onClick={() => setShowNotifications(true)} aria-label="Notifications"><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button><button type="button" className="avatar-stack" onClick={() => setShowMembersModal(true)} aria-label="Manage project members">{members.slice(0, 4).map((member) => <Avatar key={member.id} user={member} size="sm" />)}{members.length > 4 && <span>+{members.length - 4}</span>}</button><button className="button button-secondary" onClick={() => copyProjectLink().catch(() => flash("Could not copy link"))}><Link2 /> Copy link</button>{(user.role === "ADMIN" || currentProject.ownerId === user.id) && <><button className="button button-secondary" onClick={() => setShowMembersModal(true)}><UsersRound /> Members</button><button className="button button-secondary" onClick={() => setShowEditProject(true)}><Pencil /> Edit</button><button className="button button-project-delete" onClick={() => setShowDeleteProject(true)}><Trash2 /> Delete</button></>}<button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>
             </div>
             <div className="project-tabs"><button className={view === "board" ? "active" : ""} onClick={() => changeDefaultView("board")}><Kanban /> Board</button><button className={view === "list" ? "active" : ""} onClick={() => changeDefaultView("list")}><LayoutList /> List</button><button className={view === "phases" ? "active" : ""} onClick={() => setView("phases")}><Flag /> Phases</button><button className={view === "automations" ? "active" : ""} onClick={() => setView("automations")}><Zap /> Automations</button>{currentProject.repoUrl?.trim() && <a href={currentProject.repoUrl} target="_blank" rel="noreferrer"><Link2 /> Repository</a>}</div>
           </header>
@@ -262,6 +271,7 @@ export default function App() {
       {showProjectModal && <ProjectModal projects={projects} onClose={() => setShowProjectModal(false)} onSave={createProject} />}
       {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onSave={async ({ name, description, repoUrl, color }) => updateProject({ name, description, repoUrl, color })} />}
       {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
+      {showMembersModal && currentProject && <ProjectMembersModal project={currentProject} users={allUsers} currentUser={user} onClose={() => setShowMembersModal(false)} onChanged={applyProjectMembers} />}
       {showLogoutConfirm && <LogoutConfirmModal user={user} onClose={() => setShowLogoutConfirm(false)} onConfirm={logout} />}
       {showNotifications && <><button className="notification-scrim" aria-label="Close notifications" onClick={() => setShowNotifications(false)} /><NotificationPanel notifications={notifications} onClose={() => setShowNotifications(false)} onOpen={(notification) => openNotification(notification).catch(() => flash("Could not open notification"))} onReadAll={() => readAllNotifications().catch(() => flash("Could not update notifications"))} /></>}
       {showSearch && <SearchPalette onClose={() => setShowSearch(false)} onOpen={(task) => openSearchResult(task).catch(() => flash("Could not open task"))} />}
