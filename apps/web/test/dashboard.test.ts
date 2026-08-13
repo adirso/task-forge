@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultLayout, findNextSlot, normalizeLayout } from "../src/lib/dashboard.js";
+import { defaultLayout, findNextSlot, loadLayout, normalizeLayout, resetLayout } from "../src/lib/dashboard.js";
+
+function installMemoryStorage() {
+  const store = new Map<string, string>();
+  const storage = {
+    getItem(key: string) {
+      return store.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      store.set(key, value);
+    },
+    removeItem(key: string) {
+      store.delete(key);
+    },
+  };
+  Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
+  return store;
+}
 
 test("finds the first empty slot on an empty canvas", () => {
   assert.deepEqual(findNextSlot([], 6, 4), { x: 0, y: 0 });
@@ -70,4 +87,33 @@ test("does not overwrite a saved custom layout", () => {
     widgets: [{ id: "only_mine", type: "my_tasks" as const, x: 0, y: 0, w: 6, h: 5 }],
   };
   assert.deepEqual(normalizeLayout(saved, true), saved);
+});
+
+test("resetLayout restores the default widgets for members", () => {
+  installMemoryStorage();
+  const layout = resetLayout(false);
+  assert.deepEqual(layout, defaultLayout(false));
+  assert.deepEqual(loadLayout(false), defaultLayout(false));
+});
+
+test("resetLayout restores the default widgets including agent ops for admins", () => {
+  installMemoryStorage();
+  const layout = resetLayout(true);
+  assert.deepEqual(layout, defaultLayout(true));
+  assert.equal(layout.widgets.some((widget) => widget.type === "agent_ops"), true);
+});
+
+test("resetLayout overwrites a wrecked saved layout so the stored grid matches default", () => {
+  const store = installMemoryStorage();
+  store.set(
+    "taskforge_dashboard",
+    JSON.stringify({
+      version: 2,
+      widgets: [{ id: "wrecked", type: "activity", x: 9, y: 12, w: 3, h: 2 }],
+    }),
+  );
+  const layout = resetLayout(false);
+  assert.deepEqual(layout, defaultLayout(false));
+  assert.deepEqual(JSON.parse(store.get("taskforge_dashboard")!), defaultLayout(false));
+  assert.deepEqual(loadLayout(false), defaultLayout(false));
 });

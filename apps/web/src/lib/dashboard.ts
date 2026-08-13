@@ -134,6 +134,12 @@ export function saveLayout(layout: DashboardLayout): void {
   }
 }
 
+export function resetLayout(isAdmin = false): DashboardLayout {
+  const layout = defaultLayout(isAdmin);
+  saveLayout(layout);
+  return layout;
+}
+
 export function makeWidgetId(): string {
   return `w_${Math.random().toString(36).slice(2, 9)}`;
 }

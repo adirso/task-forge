@@ -582,6 +582,9 @@ html[data-text-size="large"] body { zoom: 1.08; }
 .dashboard-fab { display: flex; align-items: center; gap: 8px; padding: 12px 20px; background: #6554c0; color: white; border: 0; border-radius: 24px; font-size: 14px; font-weight: 650; cursor: pointer; box-shadow: 0 4px 16px rgba(101,84,192,.4); transition: background 0.15s, box-shadow 0.15s; }
 .dashboard-fab:hover { background: #5243aa; box-shadow: 0 6px 24px rgba(101,84,192,.5); }
 .dashboard-fab svg { width: 16px; }
+.dashboard-fab-reset { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: white; color: #42526e; border: 1px solid #dfe1e6; border-radius: 24px; font-size: 13px; font-weight: 650; cursor: pointer; box-shadow: 0 2px 8px rgba(9,30,66,.08); transition: background 0.15s, color 0.15s; }
+.dashboard-fab-reset:hover { background: #f4f5f7; color: #172b4d; }
+.dashboard-fab-reset svg { width: 15px; }
 .widget-picker { background: white; border: 1px solid #dfe1e6; border-radius: 14px; box-shadow: 0 8px 32px rgba(9,30,66,.16); width: 300px; overflow: hidden; }
 .widget-picker-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #f0f1f3; font-size: 13px; font-weight: 650; color: #172b4d; }
 .widget-picker-close { border: 0; background: transparent; color: #8993a4; cursor: pointer; display: flex; padding: 4px; border-radius: 5px; }
