@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Notification, Phase, Project, Tag, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
-import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Pencil, Plus, Search, Settings, Tag as TagIcon, Trash2, UsersRound, X, Zap } from "lucide-react";
+import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Plus, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
-import { Avatar } from "./components/Avatar";
 import { BoardView } from "./components/BoardView";
 import { ListView } from "./components/ListView";
 import { TaskModal } from "./components/TaskModal";
@@ -15,6 +14,7 @@ import { SettingsPage } from "./components/SettingsPage";
 import { PhasesPage } from "./components/PhaseManager";
 import { ProjectDeleteModal } from "./components/ProjectDeleteModal";
 import { ProjectMembersModal } from "./components/ProjectMembersModal";
+import { ProjectHeaderActions } from "./components/ProjectHeaderActions";
 import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
 import { AutomationManager } from "./components/AutomationManager";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
@@ -246,7 +246,20 @@ export default function App() {
             <div className="breadcrumbs"><span>Projects</span><span>/</span><strong>{currentProject.name}</strong></div>
             <div className="project-title-row">
               <div><span className="project-logo" style={{ background: currentProject.color }}>{currentProject.key.slice(0, 1)}</span><div><h1>{currentProject.name}</h1><p>{currentProject.description}</p></div></div>
-              <div className="header-actions"><button className="mobile-settings-button" onClick={() => { setSelectedTask(null); setShowSettings(true); }} aria-label="Settings"><Settings /></button><button className="mobile-search-button" onClick={() => setShowSearch(true)} aria-label="Search all tasks"><Search /></button><button className="mobile-notification-button" onClick={() => setShowNotifications(true)} aria-label="Notifications"><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button><button type="button" className="avatar-stack" onClick={() => setShowMembersModal(true)} aria-label="Manage project members">{members.slice(0, 4).map((member) => <Avatar key={member.id} user={member} size="sm" />)}{members.length > 4 && <span>+{members.length - 4}</span>}</button><button className="button button-secondary" onClick={() => copyProjectLink().catch(() => flash("Could not copy link"))}><Link2 /> Copy link</button>{(user.role === "ADMIN" || currentProject.ownerId === user.id) && <><button className="button button-secondary" onClick={() => setShowMembersModal(true)}><UsersRound /> Members</button><button className="button button-secondary" onClick={() => setShowEditProject(true)}><Pencil /> Edit</button><button className="button button-project-delete" onClick={() => setShowDeleteProject(true)}><Trash2 /> Delete</button></>}<button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>
+              <div className="header-actions">
+                <button className="mobile-settings-button" onClick={() => { setSelectedTask(null); setShowSettings(true); }} aria-label="Settings"><Settings /></button>
+                <button className="mobile-search-button" onClick={() => setShowSearch(true)} aria-label="Search all tasks"><Search /></button>
+                <button className="mobile-notification-button" onClick={() => setShowNotifications(true)} aria-label="Notifications"><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button>
+                <ProjectHeaderActions
+                  members={members}
+                  canManageProject={user.role === "ADMIN" || currentProject.ownerId === user.id}
+                  onOpenMembers={() => setShowMembersModal(true)}
+                  onCopyLink={() => { copyProjectLink().catch(() => flash("Could not copy link")); }}
+                  onEdit={() => setShowEditProject(true)}
+                  onDelete={() => setShowDeleteProject(true)}
+                  onCreateTask={() => setNewTaskStatus("TODO")}
+                />
+              </div>
             </div>
             <div className="project-tabs"><button className={view === "board" ? "active" : ""} onClick={() => changeDefaultView("board")}><Kanban /> Board</button><button className={view === "list" ? "active" : ""} onClick={() => changeDefaultView("list")}><LayoutList /> List</button><button className={view === "phases" ? "active" : ""} onClick={() => setView("phases")}><Flag /> Phases</button><button className={view === "automations" ? "active" : ""} onClick={() => setView("automations")}><Zap /> Automations</button>{currentProject.repoUrl?.trim() && <a href={currentProject.repoUrl} target="_blank" rel="noreferrer"><Link2 /> Repository</a>}</div>
           </header>
