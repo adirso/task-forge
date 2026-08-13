@@ -11,6 +11,7 @@ import {
   CheckSquare,
   LayoutDashboard,
   Plus,
+  RotateCcw,
   TrendingUp,
   X,
 } from "lucide-react";
@@ -30,6 +31,7 @@ import {
   GRID_ROW_HEIGHT,
   loadLayout,
   makeWidgetId,
+  resetLayout,
   saveLayout,
   WIDGET_DESCRIPTIONS,
   WIDGET_LABELS,
@@ -121,6 +123,14 @@ export function DashboardPage({ currentUser }: { currentUser: User }) {
 
   function removeWidget(id: string) {
     persist({ version: 2, widgets: layout.widgets.filter((widget) => widget.id !== id) });
+  }
+
+  function handleResetLayout() {
+    if (!window.confirm("Reset the dashboard to the default layout? Your current widget arrangement will be lost.")) {
+      return;
+    }
+    persist(resetLayout(currentUser.role === "ADMIN"));
+    setShowPicker(false);
   }
 
   function handleLayoutChange(next: Layout) {
@@ -215,6 +225,14 @@ export function DashboardPage({ currentUser }: { currentUser: User }) {
             </div>
           </div>
         )}
+        <button
+          type="button"
+          className="dashboard-fab-reset"
+          onClick={handleResetLayout}
+          aria-label="Reset layout"
+        >
+          <RotateCcw /> Reset layout
+        </button>
         <button
           type="button"
           className="dashboard-fab"
