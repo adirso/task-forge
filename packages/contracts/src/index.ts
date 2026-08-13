@@ -324,6 +324,32 @@ export interface AgentOpsEntry {
   inProgressTasks: AgentOpsTask[];
 }
 
+export interface DashboardSummaryProject {
+  id: string;
+  name: string;
+  key: string;
+  color: string;
+  counts: { TODO: number; IN_PROGRESS: number; IN_REVIEW: number; DONE: number; BACKLOG: number; total: number };
+}
+
+export interface DashboardSummaryTask {
+  id: string;
+  number: number;
+  title: string;
+  projectId: string;
+  projectKey: string;
+  projectName: string;
+  status: TaskStatus;
+  assigneeName: string | null;
+  updatedAt: string;
+}
+
+export interface DashboardSummary {
+  projects: DashboardSummaryProject[];
+  myTasks: DashboardSummaryTask[];
+  stuckTasks: DashboardSummaryTask[];
+}
+
 export interface ApiTokenMetadata {
   id: string;
   name: string;

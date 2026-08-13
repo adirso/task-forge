@@ -95,7 +95,7 @@ export function AgentOpsPage({ onOpenAgent }: { onOpenAgent?: (agentId: string) 
                   >
                     <span className="ops-task-key">{task.projectKey}-{task.number}</span>
                     <span className="ops-task-title">{task.title}</span>
-                    {task.isStuck && <AlertTriangle title="Stuck — not updated in 4+ hours" />}
+                    {task.isStuck && <span title="Stuck — not updated in 4+ hours"><AlertTriangle /></span>}
                   </button>
                 ))}
                 {agent.inProgressTasks.length > 5 && (

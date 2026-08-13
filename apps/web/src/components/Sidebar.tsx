@@ -1,9 +1,9 @@
 import type { Project, User } from "@taskforge/contracts";
-import { Bell, ChevronDown, Layers3, Plus, Search, Settings } from "lucide-react";
+import { Bell, ChevronDown, LayoutDashboard, Layers3, Plus, Search, Settings } from "lucide-react";
 import { Avatar } from "./Avatar";
 
-export function Sidebar({ projects, currentId, user, unreadCount, settingsActive, onSearch, onNotifications, onSettings, onSelect, onCreate, onLogout, onReorder }: {
-  projects: Project[]; currentId: string | null; user: User; unreadCount: number; settingsActive: boolean; onSearch: () => void; onNotifications: () => void; onSettings: () => void; onSelect: (id: string) => void; onCreate: () => void; onLogout: () => void; onReorder: (projectIds: string[]) => void;
+export function Sidebar({ projects, currentId, user, unreadCount, settingsActive, dashboardActive, onSearch, onNotifications, onSettings, onSelect, onCreate, onLogout, onReorder, onHome }: {
+  projects: Project[]; currentId: string | null; user: User; unreadCount: number; settingsActive: boolean; dashboardActive: boolean; onSearch: () => void; onNotifications: () => void; onSettings: () => void; onSelect: (id: string) => void; onCreate: () => void; onLogout: () => void; onReorder: (projectIds: string[]) => void; onHome: () => void;
 }) {
   function moveProject(sourceId: string, targetId: string) {
     if (sourceId === targetId) return;
@@ -15,6 +15,7 @@ export function Sidebar({ projects, currentId, user, unreadCount, settingsActive
     <aside className="sidebar">
       <div className="brand-lockup"><span className="brand-mark"><Layers3 /></span>TaskForge</div>
       <nav className="main-nav">
+        <button className={dashboardActive ? "active" : ""} onClick={onHome}><LayoutDashboard /><span>Home</span></button>
         <button onClick={onSearch}><Search /><span>Search</span><kbd>⌘ K</kbd></button>
         <button onClick={onNotifications} aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}><Bell /><span>Notifications</span>{unreadCount > 0 && <i>{unreadCount > 99 ? "99+" : unreadCount}</i>}</button>
       </nav>

@@ -17,6 +17,7 @@ import { ProjectMembersModal } from "./components/ProjectMembersModal";
 import { ProjectHeaderActions } from "./components/ProjectHeaderActions";
 import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
 import { AutomationManager } from "./components/AutomationManager";
+import { DashboardPage } from "./components/DashboardPage";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
 
 type DefaultView = "board" | "list";
@@ -86,7 +87,7 @@ export default function App() {
       } catch {
         if (projectList[0]) await loadProject(projectList[0].id);
       }
-    } else if (projectList[0]) await loadProject(projectList[0].id);
+    }
   }, [loadProject]);
 
   useEffect(() => {
@@ -124,6 +125,12 @@ export default function App() {
       const phaseQuery = view === "board" ? boardPhaseQueryValue(phases.find((phase) => phase.id === boardPhaseId) ?? null, phases.find((phase) => phase.isActive) ?? null) : null;
       if (phaseQuery) url.searchParams.set("phase", phaseQuery);
       else url.searchParams.delete("phase");
+    } else {
+      url.searchParams.delete("settings");
+      url.searchParams.delete("project");
+      url.searchParams.delete("task");
+      url.searchParams.delete("phase");
+      url.searchParams.delete("view");
     }
     window.history.replaceState({}, "", url);
   }, [user, showSettings, currentProject, selectedTask, view, boardPhaseId, phases]);
@@ -239,7 +246,7 @@ export default function App() {
   const members = currentProject?.members ?? allUsers.filter((candidate) => candidate.id === user.id);
   return (
     <div className="app-shell">
-      <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} />
+      <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} dashboardActive={!showSettings && !currentProject} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} onHome={() => { setShowSettings(false); setCurrentProject(null); setSelectedTask(null); }} />
       <main className="workspace">
         {showSettings ? <SettingsPage user={user} users={allUsers} defaultView={localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board"} textSize={textSize} onUserUpdated={(updated) => { setUser(updated); setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); }} onAgentCreated={(created) => setAllUsers((items) => [...items, created])} onAgentUpdated={(updated) => { setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); setTasks((items) => items.map((task) => task.assigneeId === updated.id ? { ...task, assignee: updated } : task)); }} onAgentDeleted={(id) => setAllUsers((items) => items.filter((item) => item.id !== id))} onDefaultViewChange={changeDefaultView} onTextSizeChange={changeTextSize} /> : currentProject ? <>
           <header className="project-header">
@@ -278,7 +285,7 @@ export default function App() {
           <section className={`content-area${view === "automations" ? " automations-hidden" : ""}`}>
             {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={(updated) => { setPhases(updated); setBoardPhaseId((selectedId) => updated.some((phase) => phase.id === selectedId) ? selectedId : resolveBoardPhase(updated)?.id ?? null); setTasks((items) => items.map((task) => task.phaseId && !updated.some((phase) => phase.id === task.phaseId) ? { ...task, phaseId: null } : task)); }} /> : view === "board" ? <>{selectedBoardPhase ? <><div className={`active-phase-banner${selectedBoardPhase.isActive ? "" : " viewing-phase"}`}><span className="phase-number-badge">{selectedBoardPhase.number}</span><div className="phase-banner-copy"><span>{selectedBoardPhase.isActive ? "Active phase" : "Viewing phase"}</span><strong>Phase {selectedBoardPhase.number}</strong><p>{selectedBoardPhase.goal}</p></div><label className="board-phase-selector"><span>Board phase</span><div><select aria-label="Board phase" value={selectedBoardPhase.id} onChange={(event) => setBoardPhaseId(event.target.value)}>{[...phases].sort((a, b) => a.number - b.number).map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select><ChevronDown /></div></label><small>{boardTasks.length} {boardTasks.length === 1 ? "task" : "tasks"}</small><button className="button button-secondary" onClick={() => setView("phases")}>Manage phases</button></div>{selectedPhaseHasTasks ? <BoardView tasks={boardTasks} project={currentProject} onOpen={setSelectedTask} onCreate={setNewTaskStatus} onMove={moveTask} /> : <div className="empty-board-phase"><Flag /><strong>No tasks in Phase {selectedBoardPhase.number}</strong><span>This phase is ready for its first task.</span><button className="button button-primary" onClick={() => setNewTaskStatus("TODO")}><Plus /> Create task</button></div>}</> : <div className="no-active-phase"><Flag /><div><strong>No active phase</strong><span>Choose an active phase to populate the board.</span></div><button className="button button-primary" onClick={() => setView("phases")}>Manage phases</button></div>}</> : <ListView tasks={visibleTasks} phases={phases} project={currentProject} onOpen={setSelectedTask} />}
           </section>
-        </> : <div className="empty-project"><h1>Create your first project</h1><p>Projects organize the shared work of people and agents.</p><button className="button button-primary" onClick={() => setShowProjectModal(true)}><Plus /> Create project</button></div>}
+        </> : <DashboardPage currentUser={user} />}
       </main>
       {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? "TODO"} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} availableTags={tags} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
       {showProjectModal && <ProjectModal projects={projects} onClose={() => setShowProjectModal(false)} onSave={createProject} />}
