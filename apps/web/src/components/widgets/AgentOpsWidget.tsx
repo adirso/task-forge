@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
 import type { AgentOpsEntry } from "@taskforge/contracts";
 import { AlertTriangle, Bot, ShieldCheck } from "lucide-react";
 import { api } from "../../lib/api";
 import { openTask } from "../../lib/dashboardNav";
+import { useWidgetQuery } from "../../lib/widgetQuery";
 import type { User } from "@taskforge/contracts";
 import { Avatar } from "../Avatar";
+import { WidgetError } from "../WidgetShell";
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -17,16 +18,13 @@ function formatRelative(iso: string) {
 }
 
 export function AgentOpsWidget({ currentUser }: { currentUser: User }) {
-  const [agents, setAgents] = useState<AgentOpsEntry[] | null>(null);
-  const [error, setError] = useState("");
+  const isAdmin = currentUser.role === "ADMIN";
+  const { data: agents, error, loading, reload } = useWidgetQuery<AgentOpsEntry[]>(
+    () => api.agentOps().then((res) => res.agents),
+    { enabled: isAdmin },
+  );
 
-  useEffect(() => {
-    api.agentOps()
-      .then(({ agents: data }) => setAgents(data))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load"));
-  }, []);
-
-  if (currentUser.role !== "ADMIN") {
+  if (!isAdmin) {
     return (
       <div className="widget-empty">
         <ShieldCheck style={{ width: 20, opacity: 0.5 }} />
@@ -35,8 +33,8 @@ export function AgentOpsWidget({ currentUser }: { currentUser: User }) {
     );
   }
 
-  if (error) return <div className="widget-error">{error}</div>;
-  if (!agents) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
+  if (error) return <WidgetError message={error} onRetry={reload} />;
+  if (loading || !agents) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
   if (agents.length === 0) return <div className="widget-empty"><Bot style={{ width: 20, opacity: 0.4 }} /> No agents yet.</div>;
 
   return (

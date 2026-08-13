@@ -484,9 +484,9 @@ html[data-text-size="large"] body { zoom: 1.08; }
 .widget-header-icon { display: flex; color: #6554c0; }
 .widget-header-icon svg { width: 15px; }
 .widget-header-title { flex: 1; font-size: 13px; font-weight: 650; color: #172b4d; }
-.widget-close { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; background: transparent; color: #8993a4; border-radius: 6px; cursor: pointer; flex-shrink: 0; }
-.widget-close:hover { background: #f4f5f7; color: #172b4d; }
-.widget-close svg { width: 14px; }
+.widget-refresh, .widget-close { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; background: transparent; color: #8993a4; border-radius: 6px; cursor: pointer; flex-shrink: 0; }
+.widget-refresh:hover, .widget-close:hover { background: #f4f5f7; color: #172b4d; }
+.widget-refresh svg, .widget-close svg { width: 14px; }
 .widget-body { padding: 16px; overflow-y: auto; flex: 1; min-height: 0; }
 
 /* Widget states */
@@ -495,7 +495,9 @@ html[data-text-size="large"] body { zoom: 1.08; }
 .widget-skeleton:nth-child(2) { width: 80%; }
 .widget-skeleton:nth-child(3) { width: 60%; }
 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-.widget-error { color: #bf2600; font-size: 13px; }
+.widget-error { color: #bf2600; font-size: 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.widget-retry { border: 1px solid #ffbdad; background: white; color: #bf2600; border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 650; cursor: pointer; }
+.widget-retry:hover { background: #ffebe6; }
 .widget-empty { color: #8993a4; font-size: 13px; display: flex; align-items: center; gap: 8px; }
 
 /* Project status widget */

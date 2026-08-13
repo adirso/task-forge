@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
 import type { ActivityEvent } from "@taskforge/contracts";
 import { api } from "../../lib/api";
 import { activityHref, openHref } from "../../lib/dashboardNav";
+import { useWidgetQuery } from "../../lib/widgetQuery";
 import { Avatar } from "../Avatar";
+import { WidgetError } from "../WidgetShell";
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -30,17 +31,10 @@ function actionLabel(event: ActivityEvent): string {
 }
 
 export function ActivityWidget() {
-  const [events, setEvents] = useState<ActivityEvent[] | null>(null);
-  const [error, setError] = useState("");
+  const { data: events, error, loading, reload } = useWidgetQuery<ActivityEvent[]>(() => api.activityFeed(20).then((res) => res.activity));
 
-  useEffect(() => {
-    api.activityFeed(20)
-      .then((res) => setEvents(res.activity))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load"));
-  }, []);
-
-  if (error) return <div className="widget-error">{error}</div>;
-  if (!events) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
+  if (error) return <WidgetError message={error} onRetry={reload} />;
+  if (loading || !events) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
   if (events.length === 0) return <div className="widget-empty">No recent activity.</div>;
 
   return (
