@@ -14,7 +14,9 @@ export interface UserEntity {
 export interface ActivityEntity {
   id: string;
   projectId: string;
+  projectKey: string;
   taskId: string | null;
+  taskNumber: number | null;
   actorId: string;
   actorName: string;
   actorKind: UserKind;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DashboardSummary } from "@taskforge/contracts";
 import { api } from "../../lib/api";
+import { openProject } from "../../lib/dashboardNav";
 
 export function ProjectProgressWidget() {
   const [data, setData] = useState<DashboardSummary | null>(null);
@@ -19,7 +20,7 @@ export function ProjectProgressWidget() {
       {data.projects.map((p) => {
         const pct = p.counts.total === 0 ? 0 : Math.round((p.counts.DONE / p.counts.total) * 100);
         return (
-          <div key={p.id} className="wpp-row">
+          <button key={p.id} type="button" className="wpp-row" onClick={() => openProject(p.key)}>
             <div className="wpp-header">
               <span className="wpp-dot" style={{ background: p.color }} />
               <span className="wpp-name" title={p.name}>{p.name}</span>
@@ -29,7 +30,7 @@ export function ProjectProgressWidget() {
               <div className="wpp-fill" style={{ width: `${pct}%`, background: p.color }} />
             </div>
             <div className="wpp-sub">{p.counts.DONE} of {p.counts.total} tasks done</div>
-          </div>
+          </button>
         );
       })}
     </div>

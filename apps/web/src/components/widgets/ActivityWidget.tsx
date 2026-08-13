@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ActivityEvent } from "@taskforge/contracts";
 import { api } from "../../lib/api";
+import { activityHref, openHref } from "../../lib/dashboardNav";
 import { Avatar } from "../Avatar";
 
 function formatRelative(iso: string) {
@@ -44,29 +45,39 @@ export function ActivityWidget() {
 
   return (
     <div className="widget-activity">
-      {events.map((event) => (
-        <div key={event.id} className="wa-row">
-          <Avatar
-            user={{
-              id: event.actorId,
-              name: event.actorName || "Someone",
-              email: null,
-              kind: event.actorKind,
-              role: "MEMBER",
-              avatarUrl: event.actorAvatarUrl,
-              createdAt: event.createdAt,
-            }}
-            size="sm"
-          />
-          <div className="wa-body">
-            <span className="wa-actor">{event.actorName || "Someone"}</span>
-            {" "}
-            <span className="wa-action">{actionLabel(event)}</span>
-            {typeof event.metadata.title === "string" && <span className="wa-task">: {event.metadata.title}</span>}
-          </div>
-          <span className="wa-time">{formatRelative(event.createdAt)}</span>
-        </div>
-      ))}
+      {events.map((event) => {
+        const href = activityHref(window.location.href, event);
+        const content = (
+          <>
+            <Avatar
+              user={{
+                id: event.actorId,
+                name: event.actorName || "Someone",
+                email: null,
+                kind: event.actorKind,
+                role: "MEMBER",
+                avatarUrl: event.actorAvatarUrl,
+                createdAt: event.createdAt,
+              }}
+              size="sm"
+            />
+            <div className="wa-body">
+              <span className="wa-actor">{event.actorName || "Someone"}</span>
+              {" "}
+              <span className="wa-action">{actionLabel(event)}</span>
+              {typeof event.metadata.title === "string" && <span className="wa-task">: {event.metadata.title}</span>}
+            </div>
+            <span className="wa-time">{formatRelative(event.createdAt)}</span>
+          </>
+        );
+        return href ? (
+          <button key={event.id} type="button" className="wa-row wa-row-link" onClick={() => openHref(href)}>
+            {content}
+          </button>
+        ) : (
+          <div key={event.id} className="wa-row">{content}</div>
+        );
+      })}
     </div>
   );
 }

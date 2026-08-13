@@ -216,11 +216,11 @@ function createActivityRepository(db: DatabasePort): ActivityRepository {
       if (filters.taskId) { where.push("a.task_id = ?"); params.push(filters.taskId); }
       if (filters.actorId) { where.push("a.actor_id = ?"); params.push(filters.actorId); }
       const limit = filters.limit ?? 50;
-      const rows = await db.prepare(`SELECT a.*, u.name AS actor_name, u.kind AS actor_kind, u.avatar_url AS actor_avatar_url FROM activity a JOIN users u ON u.id = a.actor_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY a.created_at DESC LIMIT ?`).all(...params, limit);
+      const rows = await db.prepare(`SELECT a.*, u.name AS actor_name, u.kind AS actor_kind, u.avatar_url AS actor_avatar_url, p.\`key\` AS project_key, t.number AS task_number FROM activity a JOIN users u ON u.id = a.actor_id JOIN projects p ON p.id = a.project_id LEFT JOIN tasks t ON t.id = a.task_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY a.created_at DESC LIMIT ?`).all(...params, limit);
       return rows.map((row) => {
         let metadata: Record<string, unknown> = {};
         try { metadata = JSON.parse(String(row.metadata ?? "{}")); } catch { /* empty */ }
-        return { id: text(row.id), projectId: text(row.project_id), taskId: nullableText(row.task_id), actorId: text(row.actor_id), actorName: text(row.actor_name), actorKind: row.actor_kind as UserEntity["kind"], actorAvatarUrl: nullableText(row.actor_avatar_url), action: text(row.action), metadata, createdAt: date(row.created_at) };
+        return { id: text(row.id), projectId: text(row.project_id), projectKey: text(row.project_key), taskId: nullableText(row.task_id), taskNumber: row.task_number == null ? null : Number(row.task_number), actorId: text(row.actor_id), actorName: text(row.actor_name), actorKind: row.actor_kind as UserEntity["kind"], actorAvatarUrl: nullableText(row.actor_avatar_url), action: text(row.action), metadata, createdAt: date(row.created_at) };
       });
     },
   };

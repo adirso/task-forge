@@ -1,20 +1,13 @@
 import { useEffect, useState } from "react";
 import type { DashboardSummary } from "@taskforge/contracts";
 import { api } from "../../lib/api";
+import { openTask } from "../../lib/dashboardNav";
 
 const STATUS_LABELS: Record<string, string> = {
   TODO: "Todo",
   IN_PROGRESS: "In progress",
   IN_REVIEW: "In review",
 };
-
-function openTask(projectKey: string, number: number) {
-  const url = new URL(window.location.href);
-  url.search = "";
-  url.searchParams.set("project", projectKey);
-  url.searchParams.set("task", `${projectKey}-${number}`);
-  window.location.href = url.toString();
-}
 
 export function MyTasksWidget() {
   const [data, setData] = useState<DashboardSummary | null>(null);
