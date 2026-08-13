@@ -28,7 +28,9 @@ export function AgentOpsWidget({ currentUser }: { currentUser: User }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.agentOps().then(setAgents).catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load"));
+    api.agentOps()
+      .then(({ agents: data }) => setAgents(data))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, []);
 
   if (currentUser.role !== "ADMIN") {

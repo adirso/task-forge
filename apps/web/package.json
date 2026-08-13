@@ -14,7 +14,7 @@
     "lucide-react": "^0.475.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-draggable": "^4.7.1"
+    "react-grid-layout": "^2.2.4"
   },
   "devDependencies": {
     "@types/react": "^19.0.8",

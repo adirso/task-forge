@@ -18,7 +18,7 @@ function actionLabel(event: ActivityEvent): string {
     case "task.created": return "created a task";
     case "task.updated": return "updated a task";
     case "task.deleted": return "deleted a task";
-    case "task.status_changed": return `moved to ${(event.meta as { to?: string })?.to ?? "a new status"}`;
+    case "task.status_changed": return `moved to ${(event.metadata.to as string | undefined) ?? "a new status"}`;
     case "task.assigned": return "assigned a task";
     case "task.update_added": return "posted an update";
     case "task.attachment_added": return "added an attachment";
@@ -46,12 +46,23 @@ export function ActivityWidget() {
     <div className="widget-activity">
       {events.map((event) => (
         <div key={event.id} className="wa-row">
-          <Avatar user={{ name: event.actorName ?? "?", avatarUrl: null, kind: "HUMAN" }} size="sm" />
+          <Avatar
+            user={{
+              id: event.actorId,
+              name: event.actorName || "Someone",
+              email: null,
+              kind: event.actorKind,
+              role: "MEMBER",
+              avatarUrl: event.actorAvatarUrl,
+              createdAt: event.createdAt,
+            }}
+            size="sm"
+          />
           <div className="wa-body">
-            <span className="wa-actor">{event.actorName ?? "Someone"}</span>
+            <span className="wa-actor">{event.actorName || "Someone"}</span>
             {" "}
             <span className="wa-action">{actionLabel(event)}</span>
-            {event.taskTitle && <span className="wa-task">: {event.taskTitle}</span>}
+            {typeof event.metadata.title === "string" && <span className="wa-task">: {event.metadata.title}</span>}
           </div>
           <span className="wa-time">{formatRelative(event.createdAt)}</span>
         </div>

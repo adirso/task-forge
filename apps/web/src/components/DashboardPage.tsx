@@ -1,4 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import ReactGridLayout, { useContainerWidth } from "react-grid-layout";
+import { getCompactor } from "react-grid-layout/core";
+import { GridBackground } from "react-grid-layout/extras";
+import type { Layout } from "react-grid-layout";
 import {
   Activity,
   AlertTriangle,
@@ -18,15 +22,23 @@ import { StuckTasksWidget } from "./widgets/StuckTasksWidget";
 import { ActivityWidget } from "./widgets/ActivityWidget";
 import { AgentOpsWidget } from "./widgets/AgentOpsWidget";
 import {
+  DEFAULT_WIDGET_SIZE,
+  findNextSlot,
+  GRID_COLS,
+  GRID_MARGIN,
+  GRID_PADDING,
+  GRID_ROW_HEIGHT,
   loadLayout,
   makeWidgetId,
   saveLayout,
   WIDGET_DESCRIPTIONS,
   WIDGET_LABELS,
-  type WidgetInstance,
+  type DashboardLayout,
   type WidgetType,
 } from "../lib/dashboard";
 import type { User } from "@taskforge/contracts";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 
 const WIDGET_ICONS: Record<WidgetType, React.ReactNode> = {
   project_status: <BarChart2 />,
@@ -46,6 +58,15 @@ const ALL_TYPES: WidgetType[] = [
   "agent_ops",
 ];
 
+const gridCompactor = getCompactor(null, false, true);
+
+const GRID_CONFIG = {
+  cols: GRID_COLS,
+  rowHeight: GRID_ROW_HEIGHT,
+  margin: GRID_MARGIN,
+  containerPadding: GRID_PADDING,
+};
+
 function renderWidgetContent(type: WidgetType, currentUser: User) {
   switch (type) {
     case "project_status": return <ProjectStatusWidget />;
@@ -58,48 +79,70 @@ function renderWidgetContent(type: WidgetType, currentUser: User) {
 }
 
 export function DashboardPage({ currentUser }: { currentUser: User }) {
+  const { width, containerRef, mounted } = useContainerWidth();
   const [layout, setLayout] = useState(loadLayout);
   const [showPicker, setShowPicker] = useState(false);
-  const [topId, setTopId] = useState<string | null>(null);
+
+  const gridLayout = useMemo<Layout>(
+    () => layout.widgets.map((widget) => {
+      const size = DEFAULT_WIDGET_SIZE[widget.type];
+      return {
+        i: widget.id,
+        x: widget.x,
+        y: widget.y,
+        w: widget.w,
+        h: widget.h,
+        minW: size.minW,
+        minH: size.minH,
+      };
+    }),
+    [layout.widgets],
+  );
+
+  const gridRows = Math.max(
+    8,
+    layout.widgets.reduce((max, widget) => Math.max(max, widget.y + widget.h), 0) + 2,
+  );
+
+  function persist(next: DashboardLayout) {
+    setLayout(next);
+    saveLayout(next);
+  }
 
   function addWidget(type: WidgetType) {
-    const offset = layout.widgets.length * 20;
-    const newWidget: WidgetInstance = {
-      id: makeWidgetId(),
-      type,
-      x: 24 + offset,
-      y: 24 + offset,
-    };
-    const updated = { widgets: [...layout.widgets, newWidget] };
-    setLayout(updated);
-    saveLayout(updated);
+    const size = DEFAULT_WIDGET_SIZE[type];
+    const slot = findNextSlot(layout.widgets, size.w, size.h);
+    persist({
+      version: 2,
+      widgets: [...layout.widgets, { id: makeWidgetId(), type, ...size, ...slot }],
+    });
     setShowPicker(false);
-    setTopId(newWidget.id);
   }
 
   function removeWidget(id: string) {
-    const updated = { widgets: layout.widgets.filter((w) => w.id !== id) };
-    setLayout(updated);
-    saveLayout(updated);
+    persist({ version: 2, widgets: layout.widgets.filter((widget) => widget.id !== id) });
   }
 
-  function handleStop(id: string, x: number, y: number) {
-    const updated = {
-      widgets: layout.widgets.map((w) => w.id === id ? { ...w, x, y } : w),
-    };
-    setLayout(updated);
-    saveLayout(updated);
-  }
-
-  const zOrder = layout.widgets.map((w) => w.id);
-  function getZ(id: string) {
-    if (id === topId) return layout.widgets.length + 1;
-    return zOrder.indexOf(id) + 1;
+  function handleLayoutChange(next: Layout) {
+    const byId = new Map(next.map((item) => [item.i, item]));
+    const unchanged = layout.widgets.every((widget) => {
+      const item = byId.get(widget.id);
+      return item && item.x === widget.x && item.y === widget.y && item.w === widget.w && item.h === widget.h;
+    });
+    if (unchanged && next.length === layout.widgets.length) return;
+    persist({
+      version: 2,
+      widgets: layout.widgets.map((widget) => {
+        const item = byId.get(widget.id);
+        if (!item) return widget;
+        return { ...widget, x: item.x, y: item.y, w: item.w, h: item.h };
+      }),
+    });
   }
 
   return (
     <div className="dashboard-page">
-      <div className="dashboard-canvas">
+      <div className="dashboard-canvas" ref={containerRef}>
         {layout.widgets.length === 0 && (
           <div className="dashboard-empty">
             <LayoutDashboard />
@@ -108,25 +151,45 @@ export function DashboardPage({ currentUser }: { currentUser: User }) {
           </div>
         )}
 
-        {layout.widgets.map((w) => (
-          <WidgetShell
-            key={w.id}
-            id={w.id}
-            type={w.type}
-            x={w.x}
-            y={w.y}
-            icon={WIDGET_ICONS[w.type]}
-            onClose={() => removeWidget(w.id)}
-            onStop={(x, y) => handleStop(w.id, x, y)}
-            zIndex={getZ(w.id)}
-            onFocus={() => setTopId(w.id)}
-          >
-            {renderWidgetContent(w.type, currentUser)}
-          </WidgetShell>
-        ))}
+        {mounted && (
+          <>
+            <GridBackground
+              width={width}
+              cols={GRID_COLS}
+              rowHeight={GRID_ROW_HEIGHT}
+              margin={GRID_MARGIN}
+              containerPadding={GRID_PADDING}
+              rows={gridRows}
+              color="#e8eaed"
+              borderRadius={12}
+              className="dashboard-grid-bg"
+            />
+            <ReactGridLayout
+              width={width}
+              layout={gridLayout}
+              gridConfig={GRID_CONFIG}
+              dragConfig={{ enabled: true, handle: ".widget-drag-handle", bounded: true }}
+              resizeConfig={{ enabled: true, handles: ["se", "e", "s"] }}
+              compactor={gridCompactor}
+              onLayoutChange={handleLayoutChange}
+              className="dashboard-grid"
+            >
+              {layout.widgets.map((widget) => (
+                <div key={widget.id} className="dashboard-grid-item">
+                  <WidgetShell
+                    type={widget.type}
+                    icon={WIDGET_ICONS[widget.type]}
+                    onClose={() => removeWidget(widget.id)}
+                  >
+                    {renderWidgetContent(widget.type, currentUser)}
+                  </WidgetShell>
+                </div>
+              ))}
+            </ReactGridLayout>
+          </>
+        )}
       </div>
 
-      {/* Widget picker */}
       <div className="dashboard-fab-area">
         {showPicker && (
           <div className="widget-picker">
@@ -155,7 +218,7 @@ export function DashboardPage({ currentUser }: { currentUser: User }) {
         <button
           type="button"
           className="dashboard-fab"
-          onClick={() => setShowPicker((s) => !s)}
+          onClick={() => setShowPicker((open) => !open)}
           aria-label="Add widget"
         >
           <Plus /> Add widget

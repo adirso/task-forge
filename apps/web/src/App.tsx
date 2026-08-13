@@ -87,7 +87,7 @@ export default function App() {
       } catch {
         if (projectList[0]) await loadProject(projectList[0].id);
       }
-    } else if (projectList[0]) await loadProject(projectList[0].id);
+    }
   }, [loadProject]);
 
   useEffect(() => {
@@ -125,6 +125,12 @@ export default function App() {
       const phaseQuery = view === "board" ? boardPhaseQueryValue(phases.find((phase) => phase.id === boardPhaseId) ?? null, phases.find((phase) => phase.isActive) ?? null) : null;
       if (phaseQuery) url.searchParams.set("phase", phaseQuery);
       else url.searchParams.delete("phase");
+    } else {
+      url.searchParams.delete("settings");
+      url.searchParams.delete("project");
+      url.searchParams.delete("task");
+      url.searchParams.delete("phase");
+      url.searchParams.delete("view");
     }
     window.history.replaceState({}, "", url);
   }, [user, showSettings, currentProject, selectedTask, view, boardPhaseId, phases]);
