@@ -84,6 +84,7 @@ export function DashboardPage({ currentUser }: { currentUser: User }) {
   const { width, containerRef, mounted } = useContainerWidth();
   const [layout, setLayout] = useState(() => loadLayout(currentUser.role === "ADMIN"));
   const [showPicker, setShowPicker] = useState(false);
+  const isMobile = width > 0 && width < 700;
 
   const gridLayout = useMemo<Layout>(
     () => layout.widgets.map((widget) => {
@@ -104,6 +105,10 @@ export function DashboardPage({ currentUser }: { currentUser: User }) {
   const gridRows = Math.max(
     8,
     layout.widgets.reduce((max, widget) => Math.max(max, widget.y + widget.h), 0) + 2,
+  );
+  const mobileWidgets = useMemo(
+    () => [...layout.widgets].sort((a, b) => (a.y - b.y) || (a.x - b.x)),
+    [layout.widgets],
   );
 
   function persist(next: DashboardLayout) {
@@ -161,7 +166,7 @@ export function DashboardPage({ currentUser }: { currentUser: User }) {
           </div>
         )}
 
-        {mounted && (
+        {mounted && !isMobile && (
           <>
             <GridBackground
               width={width}
@@ -197,6 +202,21 @@ export function DashboardPage({ currentUser }: { currentUser: User }) {
               ))}
             </ReactGridLayout>
           </>
+        )}
+        {mounted && isMobile && (
+          <div className="dashboard-mobile-list">
+            {mobileWidgets.map((widget) => (
+              <div key={widget.id} className="dashboard-mobile-item">
+                <WidgetShell
+                  type={widget.type}
+                  icon={WIDGET_ICONS[widget.type]}
+                  onClose={() => removeWidget(widget.id)}
+                >
+                  {renderWidgetContent(widget.type, currentUser)}
+                </WidgetShell>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Notification, Phase, Project, Tag, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
-import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Plus, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
+import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Menu, Plus, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
@@ -54,6 +54,7 @@ export default function App() {
   const [showDeleteProject, setShowDeleteProject] = useState(false);
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showMobileNav, setShowMobileNav] = useState(false);
 
   function applyProjectMembers(updated: Project) {
     if (currentProject?.id !== updated.id) return;
@@ -247,7 +248,17 @@ export default function App() {
   return (
     <div className="app-shell">
       <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} dashboardActive={!showSettings && !currentProject} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} onHome={() => { setShowSettings(false); setCurrentProject(null); setSelectedTask(null); }} />
+      {showMobileNav && <button className="mobile-nav-scrim" type="button" aria-label="Close navigation menu" onClick={() => setShowMobileNav(false)} />}
+      <Sidebar className={`mobile-sidebar${showMobileNav ? " mobile-open" : ""}`} onNavigate={() => setShowMobileNav(false)} projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} dashboardActive={!showSettings && !currentProject} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} onHome={() => { setShowSettings(false); setCurrentProject(null); setSelectedTask(null); }} />
       <main className="workspace">
+        <header className="mobile-topbar">
+          <button type="button" className="mobile-topbar-menu" aria-label="Open navigation menu" onClick={() => setShowMobileNav(true)}><Menu /></button>
+          <strong>TaskForge</strong>
+          <div>
+            <button type="button" className="mobile-topbar-icon" aria-label="Search" onClick={() => setShowSearch(true)}><Search /></button>
+            <button type="button" className="mobile-topbar-icon" aria-label="Notifications" onClick={() => setShowNotifications(true)}><Bell />{notifications.some((item) => !item.readAt) && <i>{notifications.filter((item) => !item.readAt).length}</i>}</button>
+          </div>
+        </header>
         {showSettings ? <SettingsPage user={user} users={allUsers} defaultView={localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board"} textSize={textSize} onUserUpdated={(updated) => { setUser(updated); setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); }} onAgentCreated={(created) => setAllUsers((items) => [...items, created])} onAgentUpdated={(updated) => { setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); setTasks((items) => items.map((task) => task.assigneeId === updated.id ? { ...task, assignee: updated } : task)); }} onAgentDeleted={(id) => setAllUsers((items) => items.filter((item) => item.id !== id))} onDefaultViewChange={changeDefaultView} onTextSizeChange={changeTextSize} /> : currentProject ? <>
           <header className="project-header">
             <div className="breadcrumbs"><span>Projects</span><span>/</span><strong>{currentProject.name}</strong></div>
