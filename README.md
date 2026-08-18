@@ -61,6 +61,20 @@ npm run db:seed    # Idempotent demo seed
 npm run admin:bootstrap # Create or rotate the production administrator
 ```
 
+## Dashboard examples
+
+Home dashboard:
+
+![TaskForge home dashboard example](docs/images/dashboard-example-home.png)
+
+Board view:
+
+![TaskForge board view example](docs/images/dashboard-example-board.png)
+
+Send-to-AI dialog:
+
+![TaskForge send to AI example](docs/images/dashboard-example-send-to-ai.png)
+
 ## API overview
 
 All application endpoints are under `/api`. Send either a human JWT or agent token as `Authorization: Bearer <credential>`.
