@@ -55,6 +55,7 @@ export default function App() {
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showMobileNav, setShowMobileNav] = useState(false);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
 
   function applyProjectMembers(updated: Project) {
     if (currentProject?.id !== updated.id) return;
@@ -158,6 +159,14 @@ export default function App() {
   const selectedBoardPhase = phases.find((phase) => phase.id === boardPhaseId) ?? activePhase;
   const boardTasks = selectedBoardPhase ? visibleTasks.filter((task) => task.phaseId === selectedBoardPhase.id) : [];
   const selectedPhaseHasTasks = selectedBoardPhase ? tasks.some((task) => task.phaseId === selectedBoardPhase.id) : false;
+  const activeFilterCount = [
+    statusFilter,
+    assigneeFilter,
+    priorityFilter,
+    tagFilter,
+    estimateMin,
+    estimateMax,
+  ].filter(Boolean).length;
 
   async function saveTask(input: TaskCreate) {
     if (!currentProject) return;
@@ -283,13 +292,24 @@ export default function App() {
           </header>
           {view !== "phases" && view !== "automations" && <section className="content-toolbar">
             <div className="search-field"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks…" />{query && <button onClick={() => setQuery("")}><X /></button>}</div>
+            <button
+              type="button"
+              className={`mobile-filter-toggle${showMobileFilters ? " open" : ""}`}
+              onClick={() => setShowMobileFilters((open) => !open)}
+            >
+              <Filter />
+              Filters
+              {activeFilterCount > 0 && <i>{activeFilterCount}</i>}
+            </button>
             <div className="toolbar-spacer" />
-            <div className="select-wrap"><select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as TaskStatus | "")}><option value="">All statuses</option><option value="BACKLOG">Backlog</option><option value="TODO">To do</option><option value="IN_PROGRESS">In progress</option><option value="IN_REVIEW">In review</option><option value="DONE">Done</option></select><ChevronDown /></div>
-            <div className="select-wrap"><Filter /><select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)}><option value="">All assignees</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select><ChevronDown /></div>
-            <div className="select-wrap"><select aria-label="Filter by priority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as TaskPriority | "")}><option value="">All priorities</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select><ChevronDown /></div>
-            <div className="select-wrap"><TagIcon /><select aria-label="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}><option value="">All tags</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select><ChevronDown /></div>
-            <div className="estimate-filter" title="Estimated points range"><span>Points</span><input type="number" min="0" max="100" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)} placeholder="Min" aria-label="Minimum estimated points" /><i>–</i><input type="number" min="0" max="100" value={estimateMax} onChange={(e) => setEstimateMax(e.target.value)} placeholder="Max" aria-label="Maximum estimated points" /></div>
-            {(statusFilter || assigneeFilter || priorityFilter || tagFilter || estimateMin || estimateMax) && <button className="clear-filters" onClick={() => { setStatusFilter(""); setAssigneeFilter(""); setPriorityFilter(""); setTagFilter(""); setEstimateMin(""); setEstimateMax(""); }}>Clear</button>}
+            <div className={`toolbar-filters${showMobileFilters ? " open" : ""}`}>
+              <div className="select-wrap"><select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as TaskStatus | "")}><option value="">All statuses</option><option value="BACKLOG">Backlog</option><option value="TODO">To do</option><option value="IN_PROGRESS">In progress</option><option value="IN_REVIEW">In review</option><option value="DONE">Done</option></select><ChevronDown /></div>
+              <div className="select-wrap"><Filter /><select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)}><option value="">All assignees</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select><ChevronDown /></div>
+              <div className="select-wrap"><select aria-label="Filter by priority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as TaskPriority | "")}><option value="">All priorities</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select><ChevronDown /></div>
+              <div className="select-wrap"><TagIcon /><select aria-label="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}><option value="">All tags</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select><ChevronDown /></div>
+              <div className="estimate-filter" title="Estimated points range"><span>Points</span><input type="number" min="0" max="100" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)} placeholder="Min" aria-label="Minimum estimated points" /><i>–</i><input type="number" min="0" max="100" value={estimateMax} onChange={(e) => setEstimateMax(e.target.value)} placeholder="Max" aria-label="Maximum estimated points" /></div>
+              {(statusFilter || assigneeFilter || priorityFilter || tagFilter || estimateMin || estimateMax) && <button className="clear-filters" onClick={() => { setStatusFilter(""); setAssigneeFilter(""); setPriorityFilter(""); setTagFilter(""); setEstimateMin(""); setEstimateMax(""); }}>Clear</button>}
+            </div>
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
           {view === "automations" && <AutomationManager project={currentProject} users={allUsers} phases={phases} />}
