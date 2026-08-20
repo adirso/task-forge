@@ -232,6 +232,7 @@ export interface Task {
   tags: Tag[];
   dependencies: TaskDependency[];
   attachments: Attachment[];
+  updates?: TaskNote[];
 }
 
 export interface AutomationCondition { field: z.infer<typeof automationFieldSchema>; operator: z.infer<typeof automationOperatorSchema>; value: string | null; }
