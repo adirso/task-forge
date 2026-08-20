@@ -102,6 +102,7 @@ export class TaskApplicationService implements TaskService {
       await repositories.activity.record({ projectId: task.projectId, taskId, actorId: context.actor.userId, action: "task.note_added" });
       const recipients = new Set([task.creatorId, task.assigneeId].filter((id): id is string => Boolean(id && id !== context.actor.userId)));
       for (const recipientId of recipients) await repositories.notifications.notify({ userId: recipientId, projectId: task.projectId, taskId, type: "TASK_UPDATED", title: "New task update", message: `${context.actor.name ?? "A teammate"} posted an update on “${task.title}”.` });
+      if (task.assigneeId !== context.actor.userId) await this.dispatchUpdateWebhookIfNeeded(repositories, task, update, context);
       return { ...update, author: await repositories.users.findById(update.authorId) ?? undefined };
     });
   }
@@ -160,6 +161,27 @@ export class TaskApplicationService implements TaskService {
       },
       assignedBy: { id: context.actor.userId, name: context.actor.name },
       timestamp: new Date().toISOString(),
+    });
+  }
+
+  private async dispatchUpdateWebhookIfNeeded(repositories: RepositorySet, task: TaskEntity, update: TaskUpdateEntity, context: RequestContext) {
+    if (!task.assigneeId) return;
+    const assignee = await repositories.users.findById(task.assigneeId);
+    if (!assignee || assignee.kind !== "AGENT" || !assignee.webhookUrl) return;
+    const project = await repositories.projects.findById(task.projectId);
+    dispatchWebhook(assignee.webhookUrl, {
+      event: "task.update_added",
+      task: {
+        id: task.id, number: task.number, title: task.title,
+        description: task.description, definitionOfDone: task.definitionOfDone,
+        status: task.status, priority: task.priority, type: task.type,
+        branch: task.branch, projectId: task.projectId,
+        projectKey: project?.key, projectName: project?.name,
+        assigneeId: task.assigneeId,
+      },
+      update: { id: update.id, body: update.body, authorId: update.authorId, createdAt: update.createdAt },
+      postedBy: { id: context.actor.userId, name: context.actor.name },
+      timestamp: update.createdAt,
     });
   }
 }
