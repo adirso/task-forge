@@ -84,6 +84,7 @@ export interface TaskEntity {
   tags?: TaskTagEntity[];
   dependencies?: TaskDependencyEntity[];
   attachments?: AttachmentEntity[];
+  updates?: TaskUpdateEntity[];
   projectName?: string;
   projectKey?: string;
   projectColor?: string;

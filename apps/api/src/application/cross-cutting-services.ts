@@ -31,7 +31,13 @@ export class ContextApplicationService implements ContextService {
       if (!project) throw new NotFoundError("Project");
       if (task && task.projectId !== project.id) throw new ValidationError("The task does not belong to the requested project");
       if (context.actor.role !== "ADMIN" && !(await repositories.memberships.isMember(project.id, context.actor.userId))) throw new ForbiddenError("You are not a member of this project");
-      return { project, task: task ? { ...task, phase: task.phaseId ? await repositories.phases.findById(task.phaseId) : null } : null };
+      if (!task) return { project, task: null };
+      const [phase, updates] = await Promise.all([
+        task.phaseId ? repositories.phases.findById(task.phaseId) : Promise.resolve(null),
+        repositories.updates.listForTask(task.id),
+      ]);
+      const hydratedUpdates = await Promise.all(updates.map(async (update) => ({ ...update, author: await repositories.users.findById(update.authorId) ?? undefined })));
+      return { project, task: { ...task, phase, updates: hydratedUpdates } };
     });
   }
 }

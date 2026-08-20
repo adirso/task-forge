@@ -324,6 +324,9 @@ test("an issued agent token authenticates and is scoped by membership", async ()
   assert.equal(context.json().task.phase.id, phaseId);
   assert.equal(context.json().task.phase.number, 2);
   assert.equal(context.json().task.phase.goal, "Deliver the integration");
+  assert.equal(context.json().task.updates.length, 1);
+  assert.equal(context.json().task.updates[0].body, "Implementation is complete and the PR is ready for review.");
+  assert.equal(context.json().task.updates[0].author.id, agentId);
 });
 
 test("only owners and administrators can manage project membership", async () => {
