@@ -12,11 +12,11 @@ The initial default remains:
 
 | Key | Label | Category | Behavior |
 | --- | --- | --- | --- |
-| `BACKLOG` | Backlog | `TODO` | Claimable |
-| `TODO` | To do | `TODO` | Default for new tasks; claimable |
-| `IN_PROGRESS` | In progress | `IN_PROGRESS` | Claim target; included in stuck-work detection |
-| `IN_REVIEW` | In review | `IN_PROGRESS` | Triggers review notification; included in stuck-work detection |
-| `DONE` | Done | `DONE` | Satisfies dependencies |
+| `BACKLOG` | Backlog | `NOT_STARTED` | Claimable |
+| `TODO` | To do | `NOT_STARTED` | Default for new tasks; claimable |
+| `IN_PROGRESS` | In progress | `ACTIVE` | Claim target; included in stuck-work detection |
+| `IN_REVIEW` | In review | `ACTIVE` | Triggers review notification; excluded from stuck-work detection |
+| `DONE` | Done | `COMPLETED` | Satisfies dependencies |
 
 This gives users custom columns and labels while preserving the meaning needed by claiming, dependency resolution, notifications, dashboards, and agents.
 
@@ -76,29 +76,33 @@ workflow_templates
 
 workflow_template_statuses
   id, template_id, key, label, color, category, position,
-  is_default, is_claim_target, triggers_review,
-  satisfies_dependencies, archived_at
+  is_default, is_claimable, is_claim_target, triggers_review,
+  tracks_staleness, satisfies_dependencies, archived_at
 
 project_statuses
   id, project_id, key, label, color, category, position,
-  is_default, is_claim_target, triggers_review,
-  satisfies_dependencies, archived_at, created_at, updated_at
+  is_default, is_claimable, is_claim_target, triggers_review,
+  tracks_staleness, satisfies_dependencies, archived_at,
+  created_at, updated_at
 
 tasks
   ... status_id -> project_statuses.id ...
 ```
 
-`category` is a small system enum: `TODO`, `IN_PROGRESS`, or `DONE`. It exists for aggregation and broad lifecycle behavior, not presentation. Multiple project statuses may share a category; for example, "Development" and "QA" can both be `IN_PROGRESS`.
+`category` is a small system enum: `NOT_STARTED`, `ACTIVE`, or `COMPLETED`. These deliberately differ from the legacy status keys so API consumers do not confuse a user-configurable status with its broad lifecycle category. Categories exist for aggregation and open/completed lifecycle behavior, not presentation. Multiple project statuses may share a category; for example, "Development" and "QA" can both be `ACTIVE`.
 
-The key is an immutable, URL/API-safe slug unique within its template or project. The label is editable and need not be unique by case, although the UI should discourage duplicates. Tasks and automations persist IDs, never labels.
+The key is an immutable, URL/API-safe slug unique within its template or project. The label is editable and need not be unique by case, although the UI should discourage duplicates. Tasks and automations persist IDs, never labels. Behavior flags are intentionally independent of category: for example, both Backlog and Icebox may be `NOT_STARTED`, while only Backlog is `is_claimable`.
 
 ### Required invariants
 
-- A project has exactly one non-archived default status for new tasks.
-- A project has exactly one non-archived claim target, and it belongs to `IN_PROGRESS`.
-- A project retains at least one non-archived `TODO`, `IN_PROGRESS`, and `DONE` status.
-- At least one non-archived `DONE` status satisfies dependencies.
+- Each template or project workflow has exactly one non-archived default status for new tasks, and it belongs to `NOT_STARTED`.
+- Each workflow has at least one non-archived claimable status, and every claimable status belongs to `NOT_STARTED`.
+- Each workflow has exactly one non-archived claim target, and it belongs to `ACTIVE`.
+- Each workflow retains at least one non-archived `NOT_STARTED`, `ACTIVE`, and `COMPLETED` status.
+- At least one non-archived `COMPLETED` status satisfies dependencies; only `COMPLETED` statuses may do so.
+- Only `ACTIVE` statuses may trigger review notifications or participate in stuck-work tracking.
 - A task can reference only a status owned by its project.
+- Status `position` is unique within its template or project and is normalized to a dense zero-based sequence after every reorder.
 - Archived statuses cannot receive new tasks and are omitted from new-task controls.
 - Archiving a status that has tasks requires an explicit replacement status; the move and archive occur in one transaction.
 - A status referenced by an automation requires a replacement or disabling that automation before archive.
@@ -130,8 +134,14 @@ Task contracts should move to `statusId` as the canonical input and return the r
     "key": "QA",
     "label": "Quality assurance",
     "color": "#6554C0",
-    "category": "IN_PROGRESS",
-    "position": 3
+    "category": "ACTIVE",
+    "position": 3,
+    "isDefault": false,
+    "isClaimable": false,
+    "isClaimTarget": false,
+    "triggersReview": true,
+    "tracksStaleness": false,
+    "satisfiesDependencies": false
   }
 }
 ```
@@ -145,13 +155,13 @@ Context responses and webhook task payloads should use the same task representat
 | Capability | New rule |
 | --- | --- |
 | Create task | Use the project's `is_default` status when `statusId` is omitted. |
-| Claim task | Candidates are unassigned tasks in a `TODO` category; move the winner to `is_claim_target`. |
+| Claim task | Candidates are unassigned tasks whose status has `is_claimable`; move the winner to `is_claim_target`. |
 | Review notification | Emit when entering a status whose `triggers_review` is true. |
 | Dependencies | A dependency stops blocking only in a status with `satisfies_dependencies` true. |
 | Board ordering | Use `project_statuses.position`; task position remains scoped to `status_id`. |
-| Open work | Any status whose category is not `DONE`. |
-| Progress | Aggregate category `DONE` versus total; report individual status counts separately. |
-| Stuck work | Tasks in `IN_PROGRESS` category older than the configured threshold. |
+| Open work | Any status whose category is not `COMPLETED`. |
+| Progress | Aggregate category `COMPLETED` versus total; report individual status counts separately. |
+| Stuck work | Tasks whose status has `tracks_staleness` and whose age exceeds the configured threshold. The legacy mapping enables it for `IN_PROGRESS` and disables it for `IN_REVIEW`, preserving today's behavior. |
 | Agent instructions | Discover the project workflow and use status IDs/keys advertised by the API. |
 
 ## Migration and compatibility plan
@@ -172,10 +182,10 @@ The rollout should preserve task numbers, positions, timestamps, foreign keys, a
 
 The implementation is split along migration and client boundaries so each change remains reviewable:
 
-1. **TAS-42 — Add configurable workflow status storage and migration.** Adds template/project status persistence and safely backfills SQLite and MySQL. No dependencies.
-2. **TAS-43 — Add workflow configuration and status-aware task APIs.** Adds invariants, permissions, workflow endpoints, task compatibility, and centralized behavior. Depends on TAS-42.
-3. **TAS-44 — Build global and per-project workflow editors.** Makes the web app and board dynamic and adds both configuration experiences. Depends on TAS-43.
-4. **TAS-45 — Make dashboards, automations, and agent flows workflow-aware.** Migrates cross-cutting consumers and agent documentation. Depends on TAS-43.
+1. **TAS-42 — Add configurable workflow status storage and migration.** Adds persistence, seeds the default records, copies them into new projects, and safely backfills SQLite and MySQL. It does not add edit APIs. No dependencies.
+2. **TAS-43 — Add workflow configuration and status-aware task APIs.** Adds administrator/project edit APIs, invariants, permissions, task compatibility, and centralized behavior including explicit claim eligibility. Depends on TAS-42.
+3. **TAS-44 — Build global and per-project workflow editors.** Makes the web app and board dynamic and exposes status behavior controls in both configuration experiences. Depends on TAS-43.
+4. **TAS-45 — Make dashboards, automations, and agent flows workflow-aware.** Migrates cross-cutting consumers and agent documentation while preserving the current stuck-work default through `tracks_staleness`. Depends on TAS-43.
 5. **TAS-46 — Retire legacy hard-coded task status compatibility.** Removes the enum and temporary API compatibility after first-party migration. Depends on TAS-44 and TAS-45.
 
 All five tasks are children of TAS-40 and are assigned to Phase 2.
@@ -183,7 +193,7 @@ All five tasks are children of TAS-40 and are assigned to Phase 2.
 ## Testing strategy
 
 - Migration tests start from a legacy SQLite database and a legacy MySQL schema, then assert row counts, mappings, constraints, and rollback behavior.
-- Application tests cover workflow invariants, permissions, same-project validation, archive-with-replacement, task creation defaults, claim races, review transitions, and dependency completion.
+- Application tests cover workflow invariants, permissions, same-project validation, dense/unique ordering, archive-with-replacement, task creation defaults, explicit claim eligibility, claim races, review transitions, staleness tracking, and dependency completion.
 - Contract/API tests cover custom status IDs, legacy-key compatibility, filters, context, webhooks, and automation migration.
 - Web tests use a workflow with more than five statuses and renamed labels to catch hidden constant usage.
 - Dashboard tests use multiple statuses in the same semantic category.
