@@ -156,6 +156,7 @@ async function runStatements(executor: Executor, statements: string[]) {
 }
 
 const WORKFLOW_STORAGE_MIGRATION = "20260821_workflow_status_storage";
+const WORKFLOW_DEFAULT_GUARD_MIGRATION = "20260821_workflow_system_default_guard";
 
 async function migrateWorkflowStorage(adapter: Adapter, dialect: DatabaseDriver) {
   if (await adapter.get("SELECT version FROM schema_migrations WHERE version = ?", [WORKFLOW_STORAGE_MIGRATION])) return;
@@ -182,9 +183,8 @@ async function migrateWorkflowStorage(adapter: Adapter, dialect: DatabaseDriver)
 
     const projects = await executor.all<{ id: string }>("SELECT id FROM projects", []);
     for (const project of projects) {
-      const existing = await executor.get<{ count: number }>("SELECT COUNT(*) AS count FROM project_statuses WHERE project_id = ?", [project.id]);
-      if (Number(existing?.count ?? 0) > 0) continue;
       for (const status of DEFAULT_WORKFLOW_STATUSES) {
+        if (await executor.get("SELECT id FROM project_statuses WHERE project_id = ? AND `key` = ?", [project.id, status.key])) continue;
         await executor.run("INSERT INTO project_statuses (id, project_id, `key`, label, color, category, position, is_initial, is_claimable, is_claim_target, triggers_review, tracks_staleness, satisfies_dependencies, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)", [randomUUID(), project.id, status.key, status.label, status.color, status.category, status.position, status.isInitial ? 1 : 0, status.isClaimable ? 1 : 0, status.isClaimTarget ? 1 : 0, status.triggersReview ? 1 : 0, status.tracksStaleness ? 1 : 0, status.satisfiesDependencies ? 1 : 0, now, now]);
       }
     }
@@ -192,6 +192,19 @@ async function migrateWorkflowStorage(adapter: Adapter, dialect: DatabaseDriver)
     await executor.run("UPDATE tasks SET status_id = (SELECT ps.id FROM project_statuses ps WHERE ps.project_id = tasks.project_id AND ps.`key` = tasks.status) WHERE status_id IS NULL AND EXISTS (SELECT 1 FROM project_statuses ps WHERE ps.project_id = tasks.project_id AND ps.`key` = tasks.status)", []);
     await executor.run("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", [WORKFLOW_STORAGE_MIGRATION, now]);
   });
+}
+
+async function migrateWorkflowDefaultGuard(adapter: Adapter, dialect: DatabaseDriver) {
+  if (await adapter.get("SELECT version FROM schema_migrations WHERE version = ?", [WORKFLOW_DEFAULT_GUARD_MIGRATION])) return;
+  if (dialect === "mysql") {
+    const hasColumn = Number((await adapter.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'workflow_templates' AND column_name = 'system_default_guard'", []))?.count) > 0;
+    if (!hasColumn) await adapter.run("ALTER TABLE workflow_templates ADD COLUMN system_default_guard TINYINT GENERATED ALWAYS AS (CASE WHEN is_system_default = 1 THEN 1 ELSE NULL END) STORED", []);
+    const hasIndex = Number((await adapter.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'workflow_templates' AND index_name = 'uq_workflow_templates_system_default'", []))?.count) > 0;
+    if (!hasIndex) await adapter.run("CREATE UNIQUE INDEX uq_workflow_templates_system_default ON workflow_templates(system_default_guard)", []);
+  } else {
+    await adapter.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_templates_system_default ON workflow_templates(is_system_default) WHERE is_system_default = 1", []);
+  }
+  await adapter.run("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", [WORKFLOW_DEFAULT_GUARD_MIGRATION, new Date().toISOString()]);
 }
 
 const sqliteSchema = [
@@ -248,7 +261,7 @@ const sqliteWorkflowSchema = [
 ];
 
 const mysqlWorkflowSchema = [
-  `CREATE TABLE IF NOT EXISTS workflow_templates (id CHAR(36) PRIMARY KEY, name VARCHAR(120) NOT NULL, is_system_default TINYINT(1) NOT NULL DEFAULT 0 CHECK (is_system_default IN (0, 1)), created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS workflow_templates (id CHAR(36) PRIMARY KEY, name VARCHAR(120) NOT NULL, is_system_default TINYINT(1) NOT NULL DEFAULT 0 CHECK (is_system_default IN (0, 1)), system_default_guard TINYINT GENERATED ALWAYS AS (CASE WHEN is_system_default = 1 THEN 1 ELSE NULL END) STORED, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_workflow_templates_system_default (system_default_guard)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS workflow_template_statuses (id CHAR(36) PRIMARY KEY, template_id CHAR(36) NOT NULL, \`key\` VARCHAR(32) NOT NULL CHECK (REGEXP_LIKE(\`key\`, '^[A-Z][A-Z0-9_]{0,31}$', 'c')), label VARCHAR(120) NOT NULL, color CHAR(7) NOT NULL, category VARCHAR(16) NOT NULL CHECK (category IN ('NOT_STARTED', 'ACTIVE', 'COMPLETED')), position INT NOT NULL CHECK (position >= 0), is_initial TINYINT(1) NOT NULL DEFAULT 0, is_claimable TINYINT(1) NOT NULL DEFAULT 0, is_claim_target TINYINT(1) NOT NULL DEFAULT 0, triggers_review TINYINT(1) NOT NULL DEFAULT 0, tracks_staleness TINYINT(1) NOT NULL DEFAULT 0, satisfies_dependencies TINYINT(1) NOT NULL DEFAULT 0, archived_at VARCHAR(30), UNIQUE KEY uq_workflow_template_status_key (template_id, \`key\`), UNIQUE KEY uq_workflow_template_status_position (template_id, position), FOREIGN KEY (template_id) REFERENCES workflow_templates(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS project_statuses (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, \`key\` VARCHAR(32) NOT NULL CHECK (REGEXP_LIKE(\`key\`, '^[A-Z][A-Z0-9_]{0,31}$', 'c')), label VARCHAR(120) NOT NULL, color CHAR(7) NOT NULL, category VARCHAR(16) NOT NULL CHECK (category IN ('NOT_STARTED', 'ACTIVE', 'COMPLETED')), position INT NOT NULL CHECK (position >= 0), is_initial TINYINT(1) NOT NULL DEFAULT 0, is_claimable TINYINT(1) NOT NULL DEFAULT 0, is_claim_target TINYINT(1) NOT NULL DEFAULT 0, triggers_review TINYINT(1) NOT NULL DEFAULT 0, tracks_staleness TINYINT(1) NOT NULL DEFAULT 0, satisfies_dependencies TINYINT(1) NOT NULL DEFAULT 0, archived_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_project_status_key (project_id, \`key\`), UNIQUE KEY uq_project_status_position (project_id, position), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
@@ -279,6 +292,7 @@ async function migrate(adapter: Adapter, dialect: DatabaseDriver) {
     if (!tokenColumns.has("permissions")) await adapter.run("ALTER TABLE api_tokens ADD COLUMN permissions TEXT", []);
   }
   await migrateWorkflowStorage(adapter, dialect);
+  await migrateWorkflowDefaultGuard(adapter, dialect);
 }
 
 export const db = new Database();

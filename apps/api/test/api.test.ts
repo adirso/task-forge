@@ -66,6 +66,7 @@ test("human can log in and create a project", async () => {
 
   const defaultTemplates = await db.prepare("SELECT COUNT(*) AS count FROM workflow_templates WHERE is_system_default = 1").get<{ count: number }>();
   assert.equal(Number(defaultTemplates?.count), 1);
+  await assert.rejects(() => db.prepare("INSERT INTO workflow_templates (id, name, is_system_default, created_at, updated_at) VALUES (?, 'Second default', 1, ?, ?)").run(randomUUID(), new Date().toISOString(), new Date().toISOString()));
   const statuses = await db.prepare("SELECT `key`, category, position, is_initial, is_claimable, is_claim_target, triggers_review, tracks_staleness, satisfies_dependencies FROM project_statuses WHERE project_id = ? ORDER BY position").all(projectId);
   assert.deepEqual(statuses, [
     { key: "BACKLOG", category: "NOT_STARTED", position: 0, is_initial: 0, is_claimable: 1, is_claim_target: 0, triggers_review: 0, tracks_staleness: 0, satisfies_dependencies: 0 },
