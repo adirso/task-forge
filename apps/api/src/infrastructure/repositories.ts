@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ProjectStatusEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WorkflowTemplateStatusEntity } from "../application/models.js";
-import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WorkflowRepository } from "../application/repositories.js";
+import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
+import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 
 export interface DatabasePort {
@@ -24,15 +24,6 @@ function toUser(row: Row): UserEntity {
 
 function toProject(row: Row): ProjectEntity {
   return { id: text(row.id), key: text(row.key), name: text(row.name), description: text(row.description), repoUrl: nullableText(row.repo_url), color: text(row.color), sortOrder: Number(row.sort_order ?? 0), ownerId: text(row.owner_id), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}) };
-}
-
-function toWorkflowTemplateStatus(row: Row): WorkflowTemplateStatusEntity {
-  return {
-    id: text(row.id), templateId: text(row.template_id), key: text(row.key), label: text(row.label), color: text(row.color),
-    category: row.category as WorkflowTemplateStatusEntity["category"], position: Number(row.position), isInitial: Boolean(row.is_initial),
-    isClaimable: Boolean(row.is_claimable), isClaimTarget: Boolean(row.is_claim_target), triggersReview: Boolean(row.triggers_review),
-    tracksStaleness: Boolean(row.tracks_staleness), satisfiesDependencies: Boolean(row.satisfies_dependencies), archivedAt: nullableText(row.archived_at),
-  };
 }
 
 function toPhase(row: Row): PhaseEntity {
@@ -117,19 +108,6 @@ function createProjectRepository(db: DatabasePort): ProjectRepository {
     async create(input) { await db.prepare("INSERT INTO projects (id, `key`, name, description, repo_url, color, sort_order, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.key, input.name, input.description, input.repoUrl, input.color, input.sortOrder, input.ownerId, input.createdAt, input.updatedAt); return input; },
     async update(id, input) { const fields: string[] = []; const values: unknown[] = []; const columns: Record<string, string> = { name: "name", description: "description", repoUrl: "repo_url", color: "color" }; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM projects WHERE id = ?").get(id); if (!row) throw new Error("Project not found after update"); return toProject(row); },
     async delete(id) { await db.prepare("DELETE FROM projects WHERE id = ?").run(id); },
-  };
-}
-
-function createWorkflowRepository(db: DatabasePort): WorkflowRepository {
-  return {
-    async listSystemDefaultStatuses() {
-      const rows = await db.prepare("SELECT s.* FROM workflow_template_statuses s JOIN workflow_templates t ON t.id = s.template_id WHERE t.is_system_default = 1 AND s.archived_at IS NULL ORDER BY s.position").all();
-      return rows.map(toWorkflowTemplateStatus);
-    },
-    async createProjectStatuses(statuses: ProjectStatusEntity[]) {
-      const insert = db.prepare("INSERT INTO project_statuses (id, project_id, `key`, label, color, category, position, is_initial, is_claimable, is_claim_target, triggers_review, tracks_staleness, satisfies_dependencies, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      for (const status of statuses) await insert.run(status.id, status.projectId, status.key, status.label, status.color, status.category, status.position, status.isInitial ? 1 : 0, status.isClaimable ? 1 : 0, status.isClaimTarget ? 1 : 0, status.triggersReview ? 1 : 0, status.tracksStaleness ? 1 : 0, status.satisfiesDependencies ? 1 : 0, status.archivedAt, status.createdAt, status.updatedAt);
-    },
   };
 }
 
@@ -253,5 +231,5 @@ function createSearchRepository(db: DatabasePort): SearchRepository {
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), workflows: createWorkflowRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
 }

@@ -1,11 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import Sqlite from "better-sqlite3";
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader } from "mysql2/promise";
 import { config } from "../config.js";
-import { DEFAULT_WORKFLOW_STATUSES, SYSTEM_DEFAULT_WORKFLOW_ID } from "../application/workflow.js";
 
 export type DatabaseDriver = "sqlite" | "mysql";
 export type Row = Record<string, unknown>;
@@ -115,7 +113,7 @@ function createSqliteAdapter(databasePath: string): Adapter {
   };
 }
 
-export class Database {
+class Database {
   readonly dialect: DatabaseDriver;
   private readonly adapter: Adapter;
   private readonly context = new AsyncLocalStorage<Executor>();
@@ -155,47 +153,7 @@ async function runStatements(executor: Executor, statements: string[]) {
   for (const statement of statements) await executor.run(statement, []);
 }
 
-const WORKFLOW_STORAGE_MIGRATION = "20260821_workflow_status_storage";
-
-async function migrateWorkflowStorage(adapter: Adapter, dialect: DatabaseDriver) {
-  if (await adapter.get("SELECT version FROM schema_migrations WHERE version = ?", [WORKFLOW_STORAGE_MIGRATION])) return;
-  await runStatements(adapter, dialect === "mysql" ? mysqlWorkflowSchema : sqliteWorkflowSchema);
-  if (dialect === "mysql") {
-    const hasColumn = Number((await adapter.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tasks' AND column_name = 'status_id'", []))?.count) > 0;
-    if (!hasColumn) await adapter.run("ALTER TABLE tasks ADD COLUMN status_id CHAR(36)", []);
-    const hasIndex = Number((await adapter.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'tasks' AND index_name = 'idx_tasks_project_status_id'", []))?.count) > 0;
-    if (!hasIndex) await adapter.run("CREATE INDEX idx_tasks_project_status_id ON tasks(project_id, status_id, position)", []);
-  } else {
-    const columns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(tasks)", [])).map((column) => column.name));
-    if (!columns.has("status_id")) await adapter.run("ALTER TABLE tasks ADD COLUMN status_id TEXT", []);
-    await adapter.run("CREATE INDEX IF NOT EXISTS idx_tasks_project_status_id ON tasks(project_id, status_id, position)", []);
-  }
-
-  await adapter.transaction(async (executor) => {
-    if (await executor.get("SELECT version FROM schema_migrations WHERE version = ?", [WORKFLOW_STORAGE_MIGRATION])) return;
-
-    const now = new Date().toISOString();
-    await executor.run("INSERT OR IGNORE INTO workflow_templates (id, name, is_system_default, created_at, updated_at) VALUES (?, ?, 1, ?, ?)", [SYSTEM_DEFAULT_WORKFLOW_ID, "TaskForge default", now, now]);
-    for (const status of DEFAULT_WORKFLOW_STATUSES) {
-      await executor.run("INSERT OR IGNORE INTO workflow_template_statuses (id, template_id, `key`, label, color, category, position, is_initial, is_claimable, is_claim_target, triggers_review, tracks_staleness, satisfies_dependencies, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)", [status.id, SYSTEM_DEFAULT_WORKFLOW_ID, status.key, status.label, status.color, status.category, status.position, status.isInitial ? 1 : 0, status.isClaimable ? 1 : 0, status.isClaimTarget ? 1 : 0, status.triggersReview ? 1 : 0, status.tracksStaleness ? 1 : 0, status.satisfiesDependencies ? 1 : 0]);
-    }
-
-    const projects = await executor.all<{ id: string }>("SELECT id FROM projects", []);
-    for (const project of projects) {
-      const existing = await executor.get<{ count: number }>("SELECT COUNT(*) AS count FROM project_statuses WHERE project_id = ?", [project.id]);
-      if (Number(existing?.count ?? 0) > 0) continue;
-      for (const status of DEFAULT_WORKFLOW_STATUSES) {
-        await executor.run("INSERT INTO project_statuses (id, project_id, `key`, label, color, category, position, is_initial, is_claimable, is_claim_target, triggers_review, tracks_staleness, satisfies_dependencies, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)", [randomUUID(), project.id, status.key, status.label, status.color, status.category, status.position, status.isInitial ? 1 : 0, status.isClaimable ? 1 : 0, status.isClaimTarget ? 1 : 0, status.triggersReview ? 1 : 0, status.tracksStaleness ? 1 : 0, status.satisfiesDependencies ? 1 : 0, now, now]);
-      }
-    }
-
-    await executor.run("UPDATE tasks SET status_id = (SELECT ps.id FROM project_statuses ps WHERE ps.project_id = tasks.project_id AND ps.`key` = tasks.status) WHERE status_id IS NULL AND EXISTS (SELECT 1 FROM project_statuses ps WHERE ps.project_id = tasks.project_id AND ps.`key` = tasks.status)", []);
-    await executor.run("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", [WORKFLOW_STORAGE_MIGRATION, now]);
-  });
-}
-
 const sqliteSchema = [
-  `CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT NOT NULL, password_hash TEXT, kind TEXT NOT NULL CHECK (kind IN ('HUMAN', 'AGENT')), role TEXT NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('ADMIN', 'MEMBER')), avatar_url TEXT, webhook_url TEXT, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS api_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, token_prefix TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_ciphertext TEXT, permissions TEXT, expires_at TEXT, last_used_at TEXT, revoked_at TEXT, created_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash)`,
@@ -223,7 +181,6 @@ const sqliteSchema = [
 ];
 
 const mysqlSchema = [
-  `CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(120) PRIMARY KEY, applied_at VARCHAR(30) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS users (id CHAR(36) PRIMARY KEY, email VARCHAR(320) UNIQUE, name VARCHAR(120) NOT NULL, password_hash VARCHAR(255), kind VARCHAR(16) NOT NULL CHECK (kind IN ('HUMAN', 'AGENT')), role VARCHAR(16) NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('ADMIN', 'MEMBER')), avatar_url TEXT, webhook_url TEXT, created_at VARCHAR(30) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS api_tokens (id CHAR(36) PRIMARY KEY, user_id CHAR(36) NOT NULL, name VARCHAR(120) NOT NULL, token_prefix VARCHAR(32) NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, token_ciphertext TEXT, permissions TEXT, expires_at VARCHAR(30), last_used_at VARCHAR(30), revoked_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, INDEX idx_api_tokens_hash (token_hash), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS projects (id CHAR(36) PRIMARY KEY, \`key\` VARCHAR(8) NOT NULL UNIQUE, name VARCHAR(120) NOT NULL, description TEXT NOT NULL, repo_url TEXT, color CHAR(7) NOT NULL DEFAULT '#6554C0', sort_order INT NOT NULL DEFAULT 0, owner_id CHAR(36) NOT NULL, next_task_number INT NOT NULL DEFAULT 1, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_projects_sort_order (sort_order), FOREIGN KEY (owner_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -238,19 +195,6 @@ const mysqlSchema = [
   `CREATE TABLE IF NOT EXISTS task_updates (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, author_id CHAR(36) NOT NULL, body TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_task_updates_task_created (task_id, created_at), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (author_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS task_attachments (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, file_name VARCHAR(255) NOT NULL, mime_type VARCHAR(160) NOT NULL, file_size BIGINT NOT NULL, storage_key VARCHAR(255) NOT NULL UNIQUE, uploaded_by_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, INDEX idx_task_attachments_task_created (task_id, created_at), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (uploaded_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS automations (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, name VARCHAR(120) NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 1, trigger VARCHAR(30) NOT NULL, actor_type VARCHAR(16) NOT NULL DEFAULT 'ANY', actor_id CHAR(36), service VARCHAR(80), conditions TEXT NOT NULL, actions TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_automations_project (project_id, enabled), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-];
-
-const sqliteWorkflowSchema = [
-  `CREATE TABLE IF NOT EXISTS workflow_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, is_system_default INTEGER NOT NULL DEFAULT 0 CHECK (is_system_default IN (0, 1)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_templates_system_default ON workflow_templates(is_system_default) WHERE is_system_default = 1`,
-  `CREATE TABLE IF NOT EXISTS workflow_template_statuses (id TEXT PRIMARY KEY, template_id TEXT NOT NULL REFERENCES workflow_templates(id) ON DELETE CASCADE, key TEXT NOT NULL COLLATE NOCASE CHECK (length(key) BETWEEN 1 AND 32 AND substr(key, 1, 1) BETWEEN 'A' AND 'Z' AND key NOT GLOB '*[^A-Z0-9_]*'), label TEXT NOT NULL, color TEXT NOT NULL, category TEXT NOT NULL CHECK (category IN ('NOT_STARTED', 'ACTIVE', 'COMPLETED')), position INTEGER NOT NULL CHECK (position >= 0), is_initial INTEGER NOT NULL DEFAULT 0 CHECK (is_initial IN (0, 1)), is_claimable INTEGER NOT NULL DEFAULT 0 CHECK (is_claimable IN (0, 1)), is_claim_target INTEGER NOT NULL DEFAULT 0 CHECK (is_claim_target IN (0, 1)), triggers_review INTEGER NOT NULL DEFAULT 0 CHECK (triggers_review IN (0, 1)), tracks_staleness INTEGER NOT NULL DEFAULT 0 CHECK (tracks_staleness IN (0, 1)), satisfies_dependencies INTEGER NOT NULL DEFAULT 0 CHECK (satisfies_dependencies IN (0, 1)), archived_at TEXT, UNIQUE (template_id, key), UNIQUE (template_id, position))`,
-  `CREATE TABLE IF NOT EXISTS project_statuses (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, key TEXT NOT NULL COLLATE NOCASE CHECK (length(key) BETWEEN 1 AND 32 AND substr(key, 1, 1) BETWEEN 'A' AND 'Z' AND key NOT GLOB '*[^A-Z0-9_]*'), label TEXT NOT NULL, color TEXT NOT NULL, category TEXT NOT NULL CHECK (category IN ('NOT_STARTED', 'ACTIVE', 'COMPLETED')), position INTEGER NOT NULL CHECK (position >= 0), is_initial INTEGER NOT NULL DEFAULT 0 CHECK (is_initial IN (0, 1)), is_claimable INTEGER NOT NULL DEFAULT 0 CHECK (is_claimable IN (0, 1)), is_claim_target INTEGER NOT NULL DEFAULT 0 CHECK (is_claim_target IN (0, 1)), triggers_review INTEGER NOT NULL DEFAULT 0 CHECK (triggers_review IN (0, 1)), tracks_staleness INTEGER NOT NULL DEFAULT 0 CHECK (tracks_staleness IN (0, 1)), satisfies_dependencies INTEGER NOT NULL DEFAULT 0 CHECK (satisfies_dependencies IN (0, 1)), archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, key), UNIQUE (project_id, position))`,
-];
-
-const mysqlWorkflowSchema = [
-  `CREATE TABLE IF NOT EXISTS workflow_templates (id CHAR(36) PRIMARY KEY, name VARCHAR(120) NOT NULL, is_system_default TINYINT(1) NOT NULL DEFAULT 0 CHECK (is_system_default IN (0, 1)), created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-  `CREATE TABLE IF NOT EXISTS workflow_template_statuses (id CHAR(36) PRIMARY KEY, template_id CHAR(36) NOT NULL, \`key\` VARCHAR(32) NOT NULL CHECK (REGEXP_LIKE(\`key\`, '^[A-Z][A-Z0-9_]{0,31}$', 'c')), label VARCHAR(120) NOT NULL, color CHAR(7) NOT NULL, category VARCHAR(16) NOT NULL CHECK (category IN ('NOT_STARTED', 'ACTIVE', 'COMPLETED')), position INT NOT NULL CHECK (position >= 0), is_initial TINYINT(1) NOT NULL DEFAULT 0, is_claimable TINYINT(1) NOT NULL DEFAULT 0, is_claim_target TINYINT(1) NOT NULL DEFAULT 0, triggers_review TINYINT(1) NOT NULL DEFAULT 0, tracks_staleness TINYINT(1) NOT NULL DEFAULT 0, satisfies_dependencies TINYINT(1) NOT NULL DEFAULT 0, archived_at VARCHAR(30), UNIQUE KEY uq_workflow_template_status_key (template_id, \`key\`), UNIQUE KEY uq_workflow_template_status_position (template_id, position), FOREIGN KEY (template_id) REFERENCES workflow_templates(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-  `CREATE TABLE IF NOT EXISTS project_statuses (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, \`key\` VARCHAR(32) NOT NULL CHECK (REGEXP_LIKE(\`key\`, '^[A-Z][A-Z0-9_]{0,31}$', 'c')), label VARCHAR(120) NOT NULL, color CHAR(7) NOT NULL, category VARCHAR(16) NOT NULL CHECK (category IN ('NOT_STARTED', 'ACTIVE', 'COMPLETED')), position INT NOT NULL CHECK (position >= 0), is_initial TINYINT(1) NOT NULL DEFAULT 0, is_claimable TINYINT(1) NOT NULL DEFAULT 0, is_claim_target TINYINT(1) NOT NULL DEFAULT 0, triggers_review TINYINT(1) NOT NULL DEFAULT 0, tracks_staleness TINYINT(1) NOT NULL DEFAULT 0, satisfies_dependencies TINYINT(1) NOT NULL DEFAULT 0, archived_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_project_status_key (project_id, \`key\`), UNIQUE KEY uq_project_status_position (project_id, position), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
 async function migrate(adapter: Adapter, dialect: DatabaseDriver) {
@@ -278,7 +222,6 @@ async function migrate(adapter: Adapter, dialect: DatabaseDriver) {
     if (!userColumns.has("webhook_url")) await adapter.run("ALTER TABLE users ADD COLUMN webhook_url TEXT", []);
     if (!tokenColumns.has("permissions")) await adapter.run("ALTER TABLE api_tokens ADD COLUMN permissions TEXT", []);
   }
-  await migrateWorkflowStorage(adapter, dialect);
 }
 
 export const db = new Database();

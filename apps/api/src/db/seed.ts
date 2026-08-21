@@ -1,6 +1,4 @@
 import bcrypt from "bcryptjs";
-import { randomUUID } from "node:crypto";
-import { DEFAULT_WORKFLOW_STATUSES } from "../application/workflow.js";
 import { db } from "./database.js";
 
 const ids = {
@@ -26,16 +24,6 @@ await db.transaction(async () => {
     VALUES (?, 'TF', 'TaskForge', 'Build a focused workspace where people and agents can plan and ship together.',
       'https://github.com/adirso/task-forge', '#6554C0', ?, 11, ?, ?)`)
     .run(ids.project, ids.admin, now, now);
-
-  const insertProjectStatus = db.prepare(`INSERT OR IGNORE INTO project_statuses
-    (id, project_id, \`key\`, label, color, category, position, is_initial, is_claimable, is_claim_target,
-      triggers_review, tracks_staleness, satisfies_dependencies, archived_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`);
-  for (const status of DEFAULT_WORKFLOW_STATUSES) {
-    await insertProjectStatus.run(randomUUID(), ids.project, status.key, status.label, status.color, status.category, status.position,
-      status.isInitial ? 1 : 0, status.isClaimable ? 1 : 0, status.isClaimTarget ? 1 : 0, status.triggersReview ? 1 : 0,
-      status.tracksStaleness ? 1 : 0, status.satisfiesDependencies ? 1 : 0, now, now);
-  }
 
   const insertMember = await db.prepare("INSERT OR IGNORE INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, ?, ?)");
   await insertMember.run(ids.project, ids.admin, "OWNER", now);

@@ -14,7 +14,6 @@ test("unit of work exposes the complete repository set through the database port
   const result = await createUnitOfWork(database).run(async (repositories) => {
     assert.ok(repositories.users);
     assert.ok(repositories.projects);
-    assert.ok(repositories.workflows);
     assert.ok(repositories.tasks);
     assert.ok(repositories.dependencies);
     assert.ok(repositories.search);
