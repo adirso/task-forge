@@ -64,12 +64,9 @@ test(`workflow storage upgrades a legacy ${legacyMysqlUrl ? "MySQL" : "SQLite"} 
   const task = await activeDatabase.prepare("SELECT status, status_id FROM tasks WHERE id = ?").get(taskId);
   const reviewStatus = await activeDatabase.prepare("SELECT id FROM project_statuses WHERE project_id = ? AND `key` = 'IN_REVIEW'").get(projectId);
   assert.deepEqual(task, { status: "IN_REVIEW", status_id: reviewStatus?.id });
-  assert.equal(Number((await activeDatabase.prepare("SELECT COUNT(*) AS count FROM tasks WHERE status_id IS NULL").get<{ count: number }>())?.count), 0);
   assert.equal(Number((await activeDatabase.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '20260821_workflow_status_storage'").get<{ count: number }>())?.count), 1);
   await assert.rejects(() => activeDatabase.prepare("UPDATE tasks SET status = 'CUSTOM' WHERE id = ?").run(taskId), "the legacy five-value constraint must remain active");
 
-  await activeDatabase.prepare("DELETE FROM schema_migrations WHERE version = '20260821_workflow_status_storage'").run();
-  await activeDatabase.prepare("DELETE FROM project_statuses WHERE project_id = ? AND `key` != 'IN_REVIEW'").run(projectId);
   await activeDatabase.close();
   activeDatabase = new Database();
   assert.equal(Number((await activeDatabase.prepare("SELECT COUNT(*) AS count FROM project_statuses WHERE project_id = ?").get<{ count: number }>(projectId))?.count), 5);

@@ -36,7 +36,3 @@ export class ConflictError extends ApplicationError {
 export class ValidationError extends ApplicationError {
   constructor(message: string, public readonly issues?: readonly unknown[]) { super("VALIDATION", message); this.name = "ValidationError"; }
 }
-
-export class ConfigurationError extends ApplicationError {
-  constructor(message: string) { super("INTERNAL", message); this.name = "ConfigurationError"; }
-}
