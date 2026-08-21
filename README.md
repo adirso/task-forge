@@ -118,7 +118,7 @@ See [Agent API guide](docs/AGENT_API.md) for copy-paste examples.
 
 - On the first deployment, temporarily set `ADMIN_EMAIL`, `ADMIN_PASSWORD` (at least 12 characters), and optionally `ADMIN_NAME`, then run `npm run admin:bootstrap`. Remove those bootstrap values after the command succeeds. Running it again safely rotates the matching human administrator's password.
 - SQLite remains available for local development. Set `DATABASE_DRIVER=sqlite` and `DATABASE_PATH=./data/taskforge.db`; no MySQL service is needed.
-- To exercise the same API suite against a dedicated empty MySQL database, run `TEST_DATABASE_URL=mysql://... npm run test:mysql -w @taskforge/api`. The test database is modified and must never point at production.
+- To exercise the API and migration suites against MySQL, provide separate dedicated databases: `TEST_DATABASE_URL=mysql://... TEST_LEGACY_DATABASE_URL=mysql://... npm run test:mysql -w @taskforge/api`. The first database must be empty; the legacy-migration database is reset by the test. Neither URL may point at production.
 - Put the API behind TLS before issuing real credentials.
 
 ## Design choices

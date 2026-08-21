@@ -1,4 +1,4 @@
-import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ProjectStatusEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WorkflowTemplateStatusEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -29,6 +29,11 @@ export interface MembershipRepository {
   list(projectId: string): Promise<UserEntity[]>;
   add(projectId: string, userId: string, role: "OWNER" | "MEMBER"): Promise<void>;
   remove(projectId: string, userId: string): Promise<void>;
+}
+
+export interface WorkflowRepository {
+  listSystemDefaultStatuses(): Promise<WorkflowTemplateStatusEntity[]>;
+  createProjectStatuses(statuses: ProjectStatusEntity[]): Promise<void>;
 }
 
 export interface PhaseRepository {
@@ -105,6 +110,7 @@ export interface ActivityRepository {
 export interface RepositorySet {
   users: UserRepository;
   projects: ProjectRepository;
+  workflows: WorkflowRepository;
   memberships: MembershipRepository;
   phases: PhaseRepository;
   tasks: TaskRepository;

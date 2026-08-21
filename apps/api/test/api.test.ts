@@ -64,6 +64,22 @@ test("human can log in and create a project", async () => {
   assert.equal(created.statusCode, 201, created.body);
   projectId = created.json().project.id;
 
+  const defaultTemplates = await db.prepare("SELECT COUNT(*) AS count FROM workflow_templates WHERE is_system_default = 1").get<{ count: number }>();
+  assert.equal(Number(defaultTemplates?.count), 1);
+  const statuses = await db.prepare("SELECT `key`, category, position, is_initial, is_claimable, is_claim_target, triggers_review, tracks_staleness, satisfies_dependencies FROM project_statuses WHERE project_id = ? ORDER BY position").all(projectId);
+  assert.deepEqual(statuses, [
+    { key: "BACKLOG", category: "NOT_STARTED", position: 0, is_initial: 0, is_claimable: 1, is_claim_target: 0, triggers_review: 0, tracks_staleness: 0, satisfies_dependencies: 0 },
+    { key: "TODO", category: "NOT_STARTED", position: 1, is_initial: 1, is_claimable: 1, is_claim_target: 0, triggers_review: 0, tracks_staleness: 0, satisfies_dependencies: 0 },
+    { key: "IN_PROGRESS", category: "ACTIVE", position: 2, is_initial: 0, is_claimable: 0, is_claim_target: 1, triggers_review: 0, tracks_staleness: 1, satisfies_dependencies: 0 },
+    { key: "IN_REVIEW", category: "ACTIVE", position: 3, is_initial: 0, is_claimable: 0, is_claim_target: 0, triggers_review: 1, tracks_staleness: 0, satisfies_dependencies: 0 },
+    { key: "DONE", category: "COMPLETED", position: 4, is_initial: 0, is_claimable: 0, is_claim_target: 0, triggers_review: 0, tracks_staleness: 0, satisfies_dependencies: 1 },
+  ]);
+
+  for (const invalidKey of ["lowercase", "1START", "A".repeat(33), "HAS-DASH"]) {
+    await assert.rejects(() => db.prepare("INSERT INTO project_statuses (id, project_id, `key`, label, color, category, position, created_at, updated_at) SELECT ?, project_id, ?, label, color, category, 5, created_at, updated_at FROM project_statuses WHERE project_id = ? AND `key` = 'TODO'").run(randomUUID(), invalidKey, projectId));
+  }
+  await assert.rejects(() => db.prepare("INSERT INTO project_statuses (id, project_id, `key`, label, color, category, position, created_at, updated_at) SELECT ?, project_id, 'DUPLICATE_POSITION', label, color, category, position, created_at, updated_at FROM project_statuses WHERE project_id = ? AND `key` = 'TODO'").run(randomUUID(), projectId));
+
   const profile = await app.inject({
     method: "PATCH", url: "/api/users/me", headers: { authorization: `Bearer ${jwtToken}` },
     payload: { name: "Admin User", email: "admin@example.com" },
@@ -140,6 +156,8 @@ test("task lifecycle supports assignment and status changes", async () => {
   assert.deepEqual(created.json().task.phase, { id: phaseId, projectId, number: 2, goal: "Deliver the integration", isActive: true, createdAt: created.json().task.phase.createdAt, updatedAt: created.json().task.phase.updatedAt });
   assert.deepEqual(created.json().task.tags.map((tag: { name: string }) => tag.name), ["backend", "frontend"]);
   taskId = created.json().task.id;
+  const additiveTaskRow = await db.prepare("SELECT status, status_id FROM tasks WHERE id = ?").get(taskId);
+  assert.deepEqual(additiveTaskRow, { status: "TODO", status_id: null }, "TAS-42 must leave post-migration writes on the legacy path");
 
   const avatar = await app.inject({ method: "POST", url: `/api/users/${agentId}/avatar`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" } });
   assert.equal(avatar.statusCode, 200, avatar.body);
@@ -214,6 +232,20 @@ test("task lifecycle supports assignment and status changes", async () => {
   const reusable = await app.inject({ method: "GET", url: `/api/projects/${projectId}/tags`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(reusable.statusCode, 200);
   assert.deepEqual(reusable.json().tags.map((tag: { name: string }) => tag.name), ["api", "backend", "frontend"]);
+});
+
+test("legacy claiming still works when status_id is null", async () => {
+  const created = await app.inject({
+    method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` },
+    payload: { title: "Claim through the legacy path", status: "BACKLOG", priority: "URGENT" },
+  });
+  assert.equal(created.statusCode, 201, created.body);
+  const claimed = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks/claim`, headers: { authorization: `Bearer ${jwtToken}` }, payload: {} });
+  assert.equal(claimed.statusCode, 200, claimed.body);
+  assert.equal(claimed.json().task.id, created.json().task.id);
+  assert.equal(claimed.json().task.status, "IN_PROGRESS");
+  const row = await db.prepare("SELECT status, status_id FROM tasks WHERE id = ?").get(created.json().task.id);
+  assert.deepEqual(row, { status: "IN_PROGRESS", status_id: null });
 });
 
 test("task tag input is validated without changing persisted tags", async () => {

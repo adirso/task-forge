@@ -45,6 +45,31 @@ export interface ProjectEntity {
   taskCount?: number;
 }
 
+export type WorkflowStatusCategory = "NOT_STARTED" | "ACTIVE" | "COMPLETED";
+
+export interface WorkflowTemplateStatusEntity {
+  id: string;
+  templateId: string;
+  key: string;
+  label: string;
+  color: string;
+  category: WorkflowStatusCategory;
+  position: number;
+  isInitial: boolean;
+  isClaimable: boolean;
+  isClaimTarget: boolean;
+  triggersReview: boolean;
+  tracksStaleness: boolean;
+  satisfiesDependencies: boolean;
+  archivedAt: string | null;
+}
+
+export interface ProjectStatusEntity extends Omit<WorkflowTemplateStatusEntity, "templateId"> {
+  projectId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PhaseEntity {
   id: string;
   projectId: string;
