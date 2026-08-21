@@ -151,6 +151,8 @@ Task contracts should move to `statusId` as the canonical input and return the r
 
 During migration, create/update/filter endpoints may also accept the legacy `status` key and map it to a non-archived key within the task's project. If both are supplied they must resolve to the same status. A missing or archived key returns `400` with a stable `UNKNOWN_STATUS_KEY` code and directs the caller to `GET /api/projects/:projectId/workflow`; filters must not silently return an empty result. Responses retain `status` as a deprecated stable key until all first-party clients and documented consumers have moved to `statusId`; they must also expose `statusDefinition` so custom labels are never lost.
 
+From the TAS-43 cutover through TAS-46, `status_id` is the only read source of truth, but task creation and transitions transactionally dual-write the legacy `tasks.status` column with the resolved status's immutable key. The deprecated response `status` is always derived from `statusDefinition.key`, never read from the compatibility column. The column is widened to the workflow-key limit and retained only as a rollback/data-recovery affordance during the compatibility window; TAS-46 removes it after legacy clients are retired.
+
 Context responses and webhook task payloads should use the same task representation. Automation status conditions and actions must store status IDs and render the current label. Dashboard responses should return `countsByStatus` for columns and `countsByCategory` for portable progress metrics instead of five named fields.
 
 ## Behavior mapping
@@ -159,7 +161,7 @@ Context responses and webhook task payloads should use the same task representat
 | --- | --- |
 | Create task | Use the project's `is_initial` status when `statusId` is omitted. |
 | Claim task | Candidates are unassigned tasks whose status has `is_claimable`; move the winner to `is_claim_target`. Candidate selection may precede the write, but the atomic conditional `UPDATE` must repeat both `assignee_id IS NULL` and claimable-status eligibility so two claimers cannot win. |
-| Review notification | Emit only on a false-to-true edge: the new status has `triggers_review` and the previous status did not. Moving between two review-triggering statuses does not notify again. |
+| Review notification | Emit only on a false-to-true edge when the actor is not the task creator: the new status has `triggers_review`, the previous status did not, and `creator_id != actor_id`. Moving between two review-triggering statuses or a creator moving their own task does not notify. |
 | Dependencies | A dependency stops blocking only in a status with `satisfies_dependencies` true. |
 | Task list and board ordering | Join `project_statuses` and order by its `position`, then the task's status-scoped `position`; never order by the status key or UUID. |
 | Project open work | Any status whose category is not `COMPLETED`. |
@@ -169,17 +171,19 @@ Context responses and webhook task payloads should use the same task representat
 | Stuck work | Tasks whose status has `tracks_staleness` and whose age exceeds the existing four-hour threshold. The legacy mapping enables it for `IN_PROGRESS` and disables it for `IN_REVIEW`, preserving today's behavior. Agent-ops uses the same flag across projects. |
 | Agent instructions | Discover the project workflow and use status IDs/keys advertised by the API. |
 
+The workflow editors must explain that `is_initial` has two intentional Phase 2 effects: it selects the status assigned to newly created tasks and includes assigned tasks in the My Tasks feed. Changing the initial status therefore changes feed membership as well as task-creation defaults.
+
 ## Migration and compatibility plan
 
 1. Introduce versioned migrations rather than adding another one-off column probe to `database.ts`.
 2. Create the default template and status tables, seeding the five legacy definitions.
 3. Copy those definitions to every existing project with deterministic legacy-key mapping.
 4. In TAS-42, add nullable `tasks.status_id` and backfill current rows from `(project_id, legacy status)`. Leave the legacy `status` column, its five-value constraint, and all existing repositories/services untouched, because tasks created between the TAS-42 and TAS-43 deployments will legitimately have a null `status_id`.
-5. In TAS-43 startup migration, rerun the idempotent backfill to cover rows created after TAS-42, verify that no row remains unmapped, then switch repositories and services to `status_id`, add resolved status data to responses, and temporarily support legacy keys at the HTTP boundary. Task list queries join status definitions for ordering, and claim keeps its eligibility check inside the conditional update.
-6. Still in TAS-43, after the final backfill and code cutover are ready, rebuild the SQLite `tasks` table and alter the MySQL table to remove the old five-value constraint, make `status_id` non-null, and add the same-project foreign key/indexes. Exercise fresh install, direct upgrade, and the intermediate TAS-42-deployed state in tests.
+5. In TAS-43 startup migration, rerun the idempotent backfill to cover rows created after TAS-42, verify that no row remains unmapped, then switch repositories and services to `status_id`, add resolved status data to responses, and temporarily support legacy keys at the HTTP boundary. If validation fails, emit structured diagnostics containing every offending task ID and its missing `(project_id, legacy key)` mapping before aborting; do not report only a count. Task list queries join status definitions for ordering, claim keeps its eligibility check inside the conditional update, and writes begin transactionally updating both canonical `status_id` and the legacy key column.
+6. Still in TAS-43, after the final backfill and code cutover are ready, rebuild the SQLite `tasks` table and alter the MySQL table to remove the old five-value constraint, make `status_id` non-null, widen but retain the dual-written legacy key column, and add the same-project foreign key/indexes. Exercise fresh install, direct upgrade, and the intermediate TAS-42-deployed state in tests.
 7. Migrate automation status values to IDs. Invalid legacy values disable the affected rule with an actionable validation message rather than being guessed.
 8. Move every first-party UI, dashboard, agent path, seed, and fixture to the workflow API.
-9. After the compatibility window, remove the deprecated status string and enum.
+9. After the compatibility window, TAS-46 removes the deprecated response/request key, enum, dual-write logic, and legacy database column.
 
 The rollout should preserve task numbers, positions, timestamps, foreign keys, and all existing legacy labels. TAS-42 must remain deployable by itself: create, update, list, and claim continue using the legacy column until TAS-43. A TAS-43 migration must fail before destructive schema replacement if the final backfill count does not match the task count.
 
@@ -188,17 +192,17 @@ The rollout should preserve task numbers, positions, timestamps, foreign keys, a
 The implementation is split along migration and client boundaries so each change remains reviewable:
 
 1. **TAS-42 — Add configurable workflow status storage and migration.** Adds persistence, seeds the default records, copies them into new projects, and adds a nullable best-effort backfill without changing the legacy task read/write path or constraints. It does not add edit APIs. No dependencies.
-2. **TAS-43 — Add workflow configuration and status-aware task APIs.** Reruns the backfill, performs the repository/schema cutover, and adds administrator/project edit APIs, invariants, permissions, compatibility, atomic claiming, deterministic ordering, and edge-triggered review behavior. Depends on TAS-42.
-3. **TAS-44 — Build global and per-project workflow editors.** Makes the web app and board dynamic and exposes status behavior controls in both configuration experiences. Depends on TAS-43.
+2. **TAS-43 — Add workflow configuration and status-aware task APIs.** Reruns the diagnosable backfill, performs the repository/schema cutover, dual-writes the legacy key, and adds administrator/project edit APIs, invariants, permissions, compatibility, atomic claiming, deterministic ordering, and edge-triggered review behavior with the existing self-notification guard. Depends on TAS-42.
+3. **TAS-44 — Build global and per-project workflow editors.** Makes the web app and board dynamic, exposes status behavior controls in both configuration experiences, and explains `is_initial`'s task-creation and My Tasks effects. Depends on TAS-43.
 4. **TAS-45 — Make dashboards, automations, and agent flows workflow-aware.** Migrates cross-cutting consumers and agent documentation while preserving the current stuck-work default through `tracks_staleness`. Depends on TAS-43.
-5. **TAS-46 — Retire legacy hard-coded task status compatibility.** Removes the enum and temporary API compatibility after first-party migration. Depends on TAS-44 and TAS-45.
+5. **TAS-46 — Retire legacy hard-coded task status compatibility.** Removes the enum, compatibility API, dual-write, and legacy column after first-party migration without dropping behavior guards. Depends on TAS-44 and TAS-45.
 
 All five tasks are children of TAS-40 and are assigned to Phase 2.
 
 ## Testing strategy
 
-- Migration tests start from legacy SQLite and MySQL schemas and from the intermediate TAS-42 schema, then assert row counts, mappings, constraints, rollback behavior, and uninterrupted legacy task creation/claiming before TAS-43.
-- Application tests cover workflow invariants, permissions, same-project validation, dense/unique ordering, archive-with-replacement, task creation defaults, explicit claim eligibility, atomic claim races, false-to-true review transitions, staleness tracking, and dependency completion.
+- Migration tests start from legacy SQLite and MySQL schemas and from the intermediate TAS-42 schema, then assert row counts, mappings, constraints, useful unmapped-row diagnostics, rollback behavior, and uninterrupted legacy task creation/claiming before TAS-43.
+- Application tests cover workflow invariants, permissions, same-project validation, dense/unique ordering, archive-with-replacement, task creation defaults, canonical reads plus transactional legacy-key dual-writes, explicit claim eligibility, atomic claim races, false-to-true review transitions and the creator self-notification guard, staleness tracking, and dependency completion.
 - Contract/API tests cover custom status IDs, legacy-key compatibility, filters, context, webhooks, and automation migration.
 - Web tests use a workflow with more than five statuses and renamed labels to catch hidden constant usage.
 - Dashboard tests use multiple statuses in the same semantic category.
