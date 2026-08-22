@@ -103,6 +103,7 @@ DELETE /api/projects/:id/members/:userId
 ```http
 GET    /api/projects/:projectId/tasks
 POST   /api/projects/:projectId/tasks
+POST   /api/projects/:projectId/tasks/claim
 GET    /api/tasks/:id
 PATCH  /api/tasks/:id
 POST   /api/tasks/:id/dependencies
@@ -150,6 +151,27 @@ curl -sS -X POST "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks" \
 ```
 
 List filters are query parameters: `status`, `assigneeId`, `priority`, `type`, `phaseId`, `tag`, `minPoints`, `maxPoints`, and `q` (searches title/description). Task responses include `phaseId` plus a `phase` object (`id`, `number`, `goal`, and `isActive`), as well as `tags`, `dependencies` (with `isBlocking`), `attachments`, and the hydrated `assignee`.
+
+### Project workflow and task claiming
+
+`project.availableStatuses` is authoritative for agents. Read it from `GET /api/context` before every status transition and never send a disabled status. `project.defaultStatus` is only the default for task creation; it does not identify a work, review, or completion transition.
+
+Claiming uses this fixed semantic mapping:
+
+- Enabled `BACKLOG`, `TODO`, and `READY_FOR_DEV` statuses are eligible claim sources.
+- `IN_PROGRESS` is the claim target and must be enabled.
+- At least one claim source must be enabled. A project without `IN_PROGRESS`, or without any enabled claim source, returns `400` with instructions to update project settings.
+- The winning task is selected by priority and position. Assignment, source-status eligibility, and the move to `IN_PROGRESS` are repeated in one conditional update, so concurrent callers cannot both claim the same task.
+
+Claim the next available task, optionally filtering by `phaseId` or `priority`:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks/claim" \
+  -H "Authorization: Bearer $AGENT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"priority":"HIGH"}'
+```
+
+For handoff and lifecycle updates, use `READY_FOR_REVIEW` when enabled, otherwise `IN_REVIEW` when enabled. Use `DONE` for successful completion only when it is enabled; `CANCELLED` is not a completion substitute. If the project has no enabled review or completion status, refresh `GET /api/context`, leave the task status unchanged, and ask the project owner which enabled transition represents that step. Send-to-AI prompts follow these same rules and list the enabled statuses they were generated from.
 
 To replace dependencies without changing any other task fields, use the dedicated endpoint. The request replaces the full set atomically at the application level; send an empty array to remove all dependencies:
 

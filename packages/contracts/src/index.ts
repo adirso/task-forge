@@ -4,6 +4,10 @@ export const userKindSchema = z.enum(["HUMAN", "AGENT"]);
 export const userRoleSchema = z.enum(["ADMIN", "MEMBER"]);
 export const projectMemberRoleSchema = z.enum(["OWNER", "MEMBER"]);
 export const TASK_STATUSES = ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"] as const;
+export const TASK_CLAIM_SOURCE_STATUSES = ["BACKLOG", "TODO", "READY_FOR_DEV"] as const;
+export const TASK_CLAIM_TARGET_STATUS = "IN_PROGRESS" as const;
+export const TASK_REVIEW_STATUSES = ["READY_FOR_REVIEW", "IN_REVIEW"] as const;
+export const TASK_COMPLETION_STATUS = "DONE" as const;
 export const taskStatusSchema = z.enum(TASK_STATUSES);
 export const projectAvailableStatusesSchema = z.array(taskStatusSchema)
   .min(1, "At least one status must be available")
