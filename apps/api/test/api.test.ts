@@ -23,6 +23,7 @@ const { buildApp } = await import("../src/app.js");
 const app = await buildApp();
 
 const adminId = randomUUID();
+const memberId = randomUUID();
 const agentId = randomUUID();
 let jwtToken = "";
 let projectId = "";
@@ -35,6 +36,8 @@ before(async () => {
   const password = await bcrypt.hash("password123", 8);
   await db.prepare("INSERT INTO users (id, email, name, password_hash, kind, role, created_at) VALUES (?, ?, ?, ?, 'HUMAN', 'ADMIN', ?)")
     .run(adminId, "admin@example.com", "Admin", password, now);
+  await db.prepare("INSERT INTO users (id, email, name, password_hash, kind, role, created_at) VALUES (?, ?, ?, ?, 'HUMAN', 'MEMBER', ?)")
+    .run(memberId, "member@example.com", "Project Member", password, now);
   await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)")
     .run(agentId, "agent@example.com", "Test Agent", now);
 });
@@ -111,6 +114,14 @@ test("projects configure available statuses and the default API status", async (
   const statusProject = created.json().project;
   assert.deepEqual(statusProject.availableStatuses, ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
   assert.equal(statusProject.defaultStatus, "TODO");
+
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  assert.equal(memberLogin.statusCode, 200, memberLogin.body);
+  const addMember = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: memberId, role: "MEMBER" } });
+  assert.equal(addMember.statusCode, 204, addMember.body);
+  const forbiddenConfiguration = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${memberLogin.json().token}` }, payload: { defaultStatus: "REFINING" } });
+  assert.equal(forbiddenConfiguration.statusCode, 403, forbiddenConfiguration.body);
+  assert.match(forbiddenConfiguration.json().error, /project owner or an administrator/);
 
   for (const status of ["REFINING", "READY_FOR_DEV", "READY_FOR_REVIEW", "CANCELLED"]) {
     const task = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: `${status} task`, status } });
