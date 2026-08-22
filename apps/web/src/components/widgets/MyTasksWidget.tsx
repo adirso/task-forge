@@ -3,12 +3,7 @@ import { api } from "../../lib/api";
 import { openTask } from "../../lib/dashboardNav";
 import { useWidgetQuery } from "../../lib/widgetQuery";
 import { WidgetError } from "../WidgetShell";
-
-const STATUS_LABELS: Record<string, string> = {
-  TODO: "Todo",
-  IN_PROGRESS: "In progress",
-  IN_REVIEW: "In review",
-};
+import { statusMeta } from "../../lib/ui";
 
 export function MyTasksWidget() {
   const { data, error, loading, reload } = useWidgetQuery<DashboardSummary>(() => api.dashboardSummary());
@@ -28,8 +23,8 @@ export function MyTasksWidget() {
         >
           <span className="wtl-key">{task.projectKey}-{task.number}</span>
           <span className="wtl-title">{task.title}</span>
-          <span className={`wtl-status wtl-status-${task.status.toLowerCase().replace("_", "-")}`}>
-            {STATUS_LABELS[task.status] ?? task.status}
+          <span className={`wtl-status wtl-status-${task.status.toLowerCase().replaceAll("_", "-")}`}>
+            {statusMeta[task.status].label}
           </span>
         </button>
       ))}

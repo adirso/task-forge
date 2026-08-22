@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { TASK_STATUSES } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 
 const STUCK_THRESHOLD_MS = 4 * 60 * 60 * 1000; // 4 hours
@@ -43,17 +44,13 @@ export async function dashboardRoutes(app: FastifyInstance) {
 
     const projects = projectRows.map((p) => {
       const c = counts[p.id] ?? {};
-      const todo = c["TODO"] ?? 0;
-      const inProgress = c["IN_PROGRESS"] ?? 0;
-      const inReview = c["IN_REVIEW"] ?? 0;
-      const done = c["DONE"] ?? 0;
-      const backlog = c["BACKLOG"] ?? 0;
+      const statusCounts = Object.fromEntries(TASK_STATUSES.map((status) => [status, c[status] ?? 0]));
       return {
         id: p.id,
         name: p.name,
         key: p.key,
         color: p.color,
-        counts: { TODO: todo, IN_PROGRESS: inProgress, IN_REVIEW: inReview, DONE: done, BACKLOG: backlog, total: todo + inProgress + inReview + done + backlog },
+        counts: { ...statusCounts, total: TASK_STATUSES.reduce((total, status) => total + (c[status] ?? 0), 0) },
       };
     });
 
@@ -65,7 +62,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       FROM tasks t
       JOIN projects p ON p.id = t.project_id
       JOIN users u ON u.id = t.assignee_id
-      WHERE t.assignee_id = ? AND t.status NOT IN ('DONE','BACKLOG')
+      WHERE t.assignee_id = ? AND t.status NOT IN ('DONE','CANCELLED','BACKLOG')
       ORDER BY t.updated_at DESC
       LIMIT 30
     `).all(authUser.id) as TaskRow[];

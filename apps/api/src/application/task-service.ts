@@ -29,9 +29,10 @@ export class TaskApplicationService implements TaskService {
   async create(context: ProjectContext, input: TaskCreateInput) {
     return this.unitOfWork.run(async (repositories) => {
       this.assertScope(context, "task:create");
-      await this.assertProjectAccess(repositories, context);
+      const project = await this.assertProjectAccess(repositories, context);
       const phaseId = input.phaseId === undefined ? (await repositories.phases.findActive(context.projectId))?.id ?? null : input.phaseId;
-      const normalized = { ...input, description: input.description ?? "", definitionOfDone: input.definitionOfDone ?? "", status: input.status ?? "TODO", priority: input.priority ?? "MEDIUM", type: input.type ?? "FEATURE", assigneeId: input.assigneeId ?? null, parentId: input.parentId ?? null, branch: input.branch ?? null, dueDate: input.dueDate ?? null, estimatePoints: input.estimatePoints ?? null, phaseId, pullRequestUrl: input.pullRequestUrl ?? null, pullRequestTitle: input.pullRequestTitle ?? null, pullRequestState: input.pullRequestState ?? null };
+      const normalized = { ...input, description: input.description ?? "", definitionOfDone: input.definitionOfDone ?? "", status: input.status ?? project.defaultStatus, priority: input.priority ?? "MEDIUM", type: input.type ?? "FEATURE", assigneeId: input.assigneeId ?? null, parentId: input.parentId ?? null, branch: input.branch ?? null, dueDate: input.dueDate ?? null, estimatePoints: input.estimatePoints ?? null, phaseId, pullRequestUrl: input.pullRequestUrl ?? null, pullRequestTitle: input.pullRequestTitle ?? null, pullRequestState: input.pullRequestState ?? null };
+      this.assertStatusAvailable(project.availableStatuses, normalized.status);
       await this.validateRelations(repositories, context.projectId, null, normalized);
       const allocation = await repositories.tasks.allocateNumber(context.projectId, normalized.status);
       const now = this.now();
@@ -55,6 +56,11 @@ export class TaskApplicationService implements TaskService {
       if ("status" in input) this.assertScope(context, "task:update:status");
       if (hasField(this.BRANCH_FIELDS)) this.assertScope(context, "task:update:branch");
       if (hasField(this.META_FIELDS)) this.assertScope(context, "task:update:meta");
+      if (input.status) {
+        const project = await repositories.projects.findById(existing.projectId);
+        if (!project) throw new NotFoundError("Project");
+        this.assertStatusAvailable(project.availableStatuses, input.status);
+      }
       await this.validateRelations(repositories, existing.projectId, taskId, input);
       const { tags, dependencyIds, ...fields } = input;
       const now = this.now();
@@ -64,7 +70,8 @@ export class TaskApplicationService implements TaskService {
       await repositories.activity.record({ projectId: existing.projectId, taskId, actorId: context.actor.userId, action: "task.updated", metadata: input });
       const assigneeChanged = input.assigneeId !== undefined && input.assigneeId !== existing.assigneeId;
       if (assigneeChanged && input.assigneeId && input.assigneeId !== context.actor.userId) await this.notify(repositories, input.assigneeId, { ...existing, ...task, title: input.title ?? existing.title }, context, "TASK_ASSIGNED", "Task assigned to you");
-      if (input.status === "IN_REVIEW" && existing.status !== "IN_REVIEW" && existing.creatorId !== context.actor.userId) await this.notify(repositories, existing.creatorId, { ...existing, ...task, title: input.title ?? existing.title }, context, "REVIEW_REQUESTED", "Review requested");
+      const reviewStatuses = new Set<TaskStatus>(["READY_FOR_REVIEW", "IN_REVIEW"]);
+      if (input.status && reviewStatuses.has(input.status) && !reviewStatuses.has(existing.status) && existing.creatorId !== context.actor.userId) await this.notify(repositories, existing.creatorId, { ...existing, ...task, title: input.title ?? existing.title }, context, "REVIEW_REQUESTED", "Review requested");
       const automated = await this.automationEngine.apply(repositories, context, existing, { ...task, updatedAt: now }, "TASK_UPDATED");
       if (assigneeChanged && input.assigneeId) await this.dispatchWebhookIfNeeded(repositories, { ...task, assigneeId: input.assigneeId }, context);
       return this.hydrate(repositories, automated);
@@ -74,7 +81,8 @@ export class TaskApplicationService implements TaskService {
   async claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string }) {
     return this.unitOfWork.run(async (repositories) => {
       this.assertScope(context, "task:claim");
-      await this.assertProjectAccess(repositories, context);
+      const project = await this.assertProjectAccess(repositories, context);
+      this.assertStatusAvailable(project.availableStatuses, "IN_PROGRESS");
       const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, options);
       if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
@@ -117,7 +125,7 @@ export class TaskApplicationService implements TaskService {
 
   private async hydrate(repositories: RepositorySet, task: TaskEntity) {
     const [tags, dependencies, attachments, assignee, phase] = await Promise.all([repositories.tags.listForTask ? repositories.tags.listForTask(task.id) : Promise.resolve([]), repositories.dependencies.listForTask ? repositories.dependencies.listForTask(task.id) : Promise.resolve([]), repositories.attachments?.listForTask ? repositories.attachments.listForTask(task.id) : Promise.resolve([]), task.assigneeId && repositories.users.findById ? repositories.users.findById(task.assigneeId) : Promise.resolve(null), task.phaseId && repositories.phases.findById ? repositories.phases.findById(task.phaseId) : Promise.resolve(null)]);
-    return { ...task, tags, dependencies: dependencies.map((dependency) => ({ ...dependency, isBlocking: dependency.status !== "DONE" })), attachments, assignee, phase };
+    return { ...task, tags, dependencies: dependencies.map((dependency) => ({ ...dependency, isBlocking: dependency.status !== "DONE" && dependency.status !== "CANCELLED" })), attachments, assignee, phase };
   }
 
   private async assertProjectAccess(repositories: RepositorySet, context: RequestContext, projectId?: string) {
@@ -125,6 +133,11 @@ export class TaskApplicationService implements TaskService {
     const project = await repositories.projects.findById(target);
     if (!project) throw new NotFoundError("Project");
     if (context.actor.role !== "ADMIN" && !(await repositories.memberships.isMember(target, context.actor.userId))) throw new ForbiddenError("You are not a member of this project");
+    return project;
+  }
+
+  private assertStatusAvailable(availableStatuses: TaskStatus[], status: TaskStatus) {
+    if (!availableStatuses.includes(status)) throw new ValidationError(`Status ${status} is not available in this project`);
   }
 
   private async requireTask(repositories: RepositorySet, taskId: string) { const task = await repositories.tasks.findById(taskId); if (!task) throw new NotFoundError("Task"); return task; }

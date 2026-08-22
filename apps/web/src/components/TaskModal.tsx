@@ -37,7 +37,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const set = <K extends keyof TaskCreate>(key: K, value: TaskCreate[K]) => setForm((current) => ({ ...current, [key]: value }));
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    try { await onSave(form); onClose(); } catch (err) { setError(err instanceof Error ? err.message : "Could not save task"); }
+    try { await onSave({ ...form, status: form.status ?? initialStatus }); onClose(); } catch (err) { setError(err instanceof Error ? err.message : "Could not save task"); }
     finally { setSaving(false); }
   }
   async function postUpdate() {
@@ -93,7 +93,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
             <div className="tag-field"><span>Tags</span><TaskTagEditor value={form.tags ?? []} availableTags={availableTags} onChange={(tags) => set("tags", tags)} /></div>
             <label>Type<select value={form.type} onChange={(e) => set("type", e.target.value as TaskType)}>{Object.entries(taskTypeMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
             <label>Phase<select value={form.phaseId ?? ""} onChange={(e) => set("phaseId", e.target.value || null)}><option value="">No phase</option>{phases.map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select></label>
-            <label>Status<select value={form.status} onChange={(e) => set("status", e.target.value as TaskStatus)}>{Object.entries(statusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
+            <label>Status<select value={form.status ?? initialStatus} onChange={(e) => set("status", e.target.value as TaskStatus)}>{project.availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select></label>
             <label>Assignee<select value={form.assigneeId ?? ""} onChange={(e) => set("assigneeId", e.target.value || null)}><option value="">Unassigned</option>{members.map((user) => <option key={user.id} value={user.id}>{user.name}{user.kind === "AGENT" ? " (Agent)" : ""}</option>)}</select></label>
             <label>Priority<select value={form.priority} onChange={(e) => set("priority", e.target.value as TaskPriority)}>{Object.entries(priorityMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
             <label>Parent task<select value={form.parentId ?? ""} onChange={(e) => set("parentId", e.target.value || null)}><option value="">None</option>{tasks.filter((candidate) => candidate.id !== task?.id).map((candidate) => <option key={candidate.id} value={candidate.id}>{project.key}-{candidate.number} · {candidate.title}</option>)}</select></label>

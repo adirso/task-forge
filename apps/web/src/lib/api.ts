@@ -1,4 +1,4 @@
-import type { ActivityEvent, AgentOpsEntry, ApiTokenMetadata, Attachment, AuthResponse, Automation, AutomationCreate, AutomationUpdate, DashboardSummary, Notification, Phase, Project, Tag, Task, TaskCreate, TaskNote, TaskSearchResult, TaskUpdate, User } from "@taskforge/contracts";
+import { TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type Notification, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User } from "@taskforge/contracts";
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
@@ -48,6 +48,8 @@ let mockProjects: Project[] = [{
   repoUrl: "https://github.com/example/mobile-refresh",
   color: "#6554c0",
   sortOrder: 0,
+  availableStatuses: [...TASK_STATUSES],
+  defaultStatus: "TODO",
   ownerId: MOCK_USER.id,
   createdAt: MOCK_NOW,
   updatedAt: MOCK_NOW,
@@ -131,10 +133,14 @@ function mockDashboardSummary(): DashboardSummary {
       color: project.color,
       counts: {
         BACKLOG: byStatus("BACKLOG").length,
+        REFINING: byStatus("REFINING").length,
         TODO: byStatus("TODO").length,
+        READY_FOR_DEV: byStatus("READY_FOR_DEV").length,
         IN_PROGRESS: byStatus("IN_PROGRESS").length,
+        READY_FOR_REVIEW: byStatus("READY_FOR_REVIEW").length,
         IN_REVIEW: byStatus("IN_REVIEW").length,
         DONE: byStatus("DONE").length,
+        CANCELLED: byStatus("CANCELLED").length,
         total: mockTasks.length,
       },
     }],
@@ -172,6 +178,10 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
   if (/^\/notifications\/[^/]+\/read$/.test(pathname) && method === "PATCH") return { notification: mockNotifications[0] } as T;
   if (pathname === "/dashboard/summary" && method === "GET") return mockDashboardSummary() as T;
   if (/^\/projects\/[^/]+$/.test(pathname) && method === "GET") return { project: mockProjects[0] } as T;
+  if (/^\/projects\/[^/]+$/.test(pathname) && method === "PATCH") {
+    mockProjects[0] = { ...mockProjects[0]!, ...(options.body as Partial<Project>), updatedAt: new Date().toISOString() };
+    return { project: mockProjects[0] } as T;
+  }
   if (/^\/projects\/[^/]+\/tasks$/.test(pathname) && method === "GET") return { tasks: mockTasks } as T;
   if (/^\/projects\/[^/]+\/phases$/.test(pathname) && method === "GET") return { phases: mockPhases } as T;
   if (/^\/projects\/[^/]+\/tags$/.test(pathname) && method === "GET") return { tags: mockTags } as T;
@@ -217,7 +227,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
         webhookUrl: null,
         createdAt: MOCK_AGENT.createdAt,
         lastActiveAt: MOCK_NOW,
-        openTaskCount: mockTasks.filter((task) => task.assigneeId === MOCK_AGENT.id && task.status !== "DONE").length,
+        openTaskCount: mockTasks.filter((task) => task.assigneeId === MOCK_AGENT.id && task.status !== "DONE" && task.status !== "CANCELLED").length,
         stuckTaskCount: 0,
         inProgressTasks: mockTasks
           .filter((task) => task.assigneeId === MOCK_AGENT.id && task.status === "IN_PROGRESS")
@@ -248,7 +258,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
     const input = options.body as TaskCreate;
     const nextNumber = Math.max(0, ...mockTasks.map((task) => task.number)) + 1;
     const assignee = [MOCK_USER, MOCK_MEMBER, MOCK_AGENT].find((candidate) => candidate.id === input.assigneeId) ?? null;
-    const created = makeMockTask(nextNumber, input.title, input.status, input.priority, input.type, input.phaseId ?? null, assignee, []);
+    const created = makeMockTask(nextNumber, input.title, input.status ?? mockProjects[0]!.defaultStatus, input.priority, input.type, input.phaseId ?? null, assignee, []);
     created.description = input.description;
     created.definitionOfDone = input.definitionOfDone;
     created.branch = input.branch ?? null;
@@ -334,7 +344,7 @@ export const api = {
   deletePhase: (id: string) => request<void>(`/phases/${id}`, { method: "DELETE" }),
   createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
-  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; color?: string }) =>
+  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   tasks: (projectId: string) => request<{ tasks: Task[] }>(`/projects/${projectId}/tasks`),

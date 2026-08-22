@@ -14,7 +14,10 @@ export function ProjectStatusWidget() {
   return (
     <div className="widget-project-status">
       {data.projects.map((p) => {
-        const active = p.counts.TODO + p.counts.IN_PROGRESS + p.counts.IN_REVIEW;
+        const planned = p.counts.REFINING + p.counts.TODO + p.counts.READY_FOR_DEV;
+        const review = p.counts.READY_FOR_REVIEW + p.counts.IN_REVIEW;
+        const closed = p.counts.DONE + p.counts.CANCELLED;
+        const active = planned + p.counts.IN_PROGRESS + review;
         return (
           <button key={p.id} type="button" className="wps-row" onClick={() => openProject(p.key)}>
             <div className="wps-name" title={p.name}>
@@ -26,10 +29,10 @@ export function ProjectStatusWidget() {
                 <div className="wps-empty-bar" />
               ) : (
                 <>
-                  {p.counts.TODO > 0 && <div className="wps-bar wps-bar-todo" style={{ flex: p.counts.TODO }} title={`${p.counts.TODO} TODO`} />}
+                  {planned > 0 && <div className="wps-bar wps-bar-todo" style={{ flex: planned }} title={`${planned} planned or ready`} />}
                   {p.counts.IN_PROGRESS > 0 && <div className="wps-bar wps-bar-inprogress" style={{ flex: p.counts.IN_PROGRESS }} title={`${p.counts.IN_PROGRESS} IN PROGRESS`} />}
-                  {p.counts.IN_REVIEW > 0 && <div className="wps-bar wps-bar-inreview" style={{ flex: p.counts.IN_REVIEW }} title={`${p.counts.IN_REVIEW} IN REVIEW`} />}
-                  {p.counts.DONE > 0 && <div className="wps-bar wps-bar-done" style={{ flex: p.counts.DONE }} title={`${p.counts.DONE} DONE`} />}
+                  {review > 0 && <div className="wps-bar wps-bar-inreview" style={{ flex: review }} title={`${review} ready for or in review`} />}
+                  {closed > 0 && <div className="wps-bar wps-bar-done" style={{ flex: closed }} title={`${closed} done or cancelled`} />}
                 </>
               )}
             </div>
@@ -38,10 +41,10 @@ export function ProjectStatusWidget() {
         );
       })}
       <div className="wps-legend">
-        <span><span className="wps-dot wps-dot-todo" />TODO</span>
+        <span><span className="wps-dot wps-dot-todo" />Planned</span>
         <span><span className="wps-dot wps-dot-inprogress" />In progress</span>
-        <span><span className="wps-dot wps-dot-inreview" />In review</span>
-        <span><span className="wps-dot wps-dot-done" />Done</span>
+        <span><span className="wps-dot wps-dot-inreview" />Review</span>
+        <span><span className="wps-dot wps-dot-done" />Closed</span>
       </div>
     </div>
   );

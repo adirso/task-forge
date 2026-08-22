@@ -20,7 +20,7 @@ export interface ProjectRepository {
   allocateSortOrder(): Promise<number>;
   reorder(ids: string[]): Promise<void>;
   create(input: ProjectEntity): Promise<ProjectEntity>;
-  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "color">>): Promise<ProjectEntity>;
+  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "color" | "availableStatuses" | "defaultStatus">>): Promise<ProjectEntity>;
   delete(id: string): Promise<void>;
 }
 
@@ -46,6 +46,7 @@ export interface TaskRepository {
   findByProjectNumber(projectId: string, number: number): Promise<TaskEntity | null>;
   listByProject(projectId: string, filters?: TaskFilters): Promise<TaskEntity[]>;
   listForAssignee(assigneeId: string, status?: string): Promise<TaskEntity[]>;
+  listUsedStatuses(projectId: string): Promise<TaskEntity["status"][]>;
   claimNext(projectId: string, claimantId: string, options?: { phaseId?: string | null; priority?: string }): Promise<TaskEntity | null>;
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   unassignForProjectMember(projectId: string, userId: string): Promise<void>;

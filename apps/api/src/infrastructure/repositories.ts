@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
 import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
 import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
@@ -22,8 +23,22 @@ function toUser(row: Row): UserEntity {
   return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), webhookUrl: nullableText(row.webhook_url), createdAt: date(row.created_at) };
 }
 
+function configuredStatuses(value: unknown): TaskStatus[] {
+  try {
+    const parsed = JSON.parse(String(value ?? "[]"));
+    if (Array.isArray(parsed)) {
+      const selected = TASK_STATUSES.filter((status) => parsed.includes(status));
+      if (selected.length) return selected;
+    }
+  } catch { /* Legacy rows use the complete status set. */ }
+  return [...TASK_STATUSES];
+}
+
 function toProject(row: Row): ProjectEntity {
-  return { id: text(row.id), key: text(row.key), name: text(row.name), description: text(row.description), repoUrl: nullableText(row.repo_url), color: text(row.color), sortOrder: Number(row.sort_order ?? 0), ownerId: text(row.owner_id), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}) };
+  const availableStatuses = configuredStatuses(row.available_statuses);
+  const configuredDefault = String(row.default_status ?? "TODO") as TaskStatus;
+  const defaultStatus = availableStatuses.includes(configuredDefault) ? configuredDefault : availableStatuses[0]!;
+  return { id: text(row.id), key: text(row.key), name: text(row.name), description: text(row.description), repoUrl: nullableText(row.repo_url), color: text(row.color), sortOrder: Number(row.sort_order ?? 0), availableStatuses, defaultStatus, ownerId: text(row.owner_id), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}) };
 }
 
 function toPhase(row: Row): PhaseEntity {
@@ -105,8 +120,8 @@ function createProjectRepository(db: DatabasePort): ProjectRepository {
     async listAccessible(actorId, isAdmin) { const rows = await db.prepare(`SELECT p.*, COUNT(t.id) AS task_count FROM projects p LEFT JOIN tasks t ON t.project_id = p.id WHERE ? = 1 OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?) GROUP BY p.id ORDER BY p.sort_order ASC, p.created_at DESC`).all(isAdmin ? 1 : 0, actorId); return rows.map(toProject); },
     async allocateSortOrder() { const row = await db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next_order FROM projects").get(); return Number(row?.next_order ?? -1); },
     async reorder(ids) { for (const [index, id] of ids.entries()) await db.prepare("UPDATE projects SET sort_order = ? WHERE id = ?").run(index, id); },
-    async create(input) { await db.prepare("INSERT INTO projects (id, `key`, name, description, repo_url, color, sort_order, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.key, input.name, input.description, input.repoUrl, input.color, input.sortOrder, input.ownerId, input.createdAt, input.updatedAt); return input; },
-    async update(id, input) { const fields: string[] = []; const values: unknown[] = []; const columns: Record<string, string> = { name: "name", description: "description", repoUrl: "repo_url", color: "color" }; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM projects WHERE id = ?").get(id); if (!row) throw new Error("Project not found after update"); return toProject(row); },
+    async create(input) { await db.prepare("INSERT INTO projects (id, `key`, name, description, repo_url, color, sort_order, available_statuses, default_status, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.key, input.name, input.description, input.repoUrl, input.color, input.sortOrder, JSON.stringify(input.availableStatuses), input.defaultStatus, input.ownerId, input.createdAt, input.updatedAt); return input; },
+    async update(id, input) { const fields: string[] = []; const values: unknown[] = []; const columns: Record<string, string> = { name: "name", description: "description", repoUrl: "repo_url", color: "color", availableStatuses: "available_statuses", defaultStatus: "default_status" }; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); const value = input[key as keyof typeof input]; values.push(key === "availableStatuses" ? JSON.stringify(value) : value ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM projects WHERE id = ?").get(id); if (!row) throw new Error("Project not found after update"); return toProject(row); },
     async delete(id) { await db.prepare("DELETE FROM projects WHERE id = ?").run(id); },
   };
 }
@@ -149,6 +164,7 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       const rows = await db.prepare(`SELECT t.*, p.name AS project_name, p.\`key\` AS project_key FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${where.join(" AND ")} ORDER BY t.updated_at DESC`).all(...params);
       return rows.map((row) => ({ ...toTask(row), projectName: text(row.project_name), projectKey: text(row.project_key) }));
     },
+    async listUsedStatuses(projectId) { return (await db.prepare("SELECT DISTINCT status FROM tasks WHERE project_id = ?").all(projectId)).map((row) => row.status as TaskStatus); },
     async claimNext(projectId, claimantId, options = {}) {
       const where = ["project_id = ?", "status IN ('BACKLOG', 'TODO')", "assignee_id IS NULL"];
       const params: unknown[] = [projectId];

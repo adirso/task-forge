@@ -81,7 +81,7 @@ curl -sS -X POST http://127.0.0.1:4000/api/projects \
   -d '{"key":"WEB","name":"Website","description":"Public site","repoUrl":"https://github.com/acme/site","color":"#6554C0"}'
 ```
 
-Project keys are case-insensitive and unique. A duplicate returns `409` with a message such as `Project key WEB is already in use`. Updateable fields are `name`, `description`, `repoUrl` (or `null` to remove it), and `color`; the key cannot be changed.
+Project keys are case-insensitive and unique. A duplicate returns `409` with a message such as `Project key WEB is already in use`. Updateable fields are `name`, `description`, `repoUrl` (or `null` to remove it), `color`, `availableStatuses`, and `defaultStatus`; the key cannot be changed. `defaultStatus` must be included in the non-empty `availableStatuses` array. A status cannot be disabled while tasks or automations still use it.
 
 The project list is ordered by persisted sidebar order. New projects are inserted first. To persist a drag-and-drop order, send every accessible project ID exactly once:
 
@@ -115,7 +115,7 @@ Task creation and update fields include:
 | --- | --- |
 | `title` | Required string |
 | `description`, `definitionOfDone` | Optional text |
-| `status` | `BACKLOG`, `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE` |
+| `status` | `BACKLOG`, `REFINING`, `TODO`, `READY_FOR_DEV`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`; must be enabled for the project. If omitted during creation, the project's `defaultStatus` is used. |
 | `priority` | `LOW`, `MEDIUM`, `HIGH`, `URGENT` |
 | `type` | `FEATURE`, `BUG`, `INFRA`, `UPDATE`, `SECURITY`, `DOCS`, `CHORE` |
 | `assigneeId` | Project-member UUID or `null` |
@@ -159,7 +159,7 @@ curl -sS -X POST "http://127.0.0.1:4000/api/tasks/$TASK_ID/dependencies" \
   -d '{"dependencyIds":["dependency-task-uuid"]}'
 ```
 
-Each returned dependency includes its task key (`projectKey` plus `number`), title, current status, and `isBlocking` (`false` once the dependency reaches `DONE`). Self-dependencies, cross-project dependencies, and cycles return validation errors.
+Each returned dependency includes its task key (`projectKey` plus `number`), title, current status, and `isBlocking` (`false` once the dependency reaches `DONE` or `CANCELLED`). Self-dependencies, cross-project dependencies, and cycles return validation errors.
 
 ## Notes, dependencies, tags, and attachments
 

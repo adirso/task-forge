@@ -5,7 +5,7 @@ import type { RepositorySet } from "../src/application/repositories.js";
 
 function repositories(overrides: Partial<RepositorySet> = {}): RepositorySet {
   return {
-    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"], defaultStatus: "TODO", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
     memberships: { isMember: async () => true } as never,
     tasks: { allocateNumber: async () => ({ number: 7, position: 2 }), create: async (task: unknown) => task } as never,
     phases: { findById: async () => null } as never,

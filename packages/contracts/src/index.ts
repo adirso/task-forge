@@ -3,7 +3,13 @@ import { z } from "zod";
 export const userKindSchema = z.enum(["HUMAN", "AGENT"]);
 export const userRoleSchema = z.enum(["ADMIN", "MEMBER"]);
 export const projectMemberRoleSchema = z.enum(["OWNER", "MEMBER"]);
-export const taskStatusSchema = z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"]);
+export const TASK_STATUSES = ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"] as const;
+export const taskStatusSchema = z.enum(TASK_STATUSES);
+export const projectAvailableStatusesSchema = z.array(taskStatusSchema)
+  .min(1, "At least one status must be available")
+  .max(TASK_STATUSES.length)
+  .refine((statuses) => new Set(statuses).size === statuses.length, "Statuses must be unique")
+  .transform((statuses) => TASK_STATUSES.filter((status) => statuses.includes(status)));
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const taskTypeSchema = z.enum(["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
@@ -29,7 +35,10 @@ export const projectCreateSchema = z.object({
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default("#6554C0"),
 });
 
-export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).partial();
+export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).partial().extend({
+  availableStatuses: projectAvailableStatusesSchema.optional(),
+  defaultStatus: taskStatusSchema.optional(),
+});
 export const projectOrderSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(500) });
 
 export const phaseCreateSchema = z.object({
@@ -44,7 +53,7 @@ export const taskCreateSchema = z.object({
   title: z.string().trim().min(1).max(240),
   description: z.string().trim().max(10000).default(""),
   definitionOfDone: z.string().trim().max(10000).default(""),
-  status: taskStatusSchema.default("TODO"),
+  status: taskStatusSchema.optional(),
   priority: taskPrioritySchema.default("MEDIUM"),
   type: taskTypeSchema.default("FEATURE"),
   assigneeId: z.string().uuid().nullable().optional(),
@@ -165,6 +174,8 @@ export interface Project {
   repoUrl: string | null;
   color: string;
   sortOrder: number;
+  availableStatuses: TaskStatus[];
+  defaultStatus: TaskStatus;
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -332,7 +343,7 @@ export interface DashboardSummaryProject {
   name: string;
   key: string;
   color: string;
-  counts: { TODO: number; IN_PROGRESS: number; IN_REVIEW: number; DONE: number; BACKLOG: number; total: number };
+  counts: Record<TaskStatus, number> & { total: number };
 }
 
 export interface DashboardSummaryTask {
