@@ -263,6 +263,44 @@ test("task lifecycle supports assignment and status changes", async () => {
   assert.deepEqual(reusable.json().tags.map((tag: { name: string }) => tag.name), ["api", "backend", "frontend"]);
 });
 
+test("reporting endpoints preserve access, dashboard, and agent operations behavior", async () => {
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  assert.equal(memberLogin.statusCode, 200, memberLogin.body);
+  const memberToken = memberLogin.json().token as string;
+  const addedMember = await app.inject({ method: "POST", url: `/api/projects/${projectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: memberId, role: "MEMBER" } });
+  assert.equal(addedMember.statusCode, 204, addedMember.body);
+
+  const myTask = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Admin dashboard task", assigneeId: adminId, status: "TODO" } });
+  assert.equal(myTask.statusCode, 201, myTask.body);
+  const staleAt = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+  await db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(staleAt, taskId);
+
+  const dashboard = await app.inject({ method: "GET", url: "/api/dashboard/summary", headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(dashboard.statusCode, 200, dashboard.body);
+  const projectSummary = dashboard.json().projects.find((project: { id: string }) => project.id === projectId);
+  assert.ok(projectSummary);
+  assert.ok(projectSummary.counts.total >= 4);
+  assert.ok(dashboard.json().myTasks.some((task: { id: string }) => task.id === myTask.json().task.id));
+  assert.ok(dashboard.json().stuckTasks.some((task: { id: string }) => task.id === taskId));
+
+  const agentOps = await app.inject({ method: "GET", url: "/api/users/agents/ops", headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(agentOps.statusCode, 200, agentOps.body);
+  const agent = agentOps.json().agents.find((entry: { id: string }) => entry.id === agentId);
+  assert.ok(agent);
+  assert.ok(agent.inProgressTasks.some((task: { id: string; isStuck: boolean }) => task.id === taskId && task.isStuck));
+  assert.equal(agent.stuckTaskCount, 1);
+
+  const scopedActivity = await app.inject({ method: "GET", url: `/api/activity?projectId=${projectId}&limit=not-a-number`, headers: { authorization: `Bearer ${memberToken}` } });
+  assert.equal(scopedActivity.statusCode, 200, scopedActivity.body);
+  assert.ok(scopedActivity.json().activity.length > 0);
+  assert.ok(scopedActivity.json().activity.every((event: { projectId: string }) => event.projectId === projectId));
+  const taskActivity = await app.inject({ method: "GET", url: `/api/activity?taskId=${taskId}`, headers: { authorization: `Bearer ${memberToken}` } });
+  assert.equal(taskActivity.statusCode, 200, taskActivity.body);
+  assert.ok(taskActivity.json().activity.every((event: { taskId: string }) => event.taskId === taskId));
+  assert.equal((await app.inject({ method: "GET", url: "/api/activity", headers: { authorization: `Bearer ${memberToken}` } })).statusCode, 403);
+  assert.equal((await app.inject({ method: "GET", url: "/api/users/agents/ops", headers: { authorization: `Bearer ${memberToken}` } })).statusCode, 403);
+});
+
 test("task tag input is validated without changing persisted tags", async () => {
   const invalid = await app.inject({
     method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { tags: ["not a valid tag"] },

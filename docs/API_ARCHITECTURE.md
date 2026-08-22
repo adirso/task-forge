@@ -24,10 +24,12 @@ Controllers should not build SQL, decide transaction scope, coordinate notificat
 | `projects.ts` | Project CRUD and membership handlers | Project lifecycle and membership use cases | `ProjectRepository`, `MembershipRepository`, transaction adapter | `ProjectMapper`, `UserMapper`, project access/owner policy |
 | `phases.ts` | Phase list/create/update/delete handlers | Phase lifecycle and active-phase use cases | `PhaseRepository`, task phase assignment repository | `PhaseMapper`, project access policy |
 | `tasks.ts` | Task CRUD, tags, dependencies, and updates handlers | `CreateTask`, `UpdateTask`, `DeleteTask`, `AddTaskUpdate` | `TaskRepository`, `TagRepository`, `DependencyRepository`, `TaskUpdateRepository`, transaction adapter | `TaskMapper`, `TaskUpdateMapper`, project/task policy |
-| `users.ts` | Profile, agent, token handlers | Profile and agent identity/token use cases | `UserRepository`, `ApiTokenRepository`, token/hash adapters | `UserMapper`, token metadata mapper, admin policy |
+| `users.ts` | Profile, agent, token, and agent-ops handlers | Profile, agent identity/token, and agent reporting use cases | `UserRepository`, `ApiTokenRepository`, `ReportingRepository`, token/hash adapters | `UserMapper`, token metadata/reporting mappers, admin policy |
 | `notifications.ts` | List/read/read-all handlers | Notification read use cases | `NotificationRepository` | `NotificationMapper`, current-user policy |
 | `search.ts` | Search query handler | Search accessible tasks use case | `SearchRepository` (or task query repository) | `TaskSearchMapper`, access policy |
 | `context.ts` | Shareable project/task context resolver | Resolve context use case | `ProjectRepository`, `TaskRepository` | `ProjectMapper`, `TaskMapper`, project access policy |
+| `activity.ts` | Activity feed HTTP handler | Activity query and access use case | `ActivityRepository`, `TaskRepository`, `MembershipRepository` | `ActivityMapper`, project access policy |
+| `dashboard.ts` | Dashboard summary HTTP handler | Dashboard aggregation use case | `ProjectRepository`, `ReportingRepository` | Dashboard summary mapper, accessible-project policy |
 | `app.ts` and `lib/auth.ts` | Health endpoint, auth hook, error handler | Error classification and authentication services | JWT/password adapters | Error presenter and auth context factory |
 
 Cross-cutting activity logging and notifications should be service collaborators (or domain event handlers), not SQL helper functions called directly from routes. The database transaction adapter should be injected into services so a use case can commit its writes atomically on both supported drivers.

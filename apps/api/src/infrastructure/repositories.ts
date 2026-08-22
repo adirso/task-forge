@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
-import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
-import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
+import type { ActivityEntity, AgentLastActiveEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
+import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 
 export interface DatabasePort {
@@ -18,6 +18,7 @@ type Row = Record<string, unknown>;
 const text = (value: unknown) => String(value);
 const nullableText = (value: unknown) => (value == null ? null : String(value));
 const date = (value: unknown) => String(value);
+const queryLimit = (value: number) => Math.max(0, Math.trunc(Number.isFinite(value) ? value : 0));
 
 function toUser(row: Row): UserEntity {
   return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), webhookUrl: nullableText(row.webhook_url), createdAt: date(row.created_at) };
@@ -54,6 +55,21 @@ function toTask(row: Row): TaskEntity {
     dueDate: nullableText(row.due_date), estimatePoints: row.estimate_points == null ? null : Number(row.estimate_points), phaseId: nullableText(row.phase_id),
     pullRequestUrl: nullableText(row.pull_request_url), pullRequestTitle: nullableText(row.pull_request_title), pullRequestState: (row.pull_request_state as TaskEntity["pullRequestState"]) ?? null,
     position: Number(row.position), createdAt: date(row.created_at), updatedAt: date(row.updated_at),
+  };
+}
+
+function toReportingTask(row: Row): ReportingTaskEntity {
+  return {
+    id: text(row.id),
+    number: Number(row.number),
+    title: text(row.title),
+    projectId: text(row.project_id),
+    projectKey: text(row.project_key),
+    projectName: text(row.project_name),
+    status: row.status as TaskStatus,
+    assigneeId: nullableText(row.assignee_id),
+    assigneeName: nullableText(row.assignee_name),
+    updatedAt: date(row.updated_at),
   };
 }
 
@@ -207,8 +223,8 @@ function createAutomationRepository(db: DatabasePort): AutomationRepository {
   return {
     async listForProject(projectId) { return (await db.prepare("SELECT * FROM automations WHERE project_id = ? ORDER BY created_at DESC").all(projectId)).map(toAutomation); },
     async findById(id) { const row = await db.prepare("SELECT * FROM automations WHERE id = ?").get(id); return row ? toAutomation(row) : null; },
-    async create(input) { await db.prepare("INSERT INTO automations (id, project_id, name, enabled, trigger, actor_type, actor_id, service, conditions, actions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.projectId, input.name, input.enabled ? 1 : 0, input.trigger, input.actorType, input.actorId, input.service, JSON.stringify(input.conditions), JSON.stringify(input.actions), input.createdAt, input.updatedAt); return input; },
-    async update(id, input) { const map: Record<string, string> = { name: "name", enabled: "enabled", trigger: "trigger", actorType: "actor_type", actorId: "actor_id", service: "service", conditions: "conditions", actions: "actions" }; const fields: string[] = []; const values: unknown[] = []; for (const [key, column] of Object.entries(map)) if (key in input) { fields.push(`${column} = ?`); const value = input[key as keyof typeof input]; values.push(key === "enabled" ? (value ? 1 : 0) : key === "conditions" || key === "actions" ? JSON.stringify(value) : value ?? null); } fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE automations SET ${fields.join(", ")} WHERE id = ?`).run(...values); const row = await db.prepare("SELECT * FROM automations WHERE id = ?").get(id); if (!row) throw new Error("Automation not found after update"); return toAutomation(row); },
+    async create(input) { await db.prepare("INSERT INTO automations (id, project_id, name, enabled, `trigger`, actor_type, actor_id, service, conditions, actions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.projectId, input.name, input.enabled ? 1 : 0, input.trigger, input.actorType, input.actorId, input.service, JSON.stringify(input.conditions), JSON.stringify(input.actions), input.createdAt, input.updatedAt); return input; },
+    async update(id, input) { const map: Record<string, string> = { name: "name", enabled: "enabled", trigger: "`trigger`", actorType: "actor_type", actorId: "actor_id", service: "service", conditions: "conditions", actions: "actions" }; const fields: string[] = []; const values: unknown[] = []; for (const [key, column] of Object.entries(map)) if (key in input) { fields.push(`${column} = ?`); const value = input[key as keyof typeof input]; values.push(key === "enabled" ? (value ? 1 : 0) : key === "conditions" || key === "actions" ? JSON.stringify(value) : value ?? null); } fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE automations SET ${fields.join(", ")} WHERE id = ?`).run(...values); const row = await db.prepare("SELECT * FROM automations WHERE id = ?").get(id); if (!row) throw new Error("Automation not found after update"); return toAutomation(row); },
     async delete(id) { await db.prepare("DELETE FROM automations WHERE id = ?").run(id); },
   };
 }
@@ -231,8 +247,8 @@ function createActivityRepository(db: DatabasePort): ActivityRepository {
       if (filters.projectId) { where.push("a.project_id = ?"); params.push(filters.projectId); }
       if (filters.taskId) { where.push("a.task_id = ?"); params.push(filters.taskId); }
       if (filters.actorId) { where.push("a.actor_id = ?"); params.push(filters.actorId); }
-      const limit = filters.limit ?? 50;
-      const rows = await db.prepare(`SELECT a.*, u.name AS actor_name, u.kind AS actor_kind, u.avatar_url AS actor_avatar_url, p.\`key\` AS project_key, t.number AS task_number FROM activity a JOIN users u ON u.id = a.actor_id JOIN projects p ON p.id = a.project_id LEFT JOIN tasks t ON t.id = a.task_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY a.created_at DESC LIMIT ?`).all(...params, limit);
+      const limit = queryLimit(filters.limit ?? 50);
+      const rows = await db.prepare(`SELECT a.*, u.name AS actor_name, u.kind AS actor_kind, u.avatar_url AS actor_avatar_url, p.\`key\` AS project_key, t.number AS task_number FROM activity a JOIN users u ON u.id = a.actor_id JOIN projects p ON p.id = a.project_id LEFT JOIN tasks t ON t.id = a.task_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY a.created_at DESC LIMIT ${limit}`).all(...params);
       return rows.map((row) => {
         let metadata: Record<string, unknown> = {};
         try { metadata = JSON.parse(String(row.metadata ?? "{}")); } catch { /* empty */ }
@@ -242,10 +258,43 @@ function createActivityRepository(db: DatabasePort): ActivityRepository {
   };
 }
 
+function createReportingRepository(db: DatabasePort): ReportingRepository {
+  return {
+    async countTasksByProject(projectIds) {
+      if (!projectIds.length) return [];
+      const placeholders = projectIds.map(() => "?").join(",");
+      const rows = await db.prepare(`SELECT project_id, status, COUNT(*) AS task_count FROM tasks WHERE project_id IN (${placeholders}) GROUP BY project_id, status`).all(...projectIds);
+      return rows.map((row): TaskStatusCountEntity => ({ projectId: text(row.project_id), status: row.status as TaskStatus, count: Number(row.task_count) }));
+    },
+    async listMyOpenTasks(assigneeId, limit) {
+      const rows = await db.prepare(`SELECT t.id, t.number, t.title, t.project_id, t.status, t.assignee_id, t.updated_at, p.\`key\` AS project_key, p.name AS project_name, u.name AS assignee_name FROM tasks t JOIN projects p ON p.id = t.project_id JOIN users u ON u.id = t.assignee_id WHERE t.assignee_id = ? AND t.status NOT IN ('DONE', 'CANCELLED', 'BACKLOG') ORDER BY t.updated_at DESC LIMIT ${queryLimit(limit)}`).all(assigneeId);
+      return rows.map(toReportingTask);
+    },
+    async listStuckTasks(projectIds, updatedBefore, limit) {
+      if (!projectIds.length) return [];
+      const placeholders = projectIds.map(() => "?").join(",");
+      const rows = await db.prepare(`SELECT t.id, t.number, t.title, t.project_id, t.status, t.assignee_id, t.updated_at, p.\`key\` AS project_key, p.name AS project_name, u.name AS assignee_name FROM tasks t JOIN projects p ON p.id = t.project_id LEFT JOIN users u ON u.id = t.assignee_id WHERE t.project_id IN (${placeholders}) AND t.status = 'IN_PROGRESS' AND t.updated_at < ? ORDER BY t.updated_at ASC LIMIT ${queryLimit(limit)}`).all(...projectIds, updatedBefore);
+      return rows.map(toReportingTask);
+    },
+    async listAgentInProgressTasks(agentIds) {
+      if (!agentIds.length) return [];
+      const placeholders = agentIds.map(() => "?").join(",");
+      const rows = await db.prepare(`SELECT t.id, t.number, t.title, t.project_id, t.status, t.assignee_id, t.updated_at, p.\`key\` AS project_key, p.name AS project_name, u.name AS assignee_name FROM tasks t JOIN projects p ON p.id = t.project_id JOIN users u ON u.id = t.assignee_id WHERE t.assignee_id IN (${placeholders}) AND t.status = 'IN_PROGRESS' ORDER BY t.assignee_id, t.updated_at DESC`).all(...agentIds);
+      return rows.map(toReportingTask);
+    },
+    async listAgentLastActive(agentIds) {
+      if (!agentIds.length) return [];
+      const placeholders = agentIds.map(() => "?").join(",");
+      const rows = await db.prepare(`SELECT user_id, MAX(last_used_at) AS last_active_at FROM api_tokens WHERE user_id IN (${placeholders}) AND revoked_at IS NULL GROUP BY user_id`).all(...agentIds);
+      return rows.map((row): AgentLastActiveEntity => ({ agentId: text(row.user_id), lastActiveAt: nullableText(row.last_active_at) }));
+    },
+  };
+}
+
 function createSearchRepository(db: DatabasePort): SearchRepository {
   return { async searchAccessible(input) { const access = input.isAdmin ? "1 = 1" : "EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = t.project_id AND pm.user_id = ?)"; const values: unknown[] = input.isAdmin ? [`%${input.query}%`, `%${input.query}%`] : [input.actorId, `%${input.query}%`, `%${input.query}%`]; const rows = await db.prepare(`SELECT t.*, p.name AS project_name, p.\`key\` AS project_key, p.color AS project_color FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${access} AND (t.title LIKE ? OR t.description LIKE ?) ORDER BY t.updated_at DESC`).all(...values); return Promise.all(rows.map(async (row) => ({ ...(await hydrateTask(db, toTask(row))), projectName: text(row.project_name), projectKey: text(row.project_key), projectColor: text(row.project_color) }))); } };
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
 }

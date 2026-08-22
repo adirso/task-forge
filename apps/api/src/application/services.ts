@@ -1,5 +1,6 @@
+import type { AgentOpsEntry, DashboardSummary } from "@taskforge/contracts";
 import type { ProjectContext, RequestContext } from "./context.js";
-import type { ApiTokenEntity, AttachmentEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
 export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
@@ -74,6 +75,7 @@ export interface UserService {
   issueToken(context: RequestContext, userId: string, input: { name: string; expiresInDays: number | null; permissions?: string[] | null }): Promise<{ token: string; prefix: string; expiresAt: string | null }>;
   revealToken(context: RequestContext, userId: string, tokenId: string): Promise<{ token: string }>;
   revokeToken(context: RequestContext, tokenId: string): Promise<void>;
+  agentOperations(context: RequestContext): Promise<AgentOpsEntry[]>;
 }
 
 export interface NotificationService {
@@ -84,4 +86,12 @@ export interface NotificationService {
 
 export interface SearchService {
   search(context: RequestContext, query: string): Promise<TaskEntity[]>;
+}
+
+export interface ActivityService {
+  list(context: RequestContext, filters: { projectId?: string; taskId?: string; actorId?: string; limit?: number }): Promise<ActivityEntity[]>;
+}
+
+export interface DashboardService {
+  summary(context: RequestContext): Promise<DashboardSummary>;
 }
