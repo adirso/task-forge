@@ -1,4 +1,4 @@
-import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskDependencyEntity, TaskEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ActivityEntity, AgentLastActiveEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -103,6 +103,14 @@ export interface ActivityRepository {
   list(filters: { projectId?: string; taskId?: string; actorId?: string; limit?: number }): Promise<ActivityEntity[]>;
 }
 
+export interface ReportingRepository {
+  countTasksByProject(projectIds: string[]): Promise<TaskStatusCountEntity[]>;
+  listMyOpenTasks(assigneeId: string, limit: number): Promise<ReportingTaskEntity[]>;
+  listStuckTasks(projectIds: string[], updatedBefore: string, limit: number): Promise<ReportingTaskEntity[]>;
+  listAgentInProgressTasks(agentIds: string[]): Promise<ReportingTaskEntity[]>;
+  listAgentLastActive(agentIds: string[]): Promise<AgentLastActiveEntity[]>;
+}
+
 export interface RepositorySet {
   users: UserRepository;
   projects: ProjectRepository;
@@ -116,6 +124,7 @@ export interface RepositorySet {
   automations: AutomationRepository;
   notifications: NotificationRepository;
   activity: ActivityRepository;
+  reporting: ReportingRepository;
   tokens: ApiTokenRepository;
   search: SearchRepository;
 }

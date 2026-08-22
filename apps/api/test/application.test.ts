@@ -1,10 +1,66 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../src/application/index.js";
+import { ActivityApplicationService, ConflictError, DashboardApplicationService, ForbiddenError, NotFoundError, UserApplicationService, ValidationError, type ProjectEntity, type RepositorySet, type RequestContext, type TaskEntity, type UnitOfWork, type UserEntity } from "../src/application/index.js";
+
+const adminContext: RequestContext = { actor: { userId: "admin-1", name: "Admin", kind: "HUMAN", role: "ADMIN", tokenScopes: null } };
+const memberContext: RequestContext = { actor: { userId: "member-1", name: "Member", kind: "HUMAN", role: "MEMBER", tokenScopes: null } };
+const unitOfWork = (repositories: RepositorySet): UnitOfWork => ({ run: (work) => work(repositories) });
+const project = (input: Pick<ProjectEntity, "id" | "key" | "name">): ProjectEntity => ({ ...input, description: "", repoUrl: null, color: "#6554C0", sortOrder: 0, availableStatuses: ["TODO", "IN_PROGRESS", "DONE"], defaultStatus: "TODO", ownerId: "admin-1", createdAt: "2026-08-22T00:00:00.000Z", updatedAt: "2026-08-22T00:00:00.000Z" });
+const task = (input: Partial<TaskEntity> = {}): TaskEntity => ({ id: "task-1", projectId: "project-1", number: 1, title: "Task", description: "", definitionOfDone: "", status: "IN_PROGRESS", priority: "MEDIUM", type: "FEATURE", assigneeId: "agent-1", creatorId: "admin-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "2026-08-22T00:00:00.000Z", updatedAt: "2026-08-22T07:00:00.000Z", ...input });
 
 test("application errors expose stable transport-independent codes", () => {
   assert.equal(new ConflictError("duplicate key").code, "CONFLICT");
   assert.equal(new ForbiddenError().code, "FORBIDDEN");
   assert.equal(new NotFoundError("Task").code, "NOT_FOUND");
   assert.equal(new ValidationError("invalid input").code, "VALIDATION");
+});
+
+test("dashboard service authorizes projects and assembles reporting responses", async () => {
+  const projects = [project({ id: "project-b", key: "B", name: "Beta" }), project({ id: "project-a", key: "A", name: "Alpha" })];
+  const repositories = {
+    projects: { listAccessible: async (actorId: string, isAdmin: boolean) => { assert.equal(actorId, "admin-1"); assert.equal(isAdmin, true); return projects; } },
+    reporting: {
+      countTasksByProject: async (projectIds: string[]) => { assert.deepEqual(projectIds, ["project-a", "project-b"]); return [{ projectId: "project-a", status: "TODO", count: 2 }]; },
+      listMyOpenTasks: async () => [{ id: "mine", number: 2, title: "Mine", projectId: "project-a", projectKey: "A", projectName: "Alpha", status: "TODO", assigneeId: "admin-1", assigneeName: "Admin", updatedAt: "2026-08-22T10:00:00.000Z" }],
+      listStuckTasks: async (_projectIds: string[], updatedBefore: string) => { assert.equal(updatedBefore, "2026-08-22T08:00:00.000Z"); return [{ id: "stuck", number: 3, title: "Stuck", projectId: "project-b", projectKey: "B", projectName: "Beta", status: "IN_PROGRESS", assigneeId: "agent-1", assigneeName: "Agent", updatedAt: "2026-08-22T07:00:00.000Z" }]; },
+    },
+  } as unknown as RepositorySet;
+  const summary = await new DashboardApplicationService(unitOfWork(repositories), () => "2026-08-22T12:00:00.000Z").summary(adminContext);
+  assert.deepEqual(summary.projects.map(({ name }) => name), ["Alpha", "Beta"]);
+  assert.equal(summary.projects[0]?.counts.TODO, 2);
+  assert.equal(summary.projects[0]?.counts.total, 2);
+  assert.equal(summary.myTasks[0]?.id, "mine");
+  assert.equal(summary.stuckTasks[0]?.id, "stuck");
+});
+
+test("activity service owns project and task access decisions", async () => {
+  let isMember = true;
+  const repositories = {
+    tasks: { findById: async () => task() },
+    memberships: { isMember: async () => isMember },
+    activity: { list: async () => [{ id: "activity-1" }] },
+  } as unknown as RepositorySet;
+  const service = new ActivityApplicationService(unitOfWork(repositories));
+  assert.equal((await service.list(memberContext, { taskId: "task-1", limit: 20 }))[0]?.id, "activity-1");
+  isMember = false;
+  await assert.rejects(() => service.list(memberContext, { projectId: "project-1" }), ForbiddenError);
+  await assert.rejects(() => service.list(memberContext, {}), /Provide a projectId or taskId/);
+});
+
+test("user service assembles agent operations and enforces admin access", async () => {
+  const agent: UserEntity = { id: "agent-1", email: "agent@example.com", name: "Agent", kind: "AGENT", role: "MEMBER", avatarUrl: null, webhookUrl: "https://agent.example/webhook", createdAt: "2026-08-22T00:00:00.000Z" };
+  const repositories = {
+    users: { list: async () => [agent] },
+    reporting: {
+      listAgentInProgressTasks: async () => [{ id: "task-1", number: 1, title: "Agent task", projectId: "project-1", projectKey: "TAS", projectName: "Task Forge", status: "IN_PROGRESS", assigneeId: "agent-1", assigneeName: "Agent", updatedAt: "2026-08-22T07:00:00.000Z" }],
+      listAgentLastActive: async () => [{ agentId: "agent-1", lastActiveAt: "2026-08-22T11:00:00.000Z" }],
+    },
+  } as unknown as RepositorySet;
+  const service = new UserApplicationService(unitOfWork(repositories), () => "2026-08-22T12:00:00.000Z");
+  const operations = await service.agentOperations(adminContext);
+  assert.equal(operations[0]?.lastActiveAt, "2026-08-22T11:00:00.000Z");
+  assert.equal(operations[0]?.openTaskCount, 1);
+  assert.equal(operations[0]?.stuckTaskCount, 1);
+  assert.equal(operations[0]?.inProgressTasks[0]?.isStuck, true);
+  await assert.rejects(() => service.agentOperations(memberContext), ForbiddenError);
 });

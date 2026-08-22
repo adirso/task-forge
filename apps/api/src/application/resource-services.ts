@@ -7,6 +7,8 @@ import type { PhaseEntity, ProjectEntity, UserEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
 import type { PhaseService, ProjectCreateInput, ProjectService, UserService } from "./services.js";
 
+const STUCK_THRESHOLD_MS = 4 * 60 * 60 * 1000;
+
 async function projectAccess(repositories: RepositorySet, context: RequestContext, projectId: string) {
   const project = await repositories.projects.findById(projectId);
   if (!project) throw new NotFoundError("Project");
@@ -66,4 +68,39 @@ export class UserApplicationService implements UserService {
   async issueToken(context: RequestContext, userId: string, input: { name: string; expiresInDays: number | null; permissions?: string[] | null }) { this.canManage(context, userId); return this.unitOfWork.run(async (repositories) => { if (!(await repositories.users.findById(userId))) throw new NotFoundError("User"); const { token, prefix } = this.tokenAdapter.create(); const now = new Date(this.now()); const expiresAt = input.expiresInDays === null ? null : new Date(now.getTime() + input.expiresInDays * 86_400_000).toISOString(); await repositories.tokens.create({ id: this.newId(), userId, name: input.name, prefix, hash: this.tokenAdapter.hash(token), ciphertext: this.tokenAdapter.encrypt(token), permissions: input.permissions ?? null, expiresAt, createdAt: now.toISOString() }); return { token, prefix, expiresAt }; }); }
   async revealToken(context: RequestContext, userId: string, tokenId: string) { this.canManage(context, userId); return this.unitOfWork.run(async (repositories) => { const token = await repositories.tokens.findById(tokenId); if (!token || token.userId !== userId) throw new NotFoundError("Token"); if (token.revokedAt) throw new ValidationError("Revoked tokens cannot be revealed"); if (!token.ciphertext) throw new ValidationError("This token was issued before reveal support and cannot be recovered. Revoke it and issue a new one."); try { return { token: this.tokenAdapter.decrypt(token.ciphertext) }; } catch { throw new ValidationError("Could not decrypt this token. Check TOKEN_ENCRYPTION_KEY."); } }); }
   async revokeToken(context: RequestContext, tokenId: string) { return this.unitOfWork.run(async (repositories) => { const token = await repositories.tokens.findById(tokenId); if (!token) throw new NotFoundError("Token"); this.canManage(context, token.userId); await repositories.tokens.revoke(tokenId); }); }
+  async agentOperations(context: RequestContext) {
+    if (context.actor.role !== "ADMIN") throw new ForbiddenError("Administrator access required");
+    return this.unitOfWork.run(async (repositories) => {
+      const agents = (await repositories.users.list()).filter((user) => user.kind === "AGENT");
+      const agentIds = agents.map((agent) => agent.id);
+      const [tasks, activity] = await Promise.all([
+        repositories.reporting.listAgentInProgressTasks(agentIds),
+        repositories.reporting.listAgentLastActive(agentIds),
+      ]);
+      const tasksByAgent = new Map<string, typeof tasks>();
+      for (const task of tasks) {
+        if (!task.assigneeId) continue;
+        tasksByAgent.set(task.assigneeId, [...(tasksByAgent.get(task.assigneeId) ?? []), task]);
+      }
+      const lastActiveByAgent = new Map(activity.map((entry) => [entry.agentId, entry.lastActiveAt]));
+      const cutoff = new Date(new Date(this.now()).getTime() - STUCK_THRESHOLD_MS).toISOString();
+      return agents.map((agent) => {
+        const inProgressTasks = tasksByAgent.get(agent.id) ?? [];
+        return {
+          id: agent.id,
+          name: agent.name,
+          email: agent.email,
+          kind: agent.kind,
+          role: agent.role,
+          avatarUrl: agent.avatarUrl,
+          webhookUrl: agent.webhookUrl ?? null,
+          createdAt: agent.createdAt,
+          lastActiveAt: lastActiveByAgent.get(agent.id) ?? null,
+          openTaskCount: inProgressTasks.length,
+          stuckTaskCount: inProgressTasks.filter((task) => task.updatedAt < cutoff).length,
+          inProgressTasks: inProgressTasks.map((task) => ({ id: task.id, title: task.title, number: task.number, projectId: task.projectId, projectName: task.projectName, projectKey: task.projectKey, updatedAt: task.updatedAt, isStuck: task.updatedAt < cutoff })),
+        };
+      });
+    });
+  }
 }
