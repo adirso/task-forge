@@ -23,6 +23,7 @@ const { buildApp } = await import("../src/app.js");
 const app = await buildApp();
 
 const adminId = randomUUID();
+const memberId = randomUUID();
 const agentId = randomUUID();
 let jwtToken = "";
 let projectId = "";
@@ -35,6 +36,8 @@ before(async () => {
   const password = await bcrypt.hash("password123", 8);
   await db.prepare("INSERT INTO users (id, email, name, password_hash, kind, role, created_at) VALUES (?, ?, ?, ?, 'HUMAN', 'ADMIN', ?)")
     .run(adminId, "admin@example.com", "Admin", password, now);
+  await db.prepare("INSERT INTO users (id, email, name, password_hash, kind, role, created_at) VALUES (?, ?, ?, ?, 'HUMAN', 'MEMBER', ?)")
+    .run(memberId, "member@example.com", "Project Member", password, now);
   await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)")
     .run(agentId, "agent@example.com", "Test Agent", now);
 });
@@ -103,6 +106,50 @@ test("project owners can update project details", async () => {
   assert.equal(updated.json().project.color, "#123456");
   const persisted = await app.inject({ method: "GET", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(persisted.json().project.name, "Updated API project");
+});
+
+test("projects configure available statuses and the default API status", async () => {
+  const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "STS", name: "Status project", description: "Custom status coverage", color: "#00A3BF" } });
+  assert.equal(created.statusCode, 201, created.body);
+  const statusProject = created.json().project;
+  assert.deepEqual(statusProject.availableStatuses, ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
+  assert.equal(statusProject.defaultStatus, "TODO");
+
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  assert.equal(memberLogin.statusCode, 200, memberLogin.body);
+  const addMember = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: memberId, role: "MEMBER" } });
+  assert.equal(addMember.statusCode, 204, addMember.body);
+  const forbiddenConfiguration = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${memberLogin.json().token}` }, payload: { defaultStatus: "REFINING" } });
+  assert.equal(forbiddenConfiguration.statusCode, 403, forbiddenConfiguration.body);
+  assert.match(forbiddenConfiguration.json().error, /project owner or an administrator/);
+
+  for (const status of ["REFINING", "READY_FOR_DEV", "READY_FOR_REVIEW", "CANCELLED"]) {
+    const task = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: `${status} task`, status } });
+    assert.equal(task.statusCode, 201, task.body);
+    assert.equal(task.json().task.status, status);
+  }
+
+  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["CANCELLED", "READY_FOR_REVIEW", "READY_FOR_DEV", "REFINING"], defaultStatus: "READY_FOR_DEV" } });
+  assert.equal(configured.statusCode, 200, configured.body);
+  assert.deepEqual(configured.json().project.availableStatuses, ["REFINING", "READY_FOR_DEV", "READY_FOR_REVIEW", "CANCELLED"]);
+  assert.equal(configured.json().project.defaultStatus, "READY_FOR_DEV");
+
+  const defaulted = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Uses project default" } });
+  assert.equal(defaulted.statusCode, 201, defaulted.body);
+  assert.equal(defaulted.json().task.status, "READY_FOR_DEV");
+
+  const unavailable = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Unavailable status", status: "TODO" } });
+  assert.equal(unavailable.statusCode, 400, unavailable.body);
+  assert.match(unavailable.json().error, /not available/);
+
+  const invalidDefault = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { defaultStatus: "TODO" } });
+  assert.equal(invalidDefault.statusCode, 400, invalidDefault.body);
+
+  const statusInUse = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["READY_FOR_DEV", "READY_FOR_REVIEW", "CANCELLED"], defaultStatus: "READY_FOR_DEV" } });
+  assert.equal(statusInUse.statusCode, 400, statusInUse.body);
+  assert.match(statusInUse.json().error, /Move tasks out of REFINING/);
+  const removed = await app.inject({ method: "DELETE", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(removed.statusCode, 204, removed.body);
 });
 
 test("duplicate project keys return a conflict instead of an internal error", async () => {

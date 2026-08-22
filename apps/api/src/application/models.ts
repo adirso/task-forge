@@ -38,6 +38,8 @@ export interface ProjectEntity {
   repoUrl: string | null;
   color: string;
   sortOrder: number;
+  availableStatuses: TaskStatus[];
+  defaultStatus: TaskStatus;
   ownerId: string;
   createdAt: string;
   updatedAt: string;

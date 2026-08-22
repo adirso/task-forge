@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Sqlite from "better-sqlite3";
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader } from "mysql2/promise";
+import { TASK_STATUSES } from "@taskforge/contracts";
 import { config } from "../config.js";
 
 export type DatabaseDriver = "sqlite" | "mysql";
@@ -153,15 +154,19 @@ async function runStatements(executor: Executor, statements: string[]) {
   for (const statement of statements) await executor.run(statement, []);
 }
 
+const taskStatusSql = TASK_STATUSES.map((status) => `'${status}'`).join(", ");
+const defaultAvailableStatuses = JSON.stringify(TASK_STATUSES);
+const legacyAvailableStatuses = JSON.stringify(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"]);
+
 const sqliteSchema = [
   `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT NOT NULL, password_hash TEXT, kind TEXT NOT NULL CHECK (kind IN ('HUMAN', 'AGENT')), role TEXT NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('ADMIN', 'MEMBER')), avatar_url TEXT, webhook_url TEXT, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS api_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, token_prefix TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_ciphertext TEXT, permissions TEXT, expires_at TEXT, last_used_at TEXT, revoked_at TEXT, created_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash)`,
-  `CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', repo_url TEXT, color TEXT NOT NULL DEFAULT '#6554C0', sort_order INTEGER NOT NULL DEFAULT 0, owner_id TEXT NOT NULL REFERENCES users(id), next_task_number INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', repo_url TEXT, color TEXT NOT NULL DEFAULT '#6554C0', sort_order INTEGER NOT NULL DEFAULT 0, available_statuses TEXT NOT NULL DEFAULT '${defaultAvailableStatuses}', default_status TEXT NOT NULL DEFAULT 'TODO', owner_id TEXT NOT NULL REFERENCES users(id), next_task_number INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS project_members (project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, role TEXT NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('OWNER', 'MEMBER')), created_at TEXT NOT NULL, PRIMARY KEY (project_id, user_id))`,
   `CREATE TABLE IF NOT EXISTS phases (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, number INTEGER NOT NULL, goal TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, number))`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_phases_one_active ON phases(project_id) WHERE is_active = 1`,
-  `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition_of_done TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'TODO' CHECK (status IN ('BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE')), priority TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type TEXT NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL, creator_id TEXT NOT NULL REFERENCES users(id), parent_id TEXT REFERENCES tasks(id) ON DELETE CASCADE, branch TEXT, due_date TEXT, estimate_points INTEGER, phase_id TEXT REFERENCES phases(id) ON DELETE SET NULL, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, number))`,
+  `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition_of_done TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'TODO' CHECK (status IN (${taskStatusSql})), priority TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type TEXT NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL, creator_id TEXT NOT NULL REFERENCES users(id), parent_id TEXT REFERENCES tasks(id) ON DELETE CASCADE, branch TEXT, due_date TEXT, estimate_points INTEGER, phase_id TEXT REFERENCES phases(id) ON DELETE SET NULL, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, number))`,
   `CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status, position)`,
   `CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,
   `CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, name TEXT NOT NULL COLLATE NOCASE, created_at TEXT NOT NULL, UNIQUE (project_id, name))`,
@@ -183,10 +188,10 @@ const sqliteSchema = [
 const mysqlSchema = [
   `CREATE TABLE IF NOT EXISTS users (id CHAR(36) PRIMARY KEY, email VARCHAR(320) UNIQUE, name VARCHAR(120) NOT NULL, password_hash VARCHAR(255), kind VARCHAR(16) NOT NULL CHECK (kind IN ('HUMAN', 'AGENT')), role VARCHAR(16) NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('ADMIN', 'MEMBER')), avatar_url TEXT, webhook_url TEXT, created_at VARCHAR(30) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS api_tokens (id CHAR(36) PRIMARY KEY, user_id CHAR(36) NOT NULL, name VARCHAR(120) NOT NULL, token_prefix VARCHAR(32) NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, token_ciphertext TEXT, permissions TEXT, expires_at VARCHAR(30), last_used_at VARCHAR(30), revoked_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, INDEX idx_api_tokens_hash (token_hash), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-  `CREATE TABLE IF NOT EXISTS projects (id CHAR(36) PRIMARY KEY, \`key\` VARCHAR(8) NOT NULL UNIQUE, name VARCHAR(120) NOT NULL, description TEXT NOT NULL, repo_url TEXT, color CHAR(7) NOT NULL DEFAULT '#6554C0', sort_order INT NOT NULL DEFAULT 0, owner_id CHAR(36) NOT NULL, next_task_number INT NOT NULL DEFAULT 1, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_projects_sort_order (sort_order), FOREIGN KEY (owner_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS projects (id CHAR(36) PRIMARY KEY, \`key\` VARCHAR(8) NOT NULL UNIQUE, name VARCHAR(120) NOT NULL, description TEXT NOT NULL, repo_url TEXT, color CHAR(7) NOT NULL DEFAULT '#6554C0', sort_order INT NOT NULL DEFAULT 0, available_statuses VARCHAR(255) NOT NULL DEFAULT '${defaultAvailableStatuses}', default_status VARCHAR(20) NOT NULL DEFAULT 'TODO', owner_id CHAR(36) NOT NULL, next_task_number INT NOT NULL DEFAULT 1, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_projects_sort_order (sort_order), FOREIGN KEY (owner_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS project_members (project_id CHAR(36) NOT NULL, user_id CHAR(36) NOT NULL, role VARCHAR(16) NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('OWNER', 'MEMBER')), created_at VARCHAR(30) NOT NULL, PRIMARY KEY (project_id, user_id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS phases (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, number INT NOT NULL, goal TEXT NOT NULL, is_active TINYINT(1) NOT NULL DEFAULT 0, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_phase_number (project_id, number), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-  `CREATE TABLE IF NOT EXISTS tasks (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, number INT NOT NULL, title VARCHAR(240) NOT NULL, description TEXT NOT NULL, definition_of_done TEXT NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'TODO' CHECK (status IN ('BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE')), priority VARCHAR(16) NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type VARCHAR(16) NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id CHAR(36), creator_id CHAR(36) NOT NULL, parent_id CHAR(36), branch VARCHAR(255), due_date VARCHAR(10), estimate_points INT, phase_id CHAR(36), pull_request_url TEXT, pull_request_title VARCHAR(240), pull_request_state VARCHAR(16), position INT NOT NULL DEFAULT 0, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_task_number (project_id, number), INDEX idx_tasks_project_status (project_id, status, position), INDEX idx_tasks_parent (parent_id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE SET NULL, FOREIGN KEY (creator_id) REFERENCES users(id), FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (phase_id) REFERENCES phases(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS tasks (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, number INT NOT NULL, title VARCHAR(240) NOT NULL, description TEXT NOT NULL, definition_of_done TEXT NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'TODO' CHECK (status IN (${taskStatusSql})), priority VARCHAR(16) NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type VARCHAR(16) NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id CHAR(36), creator_id CHAR(36) NOT NULL, parent_id CHAR(36), branch VARCHAR(255), due_date VARCHAR(10), estimate_points INT, phase_id CHAR(36), pull_request_url TEXT, pull_request_title VARCHAR(240), pull_request_state VARCHAR(16), position INT NOT NULL DEFAULT 0, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_task_number (project_id, number), INDEX idx_tasks_project_status (project_id, status, position), INDEX idx_tasks_parent (parent_id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE SET NULL, FOREIGN KEY (creator_id) REFERENCES users(id), FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (phase_id) REFERENCES phases(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS tags (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, name VARCHAR(32) NOT NULL, created_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_tag_name (project_id, name), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS task_tags (task_id CHAR(36) NOT NULL, tag_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, PRIMARY KEY (task_id, tag_id), INDEX idx_task_tags_tag_task (tag_id, task_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS task_dependencies (task_id CHAR(36) NOT NULL, depends_on_task_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, PRIMARY KEY (task_id, depends_on_task_id), INDEX idx_task_dependencies_dependency (depends_on_task_id, task_id), CHECK (task_id <> depends_on_task_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (depends_on_task_id) REFERENCES tasks(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -197,19 +202,63 @@ const mysqlSchema = [
   `CREATE TABLE IF NOT EXISTS automations (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, name VARCHAR(120) NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 1, trigger VARCHAR(30) NOT NULL, actor_type VARCHAR(16) NOT NULL DEFAULT 'ANY', actor_id CHAR(36), service VARCHAR(80), conditions TEXT NOT NULL, actions TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_automations_project (project_id, enabled), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
+async function migrateSqliteTaskStatusCheck(adapter: Adapter) {
+  const table = await adapter.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'", []);
+  if (table?.sql.includes("READY_FOR_REVIEW") && table.sql.includes("CANCELLED")) return;
+  await adapter.run("PRAGMA foreign_keys = OFF", []);
+  try {
+    await adapter.run("DROP TABLE IF EXISTS tasks_status_migration", []);
+    await adapter.run(`CREATE TABLE tasks_status_migration (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition_of_done TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'TODO' CHECK (status IN (${taskStatusSql})), priority TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type TEXT NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL, creator_id TEXT NOT NULL REFERENCES users(id), parent_id TEXT REFERENCES tasks_status_migration(id) ON DELETE CASCADE, branch TEXT, due_date TEXT, estimate_points INTEGER, phase_id TEXT REFERENCES phases(id) ON DELETE SET NULL, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, number))`, []);
+    await adapter.run("INSERT INTO tasks_status_migration (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) SELECT id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at FROM tasks", []);
+    await adapter.run("DROP TABLE tasks", []);
+    await adapter.run("ALTER TABLE tasks_status_migration RENAME TO tasks", []);
+    await adapter.run("CREATE INDEX idx_tasks_project_status ON tasks(project_id, status, position)", []);
+    await adapter.run("CREATE INDEX idx_tasks_parent ON tasks(parent_id)", []);
+  } finally {
+    await adapter.run("PRAGMA foreign_keys = ON", []);
+  }
+  const violation = await adapter.get<{ table: string }>("PRAGMA foreign_key_check", []);
+  if (violation) throw new Error(`Task status migration left a foreign key violation in ${violation.table}`);
+}
+
+async function migrateMysqlTaskStatusCheck(adapter: Adapter) {
+  const checks = await adapter.all<{ constraint_name: string; check_clause: string }>(`SELECT tc.CONSTRAINT_NAME AS constraint_name, cc.CHECK_CLAUSE AS check_clause FROM information_schema.TABLE_CONSTRAINTS tc JOIN information_schema.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'tasks' AND tc.CONSTRAINT_TYPE = 'CHECK'`, []);
+  const statusChecks = checks.filter((check) => /\bstatus\b/i.test(check.check_clause));
+  if (statusChecks.some((check) => check.check_clause.includes("READY_FOR_REVIEW") && check.check_clause.includes("CANCELLED"))) return;
+  for (const check of statusChecks) {
+    if (!/^[A-Za-z0-9_$]+$/.test(check.constraint_name)) throw new Error("Unsafe MySQL task status constraint name");
+    await adapter.run(`ALTER TABLE tasks DROP CHECK \`${check.constraint_name}\``, []);
+  }
+  await adapter.run(`ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN (${taskStatusSql}))`, []);
+}
+
+async function migrateProjectStatusDefaults(adapter: Adapter) {
+  await adapter.run("CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(120) PRIMARY KEY, applied_at VARCHAR(30) NOT NULL)", []);
+  if (await adapter.get("SELECT 1 FROM schema_migrations WHERE version = ?", ["20260822_task_statuses"])) return;
+  await adapter.transaction(async (executor) => {
+    await executor.run("UPDATE projects SET available_statuses = ? WHERE available_statuses = ?", [defaultAvailableStatuses, legacyAvailableStatuses]);
+    await executor.run("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)", ["20260822_task_statuses", new Date().toISOString()]);
+  });
+}
+
 async function migrate(adapter: Adapter, dialect: DatabaseDriver) {
   await runStatements(adapter, dialect === "mysql" ? mysqlSchema : sqliteSchema);
   if (dialect === "mysql") {
     const hasColumn = async (table: string, column: string) => Number((await adapter.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?", [table, column]))?.count) > 0;
     if (!(await hasColumn("projects", "sort_order"))) await adapter.run("ALTER TABLE projects ADD COLUMN sort_order INT NOT NULL DEFAULT 0, ADD INDEX idx_projects_sort_order (sort_order)", []);
+    if (!(await hasColumn("projects", "available_statuses"))) await adapter.run(`ALTER TABLE projects ADD COLUMN available_statuses VARCHAR(255) NOT NULL DEFAULT '${defaultAvailableStatuses}'`, []);
+    if (!(await hasColumn("projects", "default_status"))) await adapter.run("ALTER TABLE projects ADD COLUMN default_status VARCHAR(20) NOT NULL DEFAULT 'TODO'", []);
     if (!(await hasColumn("tasks", "type"))) await adapter.run("ALTER TABLE tasks ADD COLUMN type VARCHAR(16) NOT NULL DEFAULT 'FEATURE'", []);
     if (!(await hasColumn("api_tokens", "token_ciphertext"))) await adapter.run("ALTER TABLE api_tokens ADD COLUMN token_ciphertext TEXT", []);
     if (!(await hasColumn("users", "webhook_url"))) await adapter.run("ALTER TABLE users ADD COLUMN webhook_url TEXT", []);
     if (!(await hasColumn("api_tokens", "permissions"))) await adapter.run("ALTER TABLE api_tokens ADD COLUMN permissions TEXT", []);
+    await migrateMysqlTaskStatusCheck(adapter);
   }
   if (dialect === "sqlite") {
     const projectColumns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(projects)", [])).map((column) => column.name));
     if (!projectColumns.has("sort_order")) await adapter.run("ALTER TABLE projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0", []);
+    if (!projectColumns.has("available_statuses")) await adapter.run(`ALTER TABLE projects ADD COLUMN available_statuses TEXT NOT NULL DEFAULT '${defaultAvailableStatuses}'`, []);
+    if (!projectColumns.has("default_status")) await adapter.run("ALTER TABLE projects ADD COLUMN default_status TEXT NOT NULL DEFAULT 'TODO'", []);
     const columns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(tasks)", [])).map((column) => column.name));
     if (!columns.has("pull_request_url")) await adapter.run("ALTER TABLE tasks ADD COLUMN pull_request_url TEXT", []);
     if (!columns.has("pull_request_title")) await adapter.run("ALTER TABLE tasks ADD COLUMN pull_request_title TEXT", []);
@@ -221,7 +270,9 @@ async function migrate(adapter: Adapter, dialect: DatabaseDriver) {
     const userColumns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(users)", [])).map((column) => column.name));
     if (!userColumns.has("webhook_url")) await adapter.run("ALTER TABLE users ADD COLUMN webhook_url TEXT", []);
     if (!tokenColumns.has("permissions")) await adapter.run("ALTER TABLE api_tokens ADD COLUMN permissions TEXT", []);
+    await migrateSqliteTaskStatusCheck(adapter);
   }
+  await migrateProjectStatusDefaults(adapter);
 }
 
 export const db = new Database();

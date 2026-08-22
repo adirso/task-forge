@@ -146,7 +146,7 @@ svg { flex: 0 0 auto; }
 .empty-board-phase { min-width: 600px; min-height: 260px; border: 1px dashed #c7cbd3; border-radius: 10px; background: #fafbfc; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #7a869a; text-align: center; }.empty-board-phase > svg { width: 28px; height: 28px; color: #6554c0; }.empty-board-phase strong { color: #253858; font-size: 14px; }.empty-board-phase span { font-size: 11px; }.empty-board-phase .button { margin-top: 6px; }
 .phases-page { min-width: 760px; display: grid; gap: 22px; }.phases-overview { min-height: 104px; border: 1px solid #d8d3f0; border-radius: 10px; background: linear-gradient(120deg, #f8f7ff, white); display: flex; align-items: center; gap: 30px; padding: 20px 22px; }.phases-overview > div:first-child { flex: 1; }.phases-overview h2 { margin: 5px 0 5px; font-size: 22px; letter-spacing: -.3px; }.phases-overview p { margin: 0; color: #6b778c; font-size: 11px; }.phase-stats { display: flex; align-items: stretch; }.phase-stats > span { min-width: 88px; display: grid; gap: 4px; align-content: center; text-align: center; color: #7a869a; font-size: 9px; border-left: 1px solid #e1def2; }.phase-stats strong { color: #403294; font-size: 18px; }.phases-page-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }.phases-page-layout > section, .phases-page-layout > aside { border: 1px solid #dfe1e6; border-radius: 10px; background: white; box-shadow: 0 1px 3px rgba(9,30,66,.04); }.phases-page-layout > section { padding: 18px; }.phases-page-layout > aside { padding: 18px; position: sticky; top: 18px; }.phase-page-section-title { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }.phase-page-section-title h3 { margin: 0; font-size: 14px; }.phase-page-section-title span { color: #8993a4; font-size: 10px; }.phases-page .new-phase-form { margin: 0; border: 0; padding: 0; }.phases-page .new-phase-form > p { margin: -4px 0 2px; color: #7a869a; font-size: 10px; line-height: 1.45; }.phases-page .new-phase-fields { grid-template-columns: 1fr; }.phases-empty { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; color: #8993a4; }.phases-empty svg { width: 23px; }.phases-empty strong { color: #42526e; font-size: 12px; }.phases-empty span { font-size: 10px; }
 
-.board { display: grid; grid-template-columns: repeat(5, minmax(230px, 1fr)); gap: 12px; align-items: start; min-width: 1210px; }
+.board { display: grid; grid-template-columns: repeat(var(--status-count, 5), minmax(230px, 1fr)); gap: 12px; align-items: start; min-width: var(--board-min-width, 1210px); }
 .board-column { min-width: 0; background: #f1f2f4; border-radius: 9px; border: 1px solid #eaebed; overflow: hidden; }
 .board-column > header { height: 43px; display: flex; align-items: center; gap: 7px; padding: 0 10px 0 13px; color: #42526e; }
 .board-column > header strong { text-transform: uppercase; font-size: 11px; letter-spacing: .055em; }
@@ -155,7 +155,7 @@ svg { flex: 0 0 auto; }
 .board-column > header button:hover { background: #dfe1e6; }
 .board-column > header svg { width: 14px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; }
-.status-dot.slate { background: #8993a4; }.status-dot.blue { background: #2684ff; }.status-dot.purple { background: #6554c0; }.status-dot.amber { background: #ff991f; }.status-dot.green { background: #36b37e; }
+.status-dot.slate { background: #8993a4; }.status-dot.teal { background: #00a3bf; }.status-dot.blue { background: #2684ff; }.status-dot.indigo { background: #4c6fff; }.status-dot.purple { background: #6554c0; }.status-dot.orange { background: #ff8b00; }.status-dot.amber { background: #ff991f; }.status-dot.green { background: #36b37e; }.status-dot.red { background: #de350b; }
 .column-body { padding: 0 7px 8px; min-height: 150px; }
 .task-card { background: white; border: 1px solid #e1e3e7; border-radius: 7px; padding: 11px 11px 9px; margin-bottom: 7px; box-shadow: 0 1px 2px rgba(9,30,66,.08); cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s; }
 .task-card:hover { transform: translateY(-1px); border-color: #b9b3dd; box-shadow: 0 5px 14px rgba(9,30,66,.11); }
@@ -204,7 +204,7 @@ svg { flex: 0 0 auto; }
 .list-task-title .branch-icon { margin-left: auto; color: #8993a4; width: 12px; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 4px; padding: 4px 7px; font-size: 10px; font-weight: 650; }
 .status-pill i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.tone-slate { color: #505f79; background: #ebecf0; }.tone-blue { color: #0052cc; background: #deebff; }.tone-purple { color: #403294; background: #eae6ff; }.tone-amber { color: #974f0c; background: #fff0d3; }.tone-green { color: #006644; background: #e3fcef; }
+.tone-slate { color: #505f79; background: #ebecf0; }.tone-teal { color: #006b7a; background: #e6fcff; }.tone-blue { color: #0052cc; background: #deebff; }.tone-indigo { color: #253b80; background: #e9edff; }.tone-purple { color: #403294; background: #eae6ff; }.tone-orange { color: #8f4700; background: #fff1e0; }.tone-amber { color: #974f0c; background: #fff0d3; }.tone-green { color: #006644; background: #e3fcef; }.tone-red { color: #bf2600; background: #ffebe6; }
 .assignee-cell, .date-cell { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }.date-cell svg { width: 12px; color: #8993a4; }
 .list-pr { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; text-decoration: none; text-transform: capitalize; }.list-pr svg { width: 13px; }
 .muted { color: #a5adba; }
@@ -284,6 +284,10 @@ svg { flex: 0 0 auto; }
 .project-modal > header, .project-modal > footer { margin-top: 0; margin-bottom: 0; }
 .project-form-row { display: grid; grid-template-columns: 1fr 110px; gap: 12px; }
 .project-modal input[type="color"] { height: 38px; padding: 4px; }
+.project-status-settings { border-top: 1px solid #ebecf0; padding-top: 16px; display: grid; gap: 13px; }
+.project-status-settings > div:first-child { display: grid; gap: 3px; }.project-status-settings > div:first-child strong { color: #253858; font-size: 13px; }.project-status-settings > div:first-child span { color: #6b778c; font-size: 11px; }
+.project-status-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.project-status-options label { min-width: 0; display: flex; grid-template-columns: none; align-items: center; gap: 7px; border: 1px solid #dfe1e6; border-radius: 6px; padding: 8px; color: #505f79; font-size: 11px; font-weight: 550; cursor: pointer; }.project-status-options label.is-selected { border-color: #b3a8e8; background: #faf9ff; color: #253858; }.project-status-options input { width: 14px; height: 14px; margin: 0; padding: 0; }.project-status-settings label small { color: #7a869a; font-size: 10px; font-weight: 450; line-height: 1.4; }
 .optional { color: #a5adba; font-weight: 400; }
 
 .toast { position: fixed; z-index: 150; left: 50%; bottom: 24px; transform: translateX(-50%); background: #172b4d; color: white; padding: 10px 16px; border-radius: 7px; font-size: 11px; box-shadow: 0 10px 30px rgba(9,30,66,.24); animation: toast-in .18s ease-out; }
@@ -499,7 +503,7 @@ html[data-text-size="large"] body { zoom: 1.08; }
   .toolbar-filters.open .estimate-filter { grid-column: 1 / -1; }
   .toolbar-filters.open .clear-filters { justify-self: end; }
   .task-total { margin-left: auto; }
-  .content-area { padding: 14px 12px; }.modal-backdrop { padding: 10px; }.modal-grid { grid-template-columns: 1fr; }.task-modal { padding: 18px; }.modal-fields { grid-template-columns: 1fr; }
+  .content-area { padding: 14px 12px; }.modal-backdrop { padding: 10px; }.modal-grid { grid-template-columns: 1fr; }.task-modal { padding: 18px; }.modal-fields { grid-template-columns: 1fr; }.project-status-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .board { min-width: 0; grid-template-columns: 1fr; gap: 10px; }
   .phase-list-stack, .task-table, .phases-page, .active-phase-banner, .no-active-phase, .empty-board-phase { min-width: 0; }
   .task-table { min-width: 760px; }

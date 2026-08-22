@@ -14,7 +14,8 @@ export function ProjectProgressWidget() {
   return (
     <div className="widget-project-progress">
       {data.projects.map((p) => {
-        const pct = p.counts.total === 0 ? 0 : Math.round((p.counts.DONE / p.counts.total) * 100);
+        const eligible = p.counts.total - p.counts.CANCELLED;
+        const pct = eligible === 0 ? 0 : Math.round((p.counts.DONE / eligible) * 100);
         return (
           <button key={p.id} type="button" className="wpp-row" onClick={() => openProject(p.key)}>
             <div className="wpp-header">
@@ -25,7 +26,7 @@ export function ProjectProgressWidget() {
             <div className="wpp-track">
               <div className="wpp-fill" style={{ width: `${pct}%`, background: p.color }} />
             </div>
-            <div className="wpp-sub">{p.counts.DONE} of {p.counts.total} tasks done</div>
+            <div className="wpp-sub">{p.counts.DONE} of {eligible} non-cancelled tasks done</div>
           </button>
         );
       })}

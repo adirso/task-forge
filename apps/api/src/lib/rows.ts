@@ -1,4 +1,4 @@
-import type { Project, Tag, Task, TaskDependency, User } from "@taskforge/contracts";
+import { TASK_STATUSES, type Project, type Tag, type Task, type TaskDependency, type User } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 
 type Row = Record<string, unknown>;
@@ -16,6 +16,13 @@ export function toUser(row: Row, prefix = ""): User {
 }
 
 export function toProject(row: Row): Project {
+  let availableStatuses: Project["availableStatuses"] = [...TASK_STATUSES];
+  try {
+    const parsed = JSON.parse(String(row.available_statuses ?? "[]"));
+    const selected = TASK_STATUSES.filter((status) => Array.isArray(parsed) && parsed.includes(status));
+    if (selected.length) availableStatuses = selected;
+  } catch { /* Legacy projects use all statuses. */ }
+  const configuredDefault = String(row.default_status ?? "TODO") as Project["defaultStatus"];
   return {
     id: String(row.id),
     key: String(row.key),
@@ -24,6 +31,8 @@ export function toProject(row: Row): Project {
     repoUrl: (row.repo_url as string | null) ?? null,
     color: String(row.color),
     sortOrder: Number(row.sort_order ?? 0),
+    availableStatuses,
+    defaultStatus: availableStatuses.includes(configuredDefault) ? configuredDefault : availableStatuses[0]!,
     ownerId: String(row.owner_id),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -67,7 +76,7 @@ export async function toTask(row: Row): Promise<Task> {
     dependencies: dependencies.map((dependency): TaskDependency => ({
       taskId: String(dependency.task_id), dependsOnTaskId: String(dependency.depends_on_task_id), projectId: String(dependency.project_id),
       projectKey: String(dependency.project_key), number: Number(dependency.number), title: String(dependency.title),
-      status: dependency.status as Task["status"], isBlocking: dependency.status !== "DONE",
+      status: dependency.status as Task["status"], isBlocking: dependency.status !== "DONE" && dependency.status !== "CANCELLED",
     })),
     attachments: [],
   };

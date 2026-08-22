@@ -1,14 +1,19 @@
 import { useState, type FormEvent } from "react";
 import { X } from "lucide-react";
-import type { Project } from "@taskforge/contracts";
+import { TASK_STATUSES, type Project, type TaskStatus } from "@taskforge/contracts";
+import { statusMeta } from "../lib/ui";
 
-export function ProjectModal({ project, projects = [], onClose, onSave }: { project?: Project | null; projects?: Project[]; onClose: () => void; onSave: (project: { key: string; name: string; description: string; repoUrl: string | null; color: string }) => Promise<void> }) {
+type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus };
+
+export function ProjectModal({ project, projects = [], onClose, onSave }: { project?: Project | null; projects?: Project[]; onClose: () => void; onSave: (project: ProjectFormInput) => Promise<void> }) {
   const [name, setName] = useState(project?.name ?? "");
   const [key, setKey] = useState(project?.key ?? "");
   const [keyEdited, setKeyEdited] = useState(false);
   const [description, setDescription] = useState(project?.description ?? "");
   const [repoUrl, setRepoUrl] = useState(project?.repoUrl ?? "");
   const [color, setColor] = useState(project?.color ?? "#6554C0");
+  const [availableStatuses, setAvailableStatuses] = useState<TaskStatus[]>(project?.availableStatuses ?? [...TASK_STATUSES]);
+  const [defaultStatus, setDefaultStatus] = useState<TaskStatus>(project?.defaultStatus ?? "TODO");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   function suggestedKey(value: string) {
@@ -24,7 +29,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave }: { proj
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    try { await onSave({ name, key, description, repoUrl: repoUrl || null, color }); onClose(); }
+    try { await onSave({ name, key, description, repoUrl: repoUrl || null, color, ...(project ? { availableStatuses, defaultStatus } : {}) }); onClose(); }
     catch (err) { setError(err instanceof Error ? err.message : `Could not ${project ? "update" : "create"} project`); }
     finally { setSaving(false); }
   }
@@ -38,6 +43,19 @@ export function ProjectModal({ project, projects = [], onClose, onSave }: { proj
         <label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="What is this project trying to achieve?" /></label>
         <label>Repository URL <span className="optional">Optional</span><input type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/your-org/repo" /></label>
         <label>Project color<input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
+        {project && <section className="project-status-settings">
+          <div><strong>Task statuses</strong><span>Choose the statuses available on this project.</span></div>
+          <div className="project-status-options">{TASK_STATUSES.map((status) => {
+            const checked = availableStatuses.includes(status);
+            return <label key={status} className={checked ? "is-selected" : ""}><input type="checkbox" checked={checked} onChange={() => {
+              if (checked && availableStatuses.length === 1) return;
+              const next = checked ? availableStatuses.filter((item) => item !== status) : TASK_STATUSES.filter((item) => item === status || availableStatuses.includes(item));
+              setAvailableStatuses(next);
+              if (!next.includes(defaultStatus)) setDefaultStatus(next[0]!);
+            }} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>;
+          })}</div>
+          <label>Default status for API-created tasks<select value={defaultStatus} onChange={(event) => setDefaultStatus(event.target.value as TaskStatus)}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select><small>Used when an API request creates a task without a status.</small></label>
+        </section>}
         {error && <div className="form-error">{error}</div>}
         <footer><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving}>{saving ? (project ? "Saving…" : "Creating…") : (project ? "Save changes" : "Create project")}</button></footer>
       </form>
