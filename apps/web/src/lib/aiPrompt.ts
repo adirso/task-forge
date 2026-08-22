@@ -1,4 +1,4 @@
-import type { Project, Task } from "@taskforge/contracts";
+import { TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES, type Project, type Task } from "@taskforge/contracts";
 
 export type AIProvider = "claude-code" | "codex" | "cursor";
 
@@ -60,6 +60,17 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
   const updatesEndpoint = `${taskEndpoint}/updates`;
   const attachmentsEndpoint = `${taskEndpoint}/attachments`;
   const repository = project.repoUrl?.trim() || "Not configured in TaskForge. Use the repository/workspace supplied by the operator; do not guess a repository.";
+  const enabledStatuses = new Set(project.availableStatuses);
+  const startInstruction = enabledStatuses.has(TASK_CLAIM_TARGET_STATUS)
+    ? `- When starting, PATCH ${taskEndpoint} with status ${TASK_CLAIM_TARGET_STATUS} and branch ${branch}.`
+    : `- When starting, PATCH ${taskEndpoint} with branch ${branch} only. No dedicated work status is enabled; keep the current status until you refresh workflow context and the project owner identifies the intended enabled transition.`;
+  const reviewStatus = TASK_REVIEW_STATUSES.find((status) => enabledStatuses.has(status));
+  const reviewInstruction = reviewStatus
+    ? `- Move the task to ${reviewStatus} when review is required.`
+    : `- Before requesting review, refresh ${contextEndpoint} to discover the current workflow. If no review status is enabled, keep the status unchanged and ask the project owner which enabled status to use.`;
+  const completionInstruction = enabledStatuses.has(TASK_COMPLETION_STATUS)
+    ? `- Move the task to ${TASK_COMPLETION_STATUS} only when the definition of done is fully satisfied and no review or follow-up remains.`
+    : `- Before reporting completion, refresh ${contextEndpoint} to discover the current workflow. If no completion status is enabled, keep the status unchanged and ask the project owner which enabled status to use.`;
 
   return [
     `You are ${providerMeta.name}, responsible for completing TaskForge task ${taskKey}.`,
@@ -71,6 +82,8 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
     `- Project: ${project.name} (${project.key})`,
     `- Task: ${taskKey} — ${task.title}`,
     `- Status: ${task.status}`,
+    `- Enabled statuses: ${project.availableStatuses.join(", ")}`,
+    `- Default API status: ${project.defaultStatus}`,
     `- Priority: ${task.priority}`,
     `- Type: ${task.type}`,
     `- Phase: ${phaseNumber === null ? "Not assigned" : `Phase ${phaseNumber}`}`,
@@ -89,10 +102,12 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
     "TaskForge coordination:",
     "- Use the TaskForge credential already configured in your environment. Never print it, paste it into chat, commit it, or write it to repository files.",
     `- Resolve canonical context with GET ${contextEndpoint}. If access returns 403, stop and ask the project owner to add your agent as a project member.`,
-    `- When starting, PATCH ${taskEndpoint} with status IN_PROGRESS and branch ${branch}.`,
+    "- Before every status change, use project.availableStatuses from the latest context response and never PATCH a disabled status.",
+    startInstruction,
     `- Post meaningful progress and blocker notes to POST ${updatesEndpoint} with a JSON body containing the body field.`,
     "- When a pull request is opened, PATCH the task with pullRequestUrl, pullRequestTitle, pullRequestState, and the final branch.",
-    "- Move the task to IN_REVIEW when review is required. Move it to DONE only when the definition of done is fully satisfied and no review or follow-up remains.",
+    reviewInstruction,
+    completionInstruction,
     "",
     "Delivery workflow:",
     "1. Inspect the repository status and relevant code before editing; preserve unrelated changes.",

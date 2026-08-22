@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TaskStatus } from "@taskforge/contracts";
+import { TASK_CLAIM_SOURCE_STATUSES, TASK_CLAIM_TARGET_STATUS, type TaskStatus } from "@taskforge/contracts";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext, TokenScope } from "./context.js";
 import type { TaskDependencyEntity, TaskEntity, TaskUpdateEntity } from "./models.js";
@@ -82,8 +82,14 @@ export class TaskApplicationService implements TaskService {
     return this.unitOfWork.run(async (repositories) => {
       this.assertScope(context, "task:claim");
       const project = await this.assertProjectAccess(repositories, context);
-      this.assertStatusAvailable(project.availableStatuses, "IN_PROGRESS");
-      const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, options);
+      if (!project.availableStatuses.includes(TASK_CLAIM_TARGET_STATUS)) {
+        throw new ValidationError(`Task claiming requires ${TASK_CLAIM_TARGET_STATUS} to be enabled as the claim target. Enable it in project settings before claiming tasks.`);
+      }
+      const sourceStatuses = TASK_CLAIM_SOURCE_STATUSES.filter((status) => project.availableStatuses.includes(status));
+      if (!sourceStatuses.length) {
+        throw new ValidationError(`Task claiming requires at least one claim source status (${TASK_CLAIM_SOURCE_STATUSES.join(", ")}) to be enabled. Enable one in project settings before claiming tasks.`);
+      }
+      const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS }, options);
       if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
       return this.hydrate(repositories, task);

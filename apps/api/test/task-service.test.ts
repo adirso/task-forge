@@ -48,6 +48,36 @@ test("task service rejects self dependencies before persistence", async () => {
   assert.equal(created, false);
 });
 
+test("task claiming passes enabled sources and target to the atomic repository operation", async () => {
+  let workflow: { sourceStatuses: string[]; targetStatus: string } | undefined;
+  const claimed = {
+    id: "task-49", projectId: "project-1", number: 49, title: "Ready work", description: "", definitionOfDone: "", status: "IN_PROGRESS", priority: "HIGH", type: "BUG",
+    assigneeId: "agent-1", creatorId: "owner-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null,
+    pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "",
+  };
+  const set = repositories({
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["READY_FOR_DEV", "IN_PROGRESS", "DONE"], defaultStatus: "READY_FOR_DEV", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    tasks: { claimNext: async (_projectId: string, _claimantId: string, input: typeof workflow) => { workflow = input; return claimed; } } as never,
+  });
+  const service = new TaskApplicationService({ run: async (work) => work(set) });
+  const task = await service.claimTask({ actor: { userId: "agent-1", kind: "AGENT", role: "MEMBER", tokenScopes: ["task:claim"] }, projectId: "project-1" });
+  assert.equal(task.id, "task-49");
+  assert.deepEqual(workflow, { sourceStatuses: ["READY_FOR_DEV"], targetStatus: "IN_PROGRESS" });
+});
+
+test("task claiming reports actionable workflow configuration errors", async () => {
+  let availableStatuses = ["READY_FOR_DEV", "DONE"];
+  const set = repositories({
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses, defaultStatus: availableStatuses[0], ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    tasks: { claimNext: async () => { throw new Error("claim repository must not run for an invalid workflow"); } } as never,
+  });
+  const service = new TaskApplicationService({ run: async (work) => work(set) });
+  const context = { actor: { userId: "agent-1", kind: "AGENT" as const, role: "MEMBER" as const, tokenScopes: ["task:claim" as const] }, projectId: "project-1" };
+  await assert.rejects(() => service.claimTask(context), /requires IN_PROGRESS to be enabled.*project settings/);
+  availableStatuses = ["IN_PROGRESS", "DONE"];
+  await assert.rejects(() => service.claimTask(context), /requires at least one claim source status \(BACKLOG, TODO, READY_FOR_DEV\).*project settings/);
+});
+
 test("adding an update dispatches a webhook to the assigned agent", async (t) => {
   const dispatched: Array<{ url: string; payload: Record<string, unknown> }> = [];
   const originalFetch = globalThis.fetch;

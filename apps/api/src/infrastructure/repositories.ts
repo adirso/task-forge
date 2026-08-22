@@ -181,16 +181,18 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       return rows.map((row) => ({ ...toTask(row), projectName: text(row.project_name), projectKey: text(row.project_key) }));
     },
     async listUsedStatuses(projectId) { return (await db.prepare("SELECT DISTINCT status FROM tasks WHERE project_id = ?").all(projectId)).map((row) => row.status as TaskStatus); },
-    async claimNext(projectId, claimantId, options = {}) {
-      const where = ["project_id = ?", "status IN ('BACKLOG', 'TODO')", "assignee_id IS NULL"];
-      const params: unknown[] = [projectId];
+    async claimNext(projectId, claimantId, workflow, options = {}) {
+      if (!workflow.sourceStatuses.length) return null;
+      const sourcePlaceholders = workflow.sourceStatuses.map(() => "?").join(", ");
+      const where = ["project_id = ?", `status IN (${sourcePlaceholders})`, "assignee_id IS NULL"];
+      const params: unknown[] = [projectId, ...workflow.sourceStatuses];
       if (options.phaseId !== undefined && options.phaseId !== null) { where.push("phase_id = ?"); params.push(options.phaseId); }
       if (options.priority) { where.push("priority = ?"); params.push(options.priority); }
       const orderExpr = "CASE priority WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, position";
       const candidate = await db.prepare(`SELECT id FROM tasks WHERE ${where.join(" AND ")} ORDER BY ${orderExpr} LIMIT 1`).get(...params);
       if (!candidate) return null;
       const now = new Date().toISOString();
-      const result = await db.prepare("UPDATE tasks SET assignee_id = ?, status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND status IN ('BACKLOG', 'TODO') AND assignee_id IS NULL").run(claimantId, now, candidate.id);
+      const result = await db.prepare(`UPDATE tasks SET assignee_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND status IN (${sourcePlaceholders}) AND assignee_id IS NULL`).run(claimantId, workflow.targetStatus, now, candidate.id, projectId, ...workflow.sourceStatuses);
       if (!result.changes) return null;
       const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(candidate.id);
       return row ? hydrateTask(db, toTask(row)) : null;
