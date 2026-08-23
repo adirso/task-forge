@@ -10,7 +10,7 @@ The current registry is:
 4. `0004_project_status_defaults`
 5. `0005_query_indexes`
 
-`20260822_task_statuses` is a recognized marker written by the startup migration that preceded this registry. It is retained for upgrade compatibility but is not part of the ordered sequence.
+`20260821_workflow_status_storage`, `20260821_workflow_system_default_guard`, and `20260822_task_statuses` are recognized markers written by startup migrations that preceded this registry. The first two can remain after the configurable-workflow rollout was cancelled. They are retained for upgrade compatibility but are not part of the ordered sequence.
 
 ## Runtime guarantees
 

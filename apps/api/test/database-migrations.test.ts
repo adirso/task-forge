@@ -91,7 +91,9 @@ async function createLegacyFixture(adapter: Adapter, driver: DatabaseDriver, mar
 
   if (markerEra) {
     await adapter.run("CREATE TABLE schema_migrations (version VARCHAR(120) PRIMARY KEY, applied_at VARCHAR(30) NOT NULL)", []);
-    await adapter.run("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", [LEGACY_MIGRATION_VERSIONS[0], "2026-08-22T00:00:00.000Z"]);
+    for (const version of LEGACY_MIGRATION_VERSIONS) {
+      await adapter.run("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", [version, "2026-08-22T00:00:00.000Z"]);
+    }
   }
 }
 
@@ -140,13 +142,13 @@ for (const driver of ["sqlite", "mysql"] as const) {
       });
     });
 
-    for (const [name, markerEra] of [["pre-ledger five-status schema", false], ["20260822 marker-era schema", true]] as const) {
+    for (const [name, markerEra] of [["pre-ledger five-status schema", false], ["pre-registry marker-era schema", true]] as const) {
       await t.test(name, async () => {
         await withFixture(driver, async (adapter) => {
           await createLegacyFixture(adapter, driver, markerEra);
           await runMigrations(adapter, driver);
           await assertCurrentSchema(adapter, driver, true);
-          const expectedLedgerSize = migrations.length + (markerEra ? 1 : 0);
+          const expectedLedgerSize = migrations.length + (markerEra ? LEGACY_MIGRATION_VERSIONS.length : 0);
           assert.equal((await adapter.all("SELECT version FROM schema_migrations", [])).length, expectedLedgerSize);
         });
       });

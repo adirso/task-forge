@@ -326,7 +326,11 @@ export type Migration = {
   after?(adapter: Adapter, dialect: DatabaseDriver): Promise<void>;
 };
 
-export const LEGACY_MIGRATION_VERSIONS = ["20260822_task_statuses"] as const;
+export const LEGACY_MIGRATION_VERSIONS = [
+  "20260821_workflow_status_storage",
+  "20260821_workflow_system_default_guard",
+  "20260822_task_statuses",
+] as const;
 
 export const migrations: readonly Migration[] = [
   {
