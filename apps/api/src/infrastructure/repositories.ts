@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
-import type { ActivityEntity, AgentLastActiveEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
+import type { ActivityEntity, AgentLastActiveEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
 import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
+import { decodeCursor, toPage } from "./pagination.js";
 
 export interface DatabasePort {
   readonly dialect: "sqlite" | "mysql";
@@ -96,6 +97,10 @@ function toUpdate(row: Row): TaskUpdateEntity {
   return { id: text(row.id), taskId: text(row.task_id), authorId: text(row.author_id), body: text(row.body), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
 }
 
+function toHydratedUpdate(row: Row): TaskUpdateEntity {
+  return { ...toUpdate(row), author: { id: text(row.author_user_id), email: nullableText(row.author_email), name: text(row.author_name), kind: row.author_kind as UserEntity["kind"], role: row.author_role as UserEntity["role"], avatarUrl: nullableText(row.author_avatar_url), createdAt: date(row.author_created_at) } };
+}
+
 function toAttachment(row: Row): AttachmentEntity {
   return { id: text(row.id), taskId: text(row.task_id), fileName: text(row.file_name), mimeType: text(row.mime_type), size: Number(row.file_size), storageKey: text(row.storage_key), uploadedById: text(row.uploaded_by_id), createdAt: date(row.created_at) };
 }
@@ -109,14 +114,37 @@ function toAutomation(row: Row): AutomationEntity {
   return { id: text(row.id), projectId: text(row.project_id), name: text(row.name), enabled: Boolean(row.enabled), trigger: row.trigger as AutomationEntity["trigger"], actorType: row.actor_type as AutomationEntity["actorType"], actorId: nullableText(row.actor_id), service: nullableText(row.service), conditions: parse(row.conditions), actions: parse(row.actions), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
 }
 
-async function hydrateTask(db: DatabasePort, task: TaskEntity): Promise<TaskEntity> {
-  const [tags, dependencies, assignee] = await Promise.all([
-    db.prepare("SELECT * FROM tags JOIN task_tags ON task_tags.tag_id = tags.id WHERE task_tags.task_id = ? ORDER BY tags.name").all(task.id),
-    db.prepare("SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.`key` AS project_key, dep.number, dep.title, dep.status FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id JOIN projects p ON p.id = dep.project_id WHERE td.task_id = ? ORDER BY dep.number").all(task.id),
-    task.assigneeId ? db.prepare("SELECT * FROM users WHERE id = ?").get(task.assigneeId) : Promise.resolve(undefined),
+async function hydrateTasks(db: DatabasePort, tasks: TaskEntity[]): Promise<TaskEntity[]> {
+  if (!tasks.length) return [];
+  const ids = tasks.map((task) => task.id);
+  const placeholders = ids.map(() => "?").join(",");
+  const assigneeIds = [...new Set(tasks.map((task) => task.assigneeId).filter((id): id is string => Boolean(id)))];
+  const phaseIds = [...new Set(tasks.map((task) => task.phaseId).filter((id): id is string => Boolean(id)))];
+  const [tagRows, dependencyRows, attachmentRows, assigneeRows, phaseRows] = await Promise.all([
+    db.prepare(`SELECT tg.*, tt.task_id AS hydrated_task_id FROM tags tg JOIN task_tags tt ON tt.tag_id = tg.id WHERE tt.task_id IN (${placeholders}) ORDER BY tg.name`).all(...ids),
+    db.prepare(`SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.\`key\` AS project_key, dep.number, dep.title, dep.status FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id JOIN projects p ON p.id = dep.project_id WHERE td.task_id IN (${placeholders}) ORDER BY dep.number`).all(...ids),
+    db.prepare(`SELECT a.*, u.id AS uploaded_user_id, u.email AS uploaded_email, u.name AS uploaded_name, u.kind AS uploaded_kind, u.role AS uploaded_role, u.avatar_url AS uploaded_avatar_url, u.created_at AS uploaded_created_at FROM task_attachments a JOIN users u ON u.id = a.uploaded_by_id WHERE a.task_id IN (${placeholders}) ORDER BY a.created_at DESC, a.id`).all(...ids),
+    assigneeIds.length ? db.prepare(`SELECT * FROM users WHERE id IN (${assigneeIds.map(() => "?").join(",")})`).all(...assigneeIds) : Promise.resolve([]),
+    phaseIds.length ? db.prepare(`SELECT * FROM phases WHERE id IN (${phaseIds.map(() => "?").join(",")})`).all(...phaseIds) : Promise.resolve([]),
   ]);
-  const attachments = await db.prepare("SELECT a.*, u.id AS uploaded_user_id, u.email AS uploaded_email, u.name AS uploaded_name, u.kind AS uploaded_kind, u.role AS uploaded_role, u.avatar_url AS uploaded_avatar_url, u.created_at AS uploaded_created_at FROM task_attachments a JOIN users u ON u.id = a.uploaded_by_id WHERE a.task_id = ? ORDER BY a.created_at DESC").all(task.id);
-  return { ...task, tags: tags.map(toTag), dependencies: dependencies.map(toDependency), attachments: attachments.map((row) => ({ ...toAttachment(row), uploadedBy: { id: text(row.uploaded_user_id), email: nullableText(row.uploaded_email), name: text(row.uploaded_name), kind: row.uploaded_kind as UserEntity["kind"], role: row.uploaded_role as UserEntity["role"], avatarUrl: nullableText(row.uploaded_avatar_url), createdAt: date(row.uploaded_created_at) } })), assignee: assignee ? toUser(assignee) : null };
+  const grouped = <T>(rows: T[], key: (row: T) => string) => {
+    const result = new Map<string, T[]>();
+    for (const row of rows) result.set(key(row), [...(result.get(key(row)) ?? []), row]);
+    return result;
+  };
+  const tags = grouped(tagRows, (row) => text(row.hydrated_task_id));
+  const dependencies = grouped(dependencyRows, (row) => text(row.task_id));
+  const attachments = grouped(attachmentRows, (row) => text(row.task_id));
+  const assignees = new Map(assigneeRows.map((row) => [text(row.id), toUser(row)]));
+  const phases = new Map(phaseRows.map((row) => [text(row.id), toPhase(row)]));
+  return tasks.map((task) => ({
+    ...task,
+    tags: (tags.get(task.id) ?? []).map(toTag),
+    dependencies: (dependencies.get(task.id) ?? []).map((row) => { const dependency = toDependency(row); return { ...dependency, isBlocking: dependency.status !== "DONE" && dependency.status !== "CANCELLED" }; }),
+    attachments: (attachments.get(task.id) ?? []).map((row) => ({ ...toAttachment(row), uploadedBy: { id: text(row.uploaded_user_id), email: nullableText(row.uploaded_email), name: text(row.uploaded_name), kind: row.uploaded_kind as UserEntity["kind"], role: row.uploaded_role as UserEntity["role"], avatarUrl: nullableText(row.uploaded_avatar_url), createdAt: date(row.uploaded_created_at) } })),
+    assignee: task.assigneeId ? assignees.get(task.assigneeId) ?? null : null,
+    phase: task.phaseId ? phases.get(task.phaseId) ?? null : null,
+  }));
 }
 
 function toToken(row: Row): ApiTokenEntity {
@@ -177,13 +205,26 @@ function createPhaseRepository(db: DatabasePort): PhaseRepository {
 
 function createTaskRepository(db: DatabasePort): TaskRepository {
   return {
-    async findById(id) { const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); return row ? hydrateTask(db, toTask(row)) : null; },
-    async findByProjectNumber(projectId, number) { const row = await db.prepare("SELECT * FROM tasks WHERE project_id = ? AND number = ?").get(projectId, number); return row ? hydrateTask(db, toTask(row)) : null; },
+    async findById(id) { const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); return row ? (await hydrateTasks(db, [toTask(row)]))[0]! : null; },
+    async findByProjectNumber(projectId, number) { const row = await db.prepare("SELECT * FROM tasks WHERE project_id = ? AND number = ?").get(projectId, number); return row ? (await hydrateTasks(db, [toTask(row)]))[0]! : null; },
     async unassignForProjectMember(projectId, userId) { await db.prepare("UPDATE tasks SET assignee_id = NULL, updated_at = ? WHERE project_id = ? AND assignee_id = ?").run(new Date().toISOString(), projectId, userId); },
-    async listByProject(projectId, filters = {}) { const where = ["project_id = ?"]; const values: unknown[] = [projectId]; const filterMap: Record<string, string> = { status: "status", assigneeId: "assignee_id", priority: "priority", type: "type", phaseId: "phase_id" }; for (const [key, column] of Object.entries(filterMap)) if (filters[key as keyof TaskFilters] !== undefined) { where.push(`${column} = ?`); values.push(filters[key as keyof TaskFilters]); } if (filters.tag) { where.push("EXISTS (SELECT 1 FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id WHERE tt.task_id = tasks.id AND tg.name = ? COLLATE NOCASE)"); values.push(filters.tag); } if (filters.minPoints !== undefined) { where.push("estimate_points >= ?"); values.push(filters.minPoints); } if (filters.maxPoints !== undefined) { where.push("estimate_points <= ?"); values.push(filters.maxPoints); } if (filters.query) { where.push("(title LIKE ? OR description LIKE ?)"); values.push(`%${filters.query}%`, `%${filters.query}%`); } const rows = await db.prepare(`SELECT * FROM tasks WHERE ${where.join(" AND ")} ORDER BY status, position, created_at DESC`).all(...values); return Promise.all(rows.map((row) => hydrateTask(db, toTask(row)))); },
+    async listByProject(projectId, filters = {}, page) {
+      const where = ["project_id = ?"]; const values: unknown[] = [projectId];
+      const filterMap: Record<string, string> = { status: "status", assigneeId: "assignee_id", priority: "priority", type: "type", phaseId: "phase_id" };
+      for (const [key, column] of Object.entries(filterMap)) if (filters[key as keyof TaskFilters] !== undefined) { where.push(`${column} = ?`); values.push(filters[key as keyof TaskFilters]); }
+      if (filters.tag) { where.push("EXISTS (SELECT 1 FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id WHERE tt.task_id = tasks.id AND tg.name = ? COLLATE NOCASE)"); values.push(filters.tag); }
+      if (filters.minPoints !== undefined) { where.push("estimate_points >= ?"); values.push(filters.minPoints); }
+      if (filters.maxPoints !== undefined) { where.push("estimate_points <= ?"); values.push(filters.maxPoints); }
+      if (filters.query) { where.push("(title LIKE ? OR description LIKE ?)"); values.push(`%${filters.query}%`, `%${filters.query}%`); }
+      const cursor = decodeCursor(page.cursor, 4);
+      if (cursor) { const [status, position, createdAt, id] = cursor; where.push("(status > ? OR (status = ? AND position > ?) OR (status = ? AND position = ? AND created_at < ?) OR (status = ? AND position = ? AND created_at = ? AND id > ?))"); values.push(status, status, position, status, position, createdAt, status, position, createdAt, id); }
+      const rows = await db.prepare(`SELECT * FROM tasks WHERE ${where.join(" AND ")} ORDER BY status ASC, position ASC, created_at DESC, id ASC LIMIT ${page.limit + 1}`).all(...values);
+      const mapped = await hydrateTasks(db, rows.map(toTask));
+      return toPage(mapped, page, (task) => [task.status, task.position, task.createdAt, task.id]);
+    },
     async allocateNumber(projectId, status) { const project = await db.prepare(`SELECT next_task_number FROM projects WHERE id = ?${db.dialect === "mysql" ? " FOR UPDATE" : ""}`).get(projectId); if (!project) throw new Error("Project not found"); const positionRow = await db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM tasks WHERE project_id = ? AND status = ?").get(projectId, status); const position = Number(positionRow?.next ?? 0); await db.prepare("UPDATE projects SET next_task_number = next_task_number + 1, updated_at = ? WHERE id = ?").run(new Date().toISOString(), projectId); return { number: Number(project.next_task_number), position }; },
-    async create(input) { await db.prepare(`INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.id, input.projectId, input.number, input.title, input.description, input.definitionOfDone, input.status, input.priority, input.type, input.assigneeId, input.creatorId, input.parentId, input.branch, input.dueDate, input.estimatePoints, input.phaseId, input.pullRequestUrl, input.pullRequestTitle, input.pullRequestState, input.position, input.createdAt, input.updatedAt); return input; },
-    async update(id, input) { const columns: Record<string, string> = { title: "title", description: "description", definitionOfDone: "definition_of_done", status: "status", priority: "priority", type: "type", assigneeId: "assignee_id", parentId: "parent_id", branch: "branch", dueDate: "due_date", estimatePoints: "estimate_points", phaseId: "phase_id", pullRequestUrl: "pull_request_url", pullRequestTitle: "pull_request_title", pullRequestState: "pull_request_state", position: "position" }; const fields: string[] = []; const values: unknown[] = []; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); if (!row) throw new Error("Task not found after update"); return hydrateTask(db, toTask(row)); },
+    async create(input) { await db.prepare(`INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.id, input.projectId, input.number, input.title, input.description, input.definitionOfDone, input.status, input.priority, input.type, input.assigneeId, input.creatorId, input.parentId, input.branch, input.dueDate, input.estimatePoints, input.phaseId, input.pullRequestUrl, input.pullRequestTitle, input.pullRequestState, input.position, input.createdAt, input.updatedAt); return (await hydrateTasks(db, [input]))[0]!; },
+    async update(id, input) { const columns: Record<string, string> = { title: "title", description: "description", definitionOfDone: "definition_of_done", status: "status", priority: "priority", type: "type", assigneeId: "assignee_id", parentId: "parent_id", branch: "branch", dueDate: "due_date", estimatePoints: "estimate_points", phaseId: "phase_id", pullRequestUrl: "pull_request_url", pullRequestTitle: "pull_request_title", pullRequestState: "pull_request_state", position: "position" }; const fields: string[] = []; const values: unknown[] = []; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); if (!row) throw new Error("Task not found after update"); return (await hydrateTasks(db, [toTask(row)]))[0]!; },
     async delete(id) { await db.prepare("DELETE FROM tasks WHERE id = ?").run(id); },
     async listForAssignee(assigneeId, status) {
       const where = ["t.assignee_id = ?"];
@@ -207,7 +248,7 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       const result = await db.prepare(`UPDATE tasks SET assignee_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND status IN (${sourcePlaceholders}) AND assignee_id IS NULL`).run(claimantId, workflow.targetStatus, now, candidate.id, projectId, ...workflow.sourceStatuses);
       if (!result.changes) return null;
       const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(candidate.id);
-      return row ? hydrateTask(db, toTask(row)) : null;
+      return row ? (await hydrateTasks(db, [toTask(row)]))[0]! : null;
     },
   };
 }
@@ -221,7 +262,17 @@ function createDependencyRepository(db: DatabasePort): TaskDependencyRepository 
 }
 
 function createUpdateRepository(db: DatabasePort): TaskUpdateRepository {
-  return { async listForTask(taskId) { return (await db.prepare("SELECT * FROM task_updates WHERE task_id = ? ORDER BY created_at DESC").all(taskId)).map(toUpdate); }, async create(input) { await db.prepare("INSERT INTO task_updates (id, task_id, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.authorId, input.body, input.createdAt, input.updatedAt); return input; } };
+  return {
+    async listForTask(taskId, page) {
+      const where = ["tu.task_id = ?"];
+      const params: unknown[] = [taskId];
+      const cursor = decodeCursor(page.cursor, 2);
+      if (cursor) { where.push("(tu.created_at < ? OR (tu.created_at = ? AND tu.id > ?))"); params.push(cursor[0], cursor[0], cursor[1]); }
+      const rows = await db.prepare(`SELECT tu.*, u.id AS author_user_id, u.email AS author_email, u.name AS author_name, u.kind AS author_kind, u.role AS author_role, u.avatar_url AS author_avatar_url, u.created_at AS author_created_at FROM task_updates tu JOIN users u ON u.id = tu.author_id WHERE ${where.join(" AND ")} ORDER BY tu.created_at DESC, tu.id ASC LIMIT ${page.limit + 1}`).all(...params);
+      return toPage(rows.map(toHydratedUpdate), page, (update) => [update.createdAt, update.id]);
+    },
+    async create(input) { await db.prepare("INSERT INTO task_updates (id, task_id, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.authorId, input.body, input.createdAt, input.updatedAt); return input; },
+  };
 }
 
 function createAttachmentRepository(db: DatabasePort): AttachmentRepository {
@@ -245,7 +296,7 @@ function createAutomationRepository(db: DatabasePort): AutomationRepository {
 
 function createNotificationRepository(db: DatabasePort): NotificationRepository {
   const select = "SELECT n.*, p.name AS project_name, p.`key` AS project_key, t.number AS task_number FROM notifications n LEFT JOIN projects p ON p.id = n.project_id LEFT JOIN tasks t ON t.id = n.task_id";
-  return { async notify(input) { await db.prepare("INSERT INTO notifications (id, user_id, project_id, task_id, type, title, message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), input.userId, input.projectId ?? null, input.taskId ?? null, input.type, input.title, input.message, new Date().toISOString()); }, async listForUser(userId) { return (await db.prepare(`${select} WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT 50`).all(userId)).map(toNotification); }, async markRead(userId, id) { const result = await db.prepare("UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?").run(new Date().toISOString(), id, userId); if (!result.changes) throw new Error("Notification not found after read"); const row = await db.prepare(`${select} WHERE n.id = ? AND n.user_id = ?`).get(id, userId); if (!row) throw new Error("Notification not found after read"); return toNotification(row); }, async markAllRead(userId) { return (await db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(new Date().toISOString(), userId)).changes; } };
+  return { async notify(input) { await db.prepare("INSERT INTO notifications (id, user_id, project_id, task_id, type, title, message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), input.userId, input.projectId ?? null, input.taskId ?? null, input.type, input.title, input.message, new Date().toISOString()); }, async listForUser(userId, page) { const where = ["n.user_id = ?"]; const params: unknown[] = [userId]; const cursor = decodeCursor(page.cursor, 2); if (cursor) { where.push("(n.created_at < ? OR (n.created_at = ? AND n.id > ?))"); params.push(cursor[0], cursor[0], cursor[1]); } const [rows, unread] = await Promise.all([db.prepare(`${select} WHERE ${where.join(" AND ")} ORDER BY n.created_at DESC, n.id ASC LIMIT ${page.limit + 1}`).all(...params), db.prepare("SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND read_at IS NULL").get(userId)]); return { ...toPage(rows.map(toNotification), page, (notification) => [notification.createdAt, notification.id]), unreadCount: Number(unread?.count ?? 0) }; }, async markRead(userId, id) { const result = await db.prepare("UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?").run(new Date().toISOString(), id, userId); if (!result.changes) throw new Error("Notification not found after read"); const row = await db.prepare(`${select} WHERE n.id = ? AND n.user_id = ?`).get(id, userId); if (!row) throw new Error("Notification not found after read"); return toNotification(row); }, async markAllRead(userId) { return (await db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(new Date().toISOString(), userId)).changes; } };
 }
 
 function createTokenRepository(db: DatabasePort): ApiTokenRepository {
@@ -261,13 +312,15 @@ function createActivityRepository(db: DatabasePort): ActivityRepository {
       if (filters.projectId) { where.push("a.project_id = ?"); params.push(filters.projectId); }
       if (filters.taskId) { where.push("a.task_id = ?"); params.push(filters.taskId); }
       if (filters.actorId) { where.push("a.actor_id = ?"); params.push(filters.actorId); }
-      const limit = queryLimit(filters.limit ?? 50);
-      const rows = await db.prepare(`SELECT a.*, u.name AS actor_name, u.kind AS actor_kind, u.avatar_url AS actor_avatar_url, p.\`key\` AS project_key, t.number AS task_number FROM activity a JOIN users u ON u.id = a.actor_id JOIN projects p ON p.id = a.project_id LEFT JOIN tasks t ON t.id = a.task_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY a.created_at DESC LIMIT ${limit}`).all(...params);
-      return rows.map((row) => {
+      const cursor = decodeCursor(filters.page.cursor, 2);
+      if (cursor) { where.push("(a.created_at < ? OR (a.created_at = ? AND a.id > ?))"); params.push(cursor[0], cursor[0], cursor[1]); }
+      const rows = await db.prepare(`SELECT a.*, u.name AS actor_name, u.kind AS actor_kind, u.avatar_url AS actor_avatar_url, p.\`key\` AS project_key, t.number AS task_number FROM activity a JOIN users u ON u.id = a.actor_id JOIN projects p ON p.id = a.project_id LEFT JOIN tasks t ON t.id = a.task_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY a.created_at DESC, a.id ASC LIMIT ${filters.page.limit + 1}`).all(...params);
+      const items = rows.map((row) => {
         let metadata: Record<string, unknown> = {};
         try { metadata = JSON.parse(String(row.metadata ?? "{}")); } catch { /* empty */ }
         return { id: text(row.id), projectId: text(row.project_id), projectKey: text(row.project_key), taskId: nullableText(row.task_id), taskNumber: row.task_number == null ? null : Number(row.task_number), actorId: text(row.actor_id), actorName: text(row.actor_name), actorKind: row.actor_kind as UserEntity["kind"], actorAvatarUrl: nullableText(row.actor_avatar_url), action: text(row.action), metadata, createdAt: date(row.created_at) };
       });
+      return toPage(items, filters.page, (activity) => [activity.createdAt, activity.id]);
     },
   };
 }
@@ -329,7 +382,7 @@ function createReportingRepository(db: DatabasePort): ReportingRepository {
 }
 
 function createSearchRepository(db: DatabasePort): SearchRepository {
-  return { async searchAccessible(input) { const access = input.isAdmin ? "1 = 1" : "EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = t.project_id AND pm.user_id = ?)"; const values: unknown[] = input.isAdmin ? [`%${input.query}%`, `%${input.query}%`] : [input.actorId, `%${input.query}%`, `%${input.query}%`]; const rows = await db.prepare(`SELECT t.*, p.name AS project_name, p.\`key\` AS project_key, p.color AS project_color FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${access} AND (t.title LIKE ? OR t.description LIKE ?) ORDER BY t.updated_at DESC`).all(...values); return Promise.all(rows.map(async (row) => ({ ...(await hydrateTask(db, toTask(row))), projectName: text(row.project_name), projectKey: text(row.project_key), projectColor: text(row.project_color) }))); } };
+  return { async searchAccessible(input) { const access = input.isAdmin ? "1 = 1" : "EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = t.project_id AND pm.user_id = ?)"; const values: unknown[] = input.isAdmin ? [`%${input.query}%`, `%${input.query}%`] : [input.actorId, `%${input.query}%`, `%${input.query}%`]; const where = [access, "(t.title LIKE ? OR t.description LIKE ?)"]; const cursor = decodeCursor(input.page.cursor, 2); if (cursor) { where.push("(t.updated_at < ? OR (t.updated_at = ? AND t.id > ?))"); values.push(cursor[0], cursor[0], cursor[1]); } const rows = await db.prepare(`SELECT t.*, p.name AS project_name, p.\`key\` AS project_key, p.color AS project_color FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${where.join(" AND ")} ORDER BY t.updated_at DESC, t.id ASC LIMIT ${input.page.limit + 1}`).all(...values); const hydrated = await hydrateTasks(db, rows.map((row) => ({ ...toTask(row), projectName: text(row.project_name), projectKey: text(row.project_key), projectColor: text(row.project_color) }))); return toPage(hydrated, input.page, (task) => [task.updatedAt, task.id]); } };
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {

@@ -140,6 +140,7 @@ export interface TaskEntity {
   dependencies?: TaskDependencyEntity[];
   attachments?: AttachmentEntity[];
   updates?: TaskUpdateEntity[];
+  updatesPage?: PageInfo;
   projectName?: string;
   projectKey?: string;
   projectColor?: string;
@@ -216,5 +217,16 @@ export interface NotificationEntity {
 
 export interface Page<T> {
   items: T[];
-  total?: number;
+  page: PageInfo;
+}
+
+export interface PageRequest {
+  cursor?: string;
+  limit: number;
+}
+
+export interface PageInfo {
+  limit: number;
+  hasMore: boolean;
+  nextCursor: string | null;
 }

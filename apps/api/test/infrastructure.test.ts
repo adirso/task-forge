@@ -89,3 +89,35 @@ test("claim repository repeats enabled source eligibility in the atomic update",
   assert.deepEqual(update?.params.slice(0, 2), ["agent-1", "IN_PROGRESS"]);
   assert.deepEqual(update?.params.slice(-4), ["project-1", "BACKLOG", "TODO", "READY_FOR_DEV"]);
 });
+
+test("large task pages use a bounded number of relationship queries", async () => {
+  const queries: string[] = [];
+  const taskRows = Array.from({ length: 75 }, (_, index) => ({
+    id: `task-${String(index).padStart(3, "0")}`, project_id: "project-1", number: index + 1, title: `Task ${index + 1}`,
+    description: "", definition_of_done: "", status: "TODO", priority: "MEDIUM", type: "FEATURE", assignee_id: null,
+    creator_id: "owner-1", parent_id: null, branch: null, due_date: null, estimate_points: null, phase_id: null,
+    pull_request_url: null, pull_request_title: null, pull_request_state: null, position: index,
+    created_at: "2026-08-23T00:00:00.000Z", updated_at: "2026-08-23T00:00:00.000Z",
+  }));
+  const database: DatabasePort = {
+    dialect: "sqlite",
+    prepare(sql) {
+      queries.push(sql);
+      return {
+        async get() { return undefined; },
+        async run() { return { changes: 0 }; },
+        async all() { return sql.startsWith("SELECT * FROM tasks WHERE") || sql.startsWith("SELECT t.*") ? taskRows.map((row) => ({ ...row, project_name: "Task Forge", project_key: "TAS", project_color: "#6554C0" })) : []; },
+      };
+    },
+    transaction(callback) { return callback; },
+  };
+  const result = await createRepositories(database).tasks.listByProject("project-1", undefined, { limit: 100 });
+  assert.equal(result.items.length, 75);
+  assert.equal(result.page.hasMore, false);
+  assert.ok(queries.length <= 6, `expected at most 6 queries for 75 tasks, received ${queries.length}`);
+  assert.equal(queries.filter((sql) => sql.includes("task_id IN")).length, 3, "task relationships are loaded in batches");
+  queries.length = 0;
+  const search = await createRepositories(database).search.searchAccessible({ actorId: "owner-1", isAdmin: true, query: "Task", page: { limit: 100 } });
+  assert.equal(search.items.length, 75);
+  assert.ok(queries.length <= 6, `expected at most 6 search queries for 75 tasks, received ${queries.length}`);
+});

@@ -285,6 +285,7 @@ export interface Task {
   dependencies: TaskDependency[];
   attachments: Attachment[];
   updates?: TaskNote[];
+  updatesPage?: PageInfo;
 }
 
 export interface AutomationCondition { field: z.infer<typeof automationFieldSchema>; operator: z.infer<typeof automationOperatorSchema>; value: string | null; }
@@ -310,6 +311,12 @@ export interface TaskNote {
   createdAt: string;
   updatedAt: string;
   author: User;
+}
+
+export interface PageInfo {
+  limit: number;
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 export interface AuthResponse {

@@ -423,6 +423,73 @@ test("concurrent task creation allocates unique project numbers", async () => {
   assert.equal(new Set(numbers).size, responses.length);
 });
 
+test("bounded pages are stable and exclude inaccessible records before pagination", async () => {
+  const pageProjectResponse = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "PGN", name: "Pagination project", description: "Cursor coverage", color: "#0052CC" } });
+  assert.equal(pageProjectResponse.statusCode, 201, pageProjectResponse.body);
+  const pageProjectId = pageProjectResponse.json().project.id as string;
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  const memberToken = memberLogin.json().token as string;
+  await app.inject({ method: "POST", url: `/api/projects/${pageProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: memberId, role: "MEMBER" } });
+
+  const timestamp = "2099-01-01T00:00:00.000Z";
+  const taskIds = Array.from({ length: 5 }, () => randomUUID());
+  for (const [position, id] of taskIds.entries()) {
+    await db.prepare("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) VALUES (?, ?, ?, ?, '', '', 'TODO', 'MEDIUM', 'FEATURE', NULL, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)").run(id, pageProjectId, position + 1, `Pagination fixture ${position}`, adminId, position, timestamp, timestamp);
+  }
+
+  const collect = async (baseUrl: string, field: string, token = memberToken) => {
+    const items: Array<Record<string, unknown>> = [];
+    let cursor: string | null = null;
+    do {
+      const separator = baseUrl.includes("?") ? "&" : "?";
+      const response = await app.inject({ method: "GET", url: `${baseUrl}${separator}limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, headers: { authorization: `Bearer ${token}` } });
+      assert.equal(response.statusCode, 200, response.body);
+      const body = response.json();
+      assert.equal(body.page.limit, 2);
+      items.push(...body[field]);
+      cursor = body.page.nextCursor;
+      assert.equal(body.page.hasMore, Boolean(cursor));
+    } while (cursor);
+    return items;
+  };
+
+  const tasks = await collect(`/api/projects/${pageProjectId}/tasks?q=Pagination%20fixture`, "tasks");
+  assert.deepEqual(tasks.map((task) => task.position), [0, 1, 2, 3, 4]);
+  assert.equal(new Set(tasks.map((task) => task.id)).size, 5);
+
+  const expectedSearchIds = [...taskIds].sort();
+  const search = await collect("/api/search?q=Pagination%20fixture", "results");
+  assert.deepEqual(search.map((task) => task.id), expectedSearchIds);
+
+  const updateIds = Array.from({ length: 3 }, () => randomUUID()).sort();
+  for (const [index, id] of updateIds.entries()) await db.prepare("INSERT INTO task_updates (id, task_id, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, taskIds[0], adminId, `Page note ${index}`, timestamp, timestamp);
+  const updates = await collect(`/api/tasks/${taskIds[0]}/updates`, "updates");
+  assert.deepEqual(updates.map((update) => update.id), updateIds);
+  assert.ok(updates.every((update) => (update.author as { id: string }).id === adminId));
+
+  const notificationIds = Array.from({ length: 3 }, () => randomUUID()).sort();
+  for (const id of notificationIds) await db.prepare("INSERT INTO notifications (id, user_id, project_id, task_id, type, title, message, created_at) VALUES (?, ?, ?, ?, 'TEST', 'Page notification', '', ?)").run(id, adminId, pageProjectId, taskIds[0], timestamp);
+  const firstNotifications = await app.inject({ method: "GET", url: "/api/notifications?limit=2", headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(firstNotifications.statusCode, 200, firstNotifications.body);
+  assert.deepEqual(firstNotifications.json().notifications.map((notification: { id: string }) => notification.id), notificationIds.slice(0, 2));
+  assert.ok(firstNotifications.json().unreadCount >= 3, "unread count covers more than the current page");
+
+  const activityIds = Array.from({ length: 3 }, () => randomUUID()).sort();
+  for (const id of activityIds) await db.prepare("INSERT INTO activity (id, project_id, task_id, actor_id, action, metadata, created_at) VALUES (?, ?, ?, ?, 'pagination.test', '{}', ?)").run(id, pageProjectId, taskIds[0], adminId, timestamp);
+  const activity = await collect(`/api/activity?projectId=${pageProjectId}`, "activity");
+  assert.deepEqual(activity.map((event) => event.id), activityIds);
+
+  const privateProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "PRV", name: "Private pagination", description: "", color: "#FF5630" } });
+  const privateProjectId = privateProject.json().project.id as string;
+  const privateTask = await app.inject({ method: "POST", url: `/api/projects/${privateProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Pagination fixture private" } });
+  assert.equal((await app.inject({ method: "GET", url: `/api/projects/${privateProjectId}/tasks?limit=1`, headers: { authorization: `Bearer ${memberToken}` } })).statusCode, 403);
+  assert.equal((await app.inject({ method: "GET", url: `/api/tasks/${privateTask.json().task.id}/updates?limit=1`, headers: { authorization: `Bearer ${memberToken}` } })).statusCode, 403);
+  const accessibleSearch = await collect("/api/search?q=Pagination%20fixture", "results");
+  assert.ok(accessibleSearch.every((task) => task.projectId === pageProjectId));
+
+  for (const id of [privateProjectId, pageProjectId]) await app.inject({ method: "DELETE", url: `/api/projects/${id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+});
+
 test("an issued agent token authenticates and is scoped by membership", async () => {
   const issued = await app.inject({
     method: "POST", url: `/api/users/${agentId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "CI token", expiresInDays: 30 },

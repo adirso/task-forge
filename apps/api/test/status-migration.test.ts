@@ -44,5 +44,10 @@ test("legacy SQLite status checks migrate without losing tasks", async () => {
   await db.prepare("INSERT INTO tasks (id, project_id, number, title, status, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
     .run("task-2", "project-1", 2, "New status task", "READY_FOR_REVIEW", "user-1", "2026-01-02T00:00:00.000Z", "2026-01-02T00:00:00.000Z");
   assert.equal((await db.prepare("SELECT status FROM tasks WHERE id = ?").get("task-2"))?.status, "READY_FOR_REVIEW");
+  const taskIndexes = new Set((await db.prepare("PRAGMA index_list(tasks)").all()).map((index) => String(index.name)));
+  const updateIndexes = new Set((await db.prepare("PRAGMA index_list(task_updates)").all()).map((index) => String(index.name)));
+  assert.ok(taskIndexes.has("idx_tasks_project_page"));
+  assert.ok(taskIndexes.has("idx_tasks_updated_page"));
+  assert.ok(updateIndexes.has("idx_task_updates_task_page"));
   assert.equal(await db.prepare("PRAGMA foreign_key_check").get(), undefined);
 });
