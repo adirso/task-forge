@@ -59,8 +59,9 @@ export class DashboardApplicationService implements DashboardService {
       const projectsByName = [...accessible].sort((left, right) => left.name.localeCompare(right.name));
       const projectIds = projectsByName.map((project) => project.id);
       const cutoff = new Date(new Date(this.now()).getTime() - STUCK_THRESHOLD_MS).toISOString();
-      const [counts, myTasks, stuckTasks] = await Promise.all([
+      const [counts, phaseMetrics, myTasks, stuckTasks] = await Promise.all([
         repositories.reporting.countTasksByProject(projectIds),
+        repositories.reporting.countNonDonePhasesByProject(projectIds),
         repositories.reporting.listMyOpenTasks(context.actor.userId, 30),
         repositories.reporting.listStuckTasks(projectIds, cutoff, 20),
       ]);
@@ -70,11 +71,13 @@ export class DashboardApplicationService implements DashboardService {
         projectCounts.set(count.status, count.count);
         countsByProject.set(count.projectId, projectCounts);
       }
+      const nonDonePhasesByProject = new Map(phaseMetrics.map((metric) => [metric.projectId, metric.nonDonePhaseCount]));
       return {
         projects: projectsByName.map((project) => {
           const projectCounts = countsByProject.get(project.id);
           const statusCounts = Object.fromEntries(TASK_STATUSES.map((status) => [status, projectCounts?.get(status) ?? 0])) as Record<TaskStatus, number>;
-          return { id: project.id, name: project.name, key: project.key, color: project.color, counts: { ...statusCounts, total: TASK_STATUSES.reduce((total, status) => total + statusCounts[status], 0) } };
+          const total = TASK_STATUSES.reduce((sum, status) => sum + statusCounts[status], 0);
+          return { id: project.id, name: project.name, key: project.key, color: project.color, counts: { ...statusCounts, total }, nonDoneTaskCount: total - statusCounts.DONE - statusCounts.CANCELLED, cancelledTaskCount: statusCounts.CANCELLED, nonDonePhaseCount: nonDonePhasesByProject.get(project.id) ?? 0 };
         }),
         myTasks: myTasks.map(toDashboardTask),
         stuckTasks: stuckTasks.map(toDashboardTask),

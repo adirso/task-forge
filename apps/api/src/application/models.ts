@@ -74,6 +74,11 @@ export interface TaskStatusCountEntity {
   count: number;
 }
 
+export interface ProjectPhaseMetricEntity {
+  projectId: string;
+  nonDonePhaseCount: number;
+}
+
 export interface AgentLastActiveEntity {
   agentId: string;
   lastActiveAt: string | null;
@@ -109,6 +114,7 @@ export interface PhaseEntity {
   createdAt: string;
   updatedAt: string;
   taskCount?: number;
+  nonDoneTaskCount?: number;
   completedTaskCount?: number;
   cancelledTaskCount?: number;
 }
