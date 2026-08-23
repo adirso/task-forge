@@ -10,14 +10,15 @@ export type DatabaseDriver = "sqlite" | "mysql";
 export type Row = Record<string, unknown>;
 export type RunResult = { changes: number };
 
-interface Executor {
+export interface Executor {
   get<T extends Row>(sql: string, params: unknown[]): Promise<T | undefined>;
   all<T extends Row>(sql: string, params: unknown[]): Promise<T[]>;
   run(sql: string, params: unknown[]): Promise<RunResult>;
 }
 
-interface Adapter extends Executor {
-  transaction<T>(callback: (executor: Executor) => Promise<T>): Promise<T>;
+export interface Adapter extends Executor {
+  transaction<T>(callback: (executor: Executor) => Promise<T>, options?: { immediate?: boolean }): Promise<T>;
+  withMigrationLock<T>(callback: () => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -46,7 +47,7 @@ function mysqlExecutor(connection: Pool | PoolConnection): Executor {
   return executor;
 }
 
-function createMysqlAdapter(url: string): Adapter {
+export function createMysqlAdapter(url: string): Adapter {
   const pool = mysql.createPool({ uri: url, connectionLimit: 10, charset: "utf8mb4" });
   const executor = mysqlExecutor(pool);
   return {
@@ -65,15 +66,27 @@ function createMysqlAdapter(url: string): Adapter {
         connection.release();
       }
     },
+    async withMigrationLock<T>(callback: () => Promise<T>) {
+      const connection = await pool.getConnection();
+      try {
+        const [rows] = await connection.execute("SELECT GET_LOCK(CONCAT('taskforge:', LEFT(SHA2(DATABASE(), 256), 48)), 30) AS acquired");
+        if (Number((rows as Array<{ acquired: number }>)[0]?.acquired) !== 1) throw new Error("Timed out waiting for the TaskForge database migration lock");
+        return await callback();
+      } finally {
+        await connection.execute("SELECT RELEASE_LOCK(CONCAT('taskforge:', LEFT(SHA2(DATABASE(), 256), 48)))");
+        connection.release();
+      }
+    },
     async close() { await pool.end(); },
   };
 }
 
-function createSqliteAdapter(databasePath: string): Adapter {
+export function createSqliteAdapter(databasePath: string): Adapter {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
   const sqlite = new Sqlite(databasePath);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
+  sqlite.pragma("busy_timeout = 5000");
   const directExecutor: Executor = {
     async get<T extends Row>(sql: string, params: unknown[]) { return sqlite.prepare(sql).get(...params) as T | undefined; },
     async all<T extends Row>(sql: string, params: unknown[]) { return sqlite.prepare(sql).all(...params) as T[]; },
@@ -90,7 +103,7 @@ function createSqliteAdapter(databasePath: string): Adapter {
     async get<T extends Row>(sql: string, params: unknown[]) { await waitForTransactions(); return directExecutor.get<T>(sql, params); },
     async all<T extends Row>(sql: string, params: unknown[]) { await waitForTransactions(); return directExecutor.all<T>(sql, params); },
     async run(sql: string, params: unknown[]) { await waitForTransactions(); return directExecutor.run(sql, params); },
-    async transaction<T>(callback: (transactionExecutor: Executor) => Promise<T>) {
+    async transaction<T>(callback: (transactionExecutor: Executor) => Promise<T>, options?: { immediate?: boolean }) {
       const previous = transactionQueue;
       let release = () => {};
       const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -98,7 +111,7 @@ function createSqliteAdapter(databasePath: string): Adapter {
       queuedTransactions += 1;
       await previous;
       try {
-        sqlite.exec("BEGIN");
+        sqlite.exec(options?.immediate ? "BEGIN IMMEDIATE" : "BEGIN");
         const result = await callback(directExecutor);
         sqlite.exec("COMMIT");
         return result;
@@ -110,6 +123,7 @@ function createSqliteAdapter(databasePath: string): Adapter {
         release();
       }
     },
+    async withMigrationLock<T>(callback: () => Promise<T>) { return callback(); },
     async close() { sqlite.close(); },
   };
 }
@@ -123,7 +137,7 @@ class Database {
   constructor() {
     this.dialect = config.databaseDriver;
     this.adapter = this.dialect === "mysql" ? createMysqlAdapter(config.databaseUrl!) : createSqliteAdapter(config.databasePath);
-    this.ready = migrate(this.adapter, this.dialect);
+    this.ready = runMigrations(this.adapter, this.dialect);
   }
 
   prepare(sql: string) {
@@ -213,101 +227,189 @@ const mysqlSchema = [
   `CREATE TABLE IF NOT EXISTS webhook_deliveries (id CHAR(36) PRIMARY KEY, agent_id CHAR(36) NOT NULL, task_id CHAR(36), event_type VARCHAR(40) NOT NULL CHECK (event_type IN ('task.assigned', 'task.update_added')), payload JSON NOT NULL, status VARCHAR(16) NOT NULL CHECK (status IN ('PENDING', 'RETRYING', 'DELIVERED', 'FAILED')), attempt_count INT NOT NULL DEFAULT 0, next_attempt_at VARCHAR(30) NOT NULL, locked_until VARCHAR(30), last_attempt_at VARCHAR(30), delivered_at VARCHAR(30), failed_at VARCHAR(30), last_error VARCHAR(255), http_status INT, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_webhook_deliveries_due (status, next_attempt_at, locked_until), INDEX idx_webhook_deliveries_agent (agent_id, created_at), FOREIGN KEY (agent_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
-async function migrateSqliteTaskStatusCheck(adapter: Adapter) {
-  const table = await adapter.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'", []);
+async function migrateSqliteTaskStatusCheck(executor: Executor) {
+  const table = await executor.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'", []);
   if (table?.sql.includes("READY_FOR_REVIEW") && table.sql.includes("CANCELLED")) return;
-  await adapter.run("PRAGMA foreign_keys = OFF", []);
-  try {
-    await adapter.run("DROP TABLE IF EXISTS tasks_status_migration", []);
-    await adapter.run(`CREATE TABLE tasks_status_migration (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition_of_done TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'TODO' CHECK (status IN (${taskStatusSql})), priority TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type TEXT NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL, creator_id TEXT NOT NULL REFERENCES users(id), parent_id TEXT REFERENCES tasks_status_migration(id) ON DELETE CASCADE, branch TEXT, due_date TEXT, estimate_points INTEGER, phase_id TEXT REFERENCES phases(id) ON DELETE SET NULL, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, number))`, []);
-    await adapter.run("INSERT INTO tasks_status_migration (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) SELECT id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at FROM tasks", []);
-    await adapter.run("DROP TABLE tasks", []);
-    await adapter.run("ALTER TABLE tasks_status_migration RENAME TO tasks", []);
-    await adapter.run("CREATE INDEX idx_tasks_project_status ON tasks(project_id, status, position)", []);
-    await adapter.run("CREATE INDEX idx_tasks_parent ON tasks(parent_id)", []);
-  } finally {
-    await adapter.run("PRAGMA foreign_keys = ON", []);
-  }
-  const violation = await adapter.get<{ table: string }>("PRAGMA foreign_key_check", []);
-  if (violation) throw new Error(`Task status migration left a foreign key violation in ${violation.table}`);
+  await executor.run("DROP TABLE IF EXISTS tasks_status_migration", []);
+  await executor.run(`CREATE TABLE tasks_status_migration (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition_of_done TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'TODO' CHECK (status IN (${taskStatusSql})), priority TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type TEXT NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL, creator_id TEXT NOT NULL REFERENCES users(id), parent_id TEXT REFERENCES tasks_status_migration(id) ON DELETE CASCADE, branch TEXT, due_date TEXT, estimate_points INTEGER, phase_id TEXT REFERENCES phases(id) ON DELETE SET NULL, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, number))`, []);
+  await executor.run("INSERT INTO tasks_status_migration (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) SELECT id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at FROM tasks", []);
+  await executor.run("DROP TABLE tasks", []);
+  await executor.run("ALTER TABLE tasks_status_migration RENAME TO tasks", []);
+  const violation = await executor.get<{ table: string; rowid: number; parent: string }>("PRAGMA foreign_key_check", []);
+  if (violation) throw new Error(`Task status migration left a foreign key violation: table=${violation.table}, rowid=${violation.rowid}, parent=${violation.parent}`);
 }
 
-async function migrateMysqlTaskStatusCheck(adapter: Adapter) {
-  const checks = await adapter.all<{ constraint_name: string; check_clause: string }>(`SELECT tc.CONSTRAINT_NAME AS constraint_name, cc.CHECK_CLAUSE AS check_clause FROM information_schema.TABLE_CONSTRAINTS tc JOIN information_schema.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'tasks' AND tc.CONSTRAINT_TYPE = 'CHECK'`, []);
+async function migrateMysqlTaskStatusCheck(executor: Executor) {
+  const checks = await executor.all<{ constraint_name: string; check_clause: string }>(`SELECT tc.CONSTRAINT_NAME AS constraint_name, cc.CHECK_CLAUSE AS check_clause FROM information_schema.TABLE_CONSTRAINTS tc JOIN information_schema.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'tasks' AND tc.CONSTRAINT_TYPE = 'CHECK'`, []);
   const statusChecks = checks.filter((check) => /\bstatus\b/i.test(check.check_clause));
   if (statusChecks.some((check) => check.check_clause.includes("READY_FOR_REVIEW") && check.check_clause.includes("CANCELLED"))) return;
   for (const check of statusChecks) {
     if (!/^[A-Za-z0-9_$]+$/.test(check.constraint_name)) throw new Error("Unsafe MySQL task status constraint name");
-    await adapter.run(`ALTER TABLE tasks DROP CHECK \`${check.constraint_name}\``, []);
+    await executor.run(`ALTER TABLE tasks DROP CHECK \`${check.constraint_name}\``, []);
   }
-  await adapter.run(`ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN (${taskStatusSql}))`, []);
+  await executor.run(`ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN (${taskStatusSql}))`, []);
 }
 
-async function migrateProjectStatusDefaults(adapter: Adapter) {
-  await adapter.run("CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(120) PRIMARY KEY, applied_at VARCHAR(30) NOT NULL)", []);
-  if (await adapter.get("SELECT 1 FROM schema_migrations WHERE version = ?", ["20260822_task_statuses"])) return;
-  await adapter.transaction(async (executor) => {
-    await executor.run("UPDATE projects SET available_statuses = ? WHERE available_statuses = ?", [defaultAvailableStatuses, legacyAvailableStatuses]);
-    await executor.run("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)", ["20260822_task_statuses", new Date().toISOString()]);
+async function tableExists(executor: Executor, dialect: DatabaseDriver, table: string) {
+  if (dialect === "sqlite") return Boolean(await executor.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", [table]));
+  return Number((await executor.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", [table]))?.count) > 0;
+}
+
+async function hasColumn(executor: Executor, dialect: DatabaseDriver, table: string, column: string) {
+  if (dialect === "sqlite") return (await executor.all<{ name: string }>(`PRAGMA table_info(${table})`, [])).some((item) => item.name === column);
+  return Number((await executor.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?", [table, column]))?.count) > 0;
+}
+
+async function hasIndex(executor: Executor, dialect: DatabaseDriver, table: string, index: string) {
+  if (dialect === "sqlite") return (await executor.all<{ name: string }>(`PRAGMA index_list(${table})`, [])).some((item) => item.name === index);
+  return Number((await executor.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?", [table, index]))?.count) > 0;
+}
+
+async function addLegacyColumns(executor: Executor, dialect: DatabaseDriver) {
+  const columns: Array<[string, string, string, string]> = [
+    ["projects", "sort_order", "INTEGER NOT NULL DEFAULT 0", "INT NOT NULL DEFAULT 0"],
+    ["projects", "available_statuses", `TEXT NOT NULL DEFAULT '${defaultAvailableStatuses}'`, `VARCHAR(255) NOT NULL DEFAULT '${defaultAvailableStatuses}'`],
+    ["projects", "default_status", "TEXT NOT NULL DEFAULT 'TODO'", "VARCHAR(20) NOT NULL DEFAULT 'TODO'"],
+    ["tasks", "pull_request_url", "TEXT", "TEXT"],
+    ["tasks", "pull_request_title", "TEXT", "VARCHAR(240)"],
+    ["tasks", "pull_request_state", "TEXT", "VARCHAR(16)"],
+    ["tasks", "phase_id", "TEXT", "CHAR(36)"],
+    ["tasks", "type", "TEXT NOT NULL DEFAULT 'FEATURE'", "VARCHAR(16) NOT NULL DEFAULT 'FEATURE'"],
+    ["api_tokens", "token_ciphertext", "TEXT", "TEXT"],
+    ["api_tokens", "permissions", "TEXT", "TEXT"],
+    ["users", "webhook_url", "TEXT", "TEXT"],
+    ["users", "webhook_secret_ciphertext", "TEXT", "TEXT"],
+    ["users", "webhook_secret_version", "INTEGER NOT NULL DEFAULT 0", "INT NOT NULL DEFAULT 0"],
+  ];
+  for (const [table, column, sqliteType, mysqlType] of columns) {
+    if (!(await hasColumn(executor, dialect, table, column))) {
+      await executor.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${dialect === "sqlite" ? sqliteType : mysqlType}`, []);
+    }
+  }
+}
+
+async function preflightTaskStatuses(executor: Executor, dialect: DatabaseDriver) {
+  if (!(await tableExists(executor, dialect, "tasks"))) return;
+  const placeholders = TASK_STATUSES.map(() => "?").join(", ");
+  const invalid = await executor.all<{ id: string; project_id: string; status: string }>(`SELECT id, project_id, status FROM tasks WHERE status NOT IN (${placeholders}) ORDER BY project_id, id`, [...TASK_STATUSES]);
+  if (invalid.length === 0) return;
+  const rows = invalid.map((row) => `task_id=${row.id}, project_id=${row.project_id}, status=${row.status}`).join("; ");
+  throw new Error(`Migration 0003_expand_task_statuses cannot change the task status constraint because unsupported status rows exist: ${rows}`);
+}
+
+const mysqlIndexes: Array<[string, string, string]> = [
+  ["api_tokens", "idx_api_tokens_hash", "token_hash"],
+  ["projects", "idx_projects_sort_order", "sort_order"],
+  ["tasks", "idx_tasks_project_status", "project_id, status, position"],
+  ["tasks", "idx_tasks_project_page", "project_id, status, position, created_at, id"],
+  ["tasks", "idx_tasks_updated_page", "updated_at, id"],
+  ["tasks", "idx_tasks_parent", "parent_id"],
+  ["task_tags", "idx_task_tags_tag_task", "tag_id, task_id"],
+  ["task_dependencies", "idx_task_dependencies_dependency", "depends_on_task_id, task_id"],
+  ["activity", "idx_activity_project_page", "project_id, created_at, id"],
+  ["activity", "idx_activity_task_page", "task_id, created_at, id"],
+  ["activity", "idx_activity_actor_page", "actor_id, created_at, id"],
+  ["notifications", "idx_notifications_user_unread", "user_id, read_at, created_at"],
+  ["notifications", "idx_notifications_user_page", "user_id, created_at, id"],
+  ["task_updates", "idx_task_updates_task_created", "task_id, created_at"],
+  ["task_updates", "idx_task_updates_task_page", "task_id, created_at, id"],
+  ["task_attachments", "idx_task_attachments_task_created", "task_id, created_at"],
+  ["automations", "idx_automations_project", "project_id, enabled"],
+  ["webhook_deliveries", "idx_webhook_deliveries_due", "status, next_attempt_at, locked_until"],
+  ["webhook_deliveries", "idx_webhook_deliveries_agent", "agent_id, created_at"],
+];
+
+export type Migration = {
+  version: string;
+  up(executor: Executor, dialect: DatabaseDriver): Promise<void>;
+  before?(adapter: Adapter, dialect: DatabaseDriver): Promise<void>;
+  after?(adapter: Adapter, dialect: DatabaseDriver): Promise<void>;
+};
+
+export const LEGACY_MIGRATION_VERSIONS = ["20260822_task_statuses"] as const;
+
+export const migrations: readonly Migration[] = [
+  {
+    version: "0001_core_schema",
+    async up(executor, dialect) {
+      const schema = dialect === "mysql" ? mysqlSchema : sqliteSchema;
+      await runStatements(executor, schema.filter((statement) => /^CREATE TABLE/i.test(statement)));
+    },
+  },
+  {
+    version: "0002_legacy_columns",
+    up: addLegacyColumns,
+  },
+  {
+    version: "0003_expand_task_statuses",
+    before: async (adapter, dialect) => {
+      await preflightTaskStatuses(adapter, dialect);
+      if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = OFF", []);
+    },
+    async up(executor, dialect) {
+      if (dialect === "sqlite") await migrateSqliteTaskStatusCheck(executor);
+      else await migrateMysqlTaskStatusCheck(executor);
+    },
+    after: async (adapter, dialect) => {
+      if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = ON", []);
+    },
+  },
+  {
+    version: "0004_project_status_defaults",
+    async up(executor) {
+      await executor.run("UPDATE projects SET available_statuses = ? WHERE available_statuses = ?", [defaultAvailableStatuses, legacyAvailableStatuses]);
+    },
+  },
+  {
+    version: "0005_query_indexes",
+    async up(executor, dialect) {
+      if (dialect === "sqlite") {
+        await runStatements(executor, sqliteSchema.filter((statement) => /^CREATE (?:UNIQUE )?INDEX/i.test(statement)));
+        return;
+      }
+      for (const [table, index, columns] of mysqlIndexes) {
+        if (!(await hasIndex(executor, dialect, table, index))) await executor.run(`CREATE INDEX ${index} ON ${table} (${columns})`, []);
+      }
+    },
+  },
+];
+
+async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {
+  const rows = await adapter.all<{ version: string }>("SELECT version FROM schema_migrations ORDER BY version", []);
+  const known = new Set([...registry.map((migration) => migration.version), ...LEGACY_MIGRATION_VERSIONS]);
+  const unknown = rows.map((row) => row.version).filter((version) => !known.has(version));
+  if (unknown.length > 0) throw new Error(`Database has unknown migration version(s): ${unknown.join(", ")}. Start TaskForge with a matching or newer release; do not edit the migration ledger manually.`);
+
+  const applied = new Set(rows.map((row) => row.version));
+  let missing: string | undefined;
+  for (const migration of registry) {
+    if (!applied.has(migration.version)) missing ??= migration.version;
+    else if (missing) throw new Error(`Database migration history is inconsistent: ${migration.version} is applied after missing ${missing}. Restore the ledger from backup or deploy the release that created it.`);
+  }
+  return applied;
+}
+
+export async function runMigrations(adapter: Adapter, dialect: DatabaseDriver, registry: readonly Migration[] = migrations) {
+  await adapter.withMigrationLock(async () => {
+    await adapter.run("CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(120) PRIMARY KEY, applied_at VARCHAR(30) NOT NULL)", []);
+    const applied = await validateMigrationLedger(adapter, registry);
+    for (const migration of registry) {
+      if (applied.has(migration.version)) continue;
+      try {
+        await migration.before?.(adapter, dialect);
+        const apply = async (executor: Executor) => {
+          if (await executor.get("SELECT 1 FROM schema_migrations WHERE version = ?", [migration.version])) return;
+          await migration.up(executor, dialect);
+          await executor.run("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", [migration.version, new Date().toISOString()]);
+        };
+        if (dialect === "sqlite") await adapter.transaction(apply, { immediate: true });
+        else await apply(adapter);
+        applied.add(migration.version);
+      } finally {
+        await migration.after?.(adapter, dialect);
+      }
+    }
   });
-}
-
-async function migrate(adapter: Adapter, dialect: DatabaseDriver) {
-  await runStatements(adapter, dialect === "mysql" ? mysqlSchema : sqliteSchema);
-  if (dialect === "mysql") {
-    const hasColumn = async (table: string, column: string) => Number((await adapter.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?", [table, column]))?.count) > 0;
-    const hasIndex = async (table: string, index: string) => Number((await adapter.get<{ count: number }>("SELECT COUNT(*) AS count FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?", [table, index]))?.count) > 0;
-    if (!(await hasColumn("projects", "sort_order"))) await adapter.run("ALTER TABLE projects ADD COLUMN sort_order INT NOT NULL DEFAULT 0, ADD INDEX idx_projects_sort_order (sort_order)", []);
-    if (!(await hasColumn("projects", "available_statuses"))) await adapter.run(`ALTER TABLE projects ADD COLUMN available_statuses VARCHAR(255) NOT NULL DEFAULT '${defaultAvailableStatuses}'`, []);
-    if (!(await hasColumn("projects", "default_status"))) await adapter.run("ALTER TABLE projects ADD COLUMN default_status VARCHAR(20) NOT NULL DEFAULT 'TODO'", []);
-    if (!(await hasColumn("tasks", "type"))) await adapter.run("ALTER TABLE tasks ADD COLUMN type VARCHAR(16) NOT NULL DEFAULT 'FEATURE'", []);
-    if (!(await hasColumn("api_tokens", "token_ciphertext"))) await adapter.run("ALTER TABLE api_tokens ADD COLUMN token_ciphertext TEXT", []);
-    if (!(await hasColumn("users", "webhook_url"))) await adapter.run("ALTER TABLE users ADD COLUMN webhook_url TEXT", []);
-    if (!(await hasColumn("users", "webhook_secret_ciphertext"))) await adapter.run("ALTER TABLE users ADD COLUMN webhook_secret_ciphertext TEXT", []);
-    if (!(await hasColumn("users", "webhook_secret_version"))) await adapter.run("ALTER TABLE users ADD COLUMN webhook_secret_version INT NOT NULL DEFAULT 0", []);
-    if (!(await hasColumn("api_tokens", "permissions"))) await adapter.run("ALTER TABLE api_tokens ADD COLUMN permissions TEXT", []);
-    await migrateMysqlTaskStatusCheck(adapter);
-    const indexes: Array<[string, string, string]> = [
-      ["tasks", "idx_tasks_project_page", "project_id, status, position, created_at, id"],
-      ["tasks", "idx_tasks_updated_page", "updated_at, id"],
-      ["task_updates", "idx_task_updates_task_page", "task_id, created_at, id"],
-      ["notifications", "idx_notifications_user_page", "user_id, created_at, id"],
-      ["activity", "idx_activity_project_page", "project_id, created_at, id"],
-      ["activity", "idx_activity_task_page", "task_id, created_at, id"],
-      ["activity", "idx_activity_actor_page", "actor_id, created_at, id"],
-    ];
-    for (const [table, index, columns] of indexes) if (!(await hasIndex(table, index))) await adapter.run(`ALTER TABLE ${table} ADD INDEX ${index} (${columns})`, []);
-  }
-  if (dialect === "sqlite") {
-    const projectColumns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(projects)", [])).map((column) => column.name));
-    if (!projectColumns.has("sort_order")) await adapter.run("ALTER TABLE projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0", []);
-    if (!projectColumns.has("available_statuses")) await adapter.run(`ALTER TABLE projects ADD COLUMN available_statuses TEXT NOT NULL DEFAULT '${defaultAvailableStatuses}'`, []);
-    if (!projectColumns.has("default_status")) await adapter.run("ALTER TABLE projects ADD COLUMN default_status TEXT NOT NULL DEFAULT 'TODO'", []);
-    const columns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(tasks)", [])).map((column) => column.name));
-    if (!columns.has("pull_request_url")) await adapter.run("ALTER TABLE tasks ADD COLUMN pull_request_url TEXT", []);
-    if (!columns.has("pull_request_title")) await adapter.run("ALTER TABLE tasks ADD COLUMN pull_request_title TEXT", []);
-    if (!columns.has("pull_request_state")) await adapter.run("ALTER TABLE tasks ADD COLUMN pull_request_state TEXT", []);
-    if (!columns.has("phase_id")) await adapter.run("ALTER TABLE tasks ADD COLUMN phase_id TEXT", []);
-    if (!columns.has("type")) await adapter.run("ALTER TABLE tasks ADD COLUMN type TEXT NOT NULL DEFAULT 'FEATURE'", []);
-    const tokenColumns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(api_tokens)", [])).map((column) => column.name));
-    if (!tokenColumns.has("token_ciphertext")) await adapter.run("ALTER TABLE api_tokens ADD COLUMN token_ciphertext TEXT", []);
-    const userColumns = new Set((await adapter.all<{ name: string }>("PRAGMA table_info(users)", [])).map((column) => column.name));
-    if (!userColumns.has("webhook_url")) await adapter.run("ALTER TABLE users ADD COLUMN webhook_url TEXT", []);
-    if (!userColumns.has("webhook_secret_ciphertext")) await adapter.run("ALTER TABLE users ADD COLUMN webhook_secret_ciphertext TEXT", []);
-    if (!userColumns.has("webhook_secret_version")) await adapter.run("ALTER TABLE users ADD COLUMN webhook_secret_version INTEGER NOT NULL DEFAULT 0", []);
-    if (!tokenColumns.has("permissions")) await adapter.run("ALTER TABLE api_tokens ADD COLUMN permissions TEXT", []);
-    await migrateSqliteTaskStatusCheck(adapter);
-    await runStatements(adapter, [
-      "CREATE INDEX IF NOT EXISTS idx_tasks_project_page ON tasks(project_id, status, position, created_at, id)",
-      "CREATE INDEX IF NOT EXISTS idx_tasks_updated_page ON tasks(updated_at, id)",
-      "CREATE INDEX IF NOT EXISTS idx_task_updates_task_page ON task_updates(task_id, created_at, id)",
-      "CREATE INDEX IF NOT EXISTS idx_notifications_user_page ON notifications(user_id, created_at, id)",
-      "CREATE INDEX IF NOT EXISTS idx_activity_project_page ON activity(project_id, created_at, id)",
-      "CREATE INDEX IF NOT EXISTS idx_activity_task_page ON activity(task_id, created_at, id)",
-      "CREATE INDEX IF NOT EXISTS idx_activity_actor_page ON activity(actor_id, created_at, id)",
-    ]);
-  }
-  await migrateProjectStatusDefaults(adapter);
 }
 
 export const db = new Database();
