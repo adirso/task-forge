@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
-import type { ActivityEntity, AgentLastActiveEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "../application/models.js";
-import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository } from "../application/repositories.js";
+import type { ActivityEntity, AgentLastActiveEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
+import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 
 export interface DatabasePort {
@@ -21,7 +21,18 @@ const date = (value: unknown) => String(value);
 const queryLimit = (value: number) => Math.max(0, Math.trunc(Number.isFinite(value) ? value : 0));
 
 function toUser(row: Row): UserEntity {
-  return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), webhookUrl: nullableText(row.webhook_url), createdAt: date(row.created_at) };
+  return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), webhookUrl: nullableText(row.webhook_url), webhookSecretConfigured: Boolean(row.webhook_secret_ciphertext), createdAt: date(row.created_at) };
+}
+
+function toWebhookDelivery(row: Row): WebhookDeliveryEntity {
+  return {
+    id: text(row.id), agentId: text(row.agent_id), taskId: nullableText(row.task_id), eventType: row.event_type as WebhookDeliveryEntity["eventType"],
+    payload: typeof row.payload === "string" ? row.payload : JSON.stringify(row.payload), status: row.status as WebhookDeliveryEntity["status"], attemptCount: Number(row.attempt_count), nextAttemptAt: date(row.next_attempt_at),
+    lockedUntil: nullableText(row.locked_until), lastAttemptAt: nullableText(row.last_attempt_at), deliveredAt: nullableText(row.delivered_at), failedAt: nullableText(row.failed_at),
+    lastError: nullableText(row.last_error), httpStatus: row.http_status == null ? null : Number(row.http_status), createdAt: date(row.created_at), updatedAt: date(row.updated_at),
+    ...(row.agent_name !== undefined ? { agentName: text(row.agent_name) } : {}), ...(row.task_number !== undefined ? { taskNumber: row.task_number == null ? null : Number(row.task_number) } : {}),
+    ...(row.project_key !== undefined ? { projectKey: nullableText(row.project_key) } : {}),
+  };
 }
 
 function configuredStatuses(value: unknown): TaskStatus[] {
@@ -122,7 +133,8 @@ function createUserRepository(db: DatabasePort): UserRepository {
     async list() { return (await db.prepare("SELECT * FROM users ORDER BY kind, name").all()).map(toUser); },
     async saveProfile(id, input) { await db.prepare("UPDATE users SET name = ?, email = ? WHERE id = ?").run(input.name, input.email.toLowerCase(), id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after update"); return toUser(row); },
     async updateAvatar(id, avatarUrl) { await db.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(avatarUrl, id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after avatar update"); return toUser(row); },
-    async updateWebhookUrl(id, webhookUrl) { await db.prepare("UPDATE users SET webhook_url = ? WHERE id = ?").run(webhookUrl, id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after webhook update"); return toUser(row); },
+    async getWebhookConfiguration(id) { const row = await db.prepare("SELECT webhook_url, webhook_secret_ciphertext, webhook_secret_version FROM users WHERE id = ?").get(id); return row ? { webhookUrl: nullableText(row.webhook_url), secretCiphertext: nullableText(row.webhook_secret_ciphertext), secretVersion: Number(row.webhook_secret_version ?? 0) } : null; },
+    async updateWebhookConfiguration(id, input) { const fields: string[] = []; const values: unknown[] = []; if ("webhookUrl" in input) { fields.push("webhook_url = ?"); values.push(input.webhookUrl ?? null); } if (input.secretCiphertext !== undefined) { fields.push("webhook_secret_ciphertext = ?"); values.push(input.secretCiphertext); } if (input.secretVersion !== undefined) { fields.push("webhook_secret_version = ?"); values.push(input.secretVersion); } if (fields.length) await db.prepare(`UPDATE users SET ${fields.join(", ")} WHERE id = ?`).run(...values, id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after webhook configuration update"); return toUser(row); },
     async createAgent(input) { await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)").run(input.id, input.email.toLowerCase(), input.name, input.createdAt); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(input.id); if (!row) throw new Error("Agent not found after create"); return toUser(row); },
     async hasAgentHistory(id) { const row = await db.prepare("SELECT (SELECT COUNT(*) FROM projects WHERE owner_id = ?) + (SELECT COUNT(*) FROM tasks WHERE creator_id = ?) + (SELECT COUNT(*) FROM task_updates WHERE author_id = ?) + (SELECT COUNT(*) FROM activity WHERE actor_id = ?) AS total").get(id, id, id, id) as { total: number }; return Number(row.total) > 0; },
     async deleteAgent(id) { await db.prepare("DELETE FROM users WHERE id = ?").run(id); },
@@ -260,6 +272,29 @@ function createActivityRepository(db: DatabasePort): ActivityRepository {
   };
 }
 
+function createWebhookDeliveryRepository(db: DatabasePort): WebhookDeliveryRepository {
+  const adminSelect = "SELECT d.*, u.name AS agent_name, t.number AS task_number, p.`key` AS project_key FROM webhook_deliveries d JOIN users u ON u.id = d.agent_id LEFT JOIN tasks t ON t.id = d.task_id LEFT JOIN projects p ON p.id = t.project_id";
+  return {
+    async create(input) {
+      await db.prepare("INSERT INTO webhook_deliveries (id, agent_id, task_id, event_type, payload, status, attempt_count, next_attempt_at, locked_until, last_attempt_at, delivered_at, failed_at, last_error, http_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.agentId, input.taskId, input.eventType, input.payload, input.status, input.attemptCount, input.nextAttemptAt, input.lockedUntil, input.lastAttemptAt, input.deliveredAt, input.failedAt, input.lastError, input.httpStatus, input.createdAt, input.updatedAt);
+      return input;
+    },
+    async findById(id) { const row = await db.prepare(`${adminSelect} WHERE d.id = ?`).get(id); return row ? toWebhookDelivery(row) : null; },
+    async list(filters) {
+      const where: string[] = []; const params: unknown[] = [];
+      if (filters.agentId) { where.push("d.agent_id = ?"); params.push(filters.agentId); }
+      if (filters.status) { where.push("d.status = ?"); params.push(filters.status); }
+      return (await db.prepare(`${adminSelect}${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY d.created_at DESC LIMIT ${queryLimit(filters.limit)}`).all(...params)).map(toWebhookDelivery);
+    },
+    async listDue(now, limit) { return (await db.prepare(`SELECT id FROM webhook_deliveries WHERE status IN ('PENDING', 'RETRYING') AND next_attempt_at <= ? AND (locked_until IS NULL OR locked_until <= ?) ORDER BY next_attempt_at, created_at LIMIT ${queryLimit(limit)}`).all(now, now)).map((row) => text(row.id)); },
+    async claim(id, now, lockedUntil) { return Boolean((await db.prepare("UPDATE webhook_deliveries SET attempt_count = attempt_count + 1, last_attempt_at = ?, locked_until = ?, updated_at = ? WHERE id = ? AND status IN ('PENDING', 'RETRYING') AND next_attempt_at <= ? AND (locked_until IS NULL OR locked_until <= ?)").run(now, lockedUntil, now, id, now, now)).changes); },
+    async markDelivered(id, deliveredAt, httpStatus) { await db.prepare("UPDATE webhook_deliveries SET status = 'DELIVERED', delivered_at = ?, failed_at = NULL, last_error = NULL, http_status = ?, locked_until = NULL, updated_at = ? WHERE id = ?").run(deliveredAt, httpStatus, deliveredAt, id); },
+    async markRetry(id, nextAttemptAt, lastError, httpStatus, updatedAt) { await db.prepare("UPDATE webhook_deliveries SET status = 'RETRYING', next_attempt_at = ?, last_error = ?, http_status = ?, locked_until = NULL, updated_at = ? WHERE id = ?").run(nextAttemptAt, lastError, httpStatus, updatedAt, id); },
+    async markFailed(id, failedAt, lastError, httpStatus) { await db.prepare("UPDATE webhook_deliveries SET status = 'FAILED', failed_at = ?, last_error = ?, http_status = ?, locked_until = NULL, updated_at = ? WHERE id = ?").run(failedAt, lastError, httpStatus, failedAt, id); },
+    async retry(id, nextAttemptAt) { return Boolean((await db.prepare("UPDATE webhook_deliveries SET status = 'RETRYING', attempt_count = 0, next_attempt_at = ?, locked_until = NULL, failed_at = NULL, last_error = NULL, http_status = NULL, updated_at = ? WHERE id = ? AND status = 'FAILED'").run(nextAttemptAt, nextAttemptAt, id)).changes); },
+  };
+}
+
 function createReportingRepository(db: DatabasePort): ReportingRepository {
   return {
     async countTasksByProject(projectIds) {
@@ -298,5 +333,5 @@ function createSearchRepository(db: DatabasePort): SearchRepository {
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
 }

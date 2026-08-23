@@ -20,7 +20,7 @@ test("API route handlers stay free of persistence and row-mapping code", () => {
 
 test("application layer owns the migrated route use cases", () => {
   const files = readdirSync(applicationRoot).filter((name) => name.endsWith(".ts")).map((name) => readFileSync(path.join(applicationRoot, name), "utf8")).join("\n");
-  for (const service of ["TaskApplicationService", "ProjectApplicationService", "PhaseApplicationService", "UserApplicationService", "NotificationApplicationService", "SearchApplicationService", "ContextApplicationService", "ActivityApplicationService", "DashboardApplicationService"]) {
+  for (const service of ["TaskApplicationService", "ProjectApplicationService", "PhaseApplicationService", "UserApplicationService", "NotificationApplicationService", "SearchApplicationService", "ContextApplicationService", "ActivityApplicationService", "DashboardApplicationService", "WebhookDeliveryApplicationService"]) {
     assert.match(files, new RegExp(`class ${service}`), `${service} is not defined in the application layer`);
   }
   assert.doesNotMatch(files, /from ["'][^"']*routes\//, "application code must not depend on HTTP routes");

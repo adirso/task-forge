@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentLastActiveEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -7,7 +7,8 @@ export interface UserRepository {
   list(): Promise<UserEntity[]>;
   saveProfile(id: string, input: { name: string; email: string }): Promise<UserEntity>;
   updateAvatar(id: string, avatarUrl: string | null): Promise<UserEntity>;
-  updateWebhookUrl(id: string, webhookUrl: string | null): Promise<UserEntity>;
+  getWebhookConfiguration(id: string): Promise<AgentWebhookConfiguration | null>;
+  updateWebhookConfiguration(id: string, input: { webhookUrl?: string | null; secretCiphertext?: string; secretVersion?: number }): Promise<UserEntity>;
   createAgent(input: { id: string; name: string; email: string; createdAt: string }): Promise<UserEntity>;
   deleteAgent(id: string): Promise<void>;
   hasAgentHistory(id: string): Promise<boolean>;
@@ -103,6 +104,18 @@ export interface ActivityRepository {
   list(filters: { projectId?: string; taskId?: string; actorId?: string; limit?: number }): Promise<ActivityEntity[]>;
 }
 
+export interface WebhookDeliveryRepository {
+  create(input: WebhookDeliveryEntity): Promise<WebhookDeliveryEntity>;
+  findById(id: string): Promise<WebhookDeliveryEntity | null>;
+  list(filters: { agentId?: string; status?: WebhookDeliveryEntity["status"]; limit: number }): Promise<WebhookDeliveryEntity[]>;
+  listDue(now: string, limit: number): Promise<string[]>;
+  claim(id: string, now: string, lockedUntil: string): Promise<boolean>;
+  markDelivered(id: string, deliveredAt: string, httpStatus: number): Promise<void>;
+  markRetry(id: string, nextAttemptAt: string, lastError: string, httpStatus: number | null, updatedAt: string): Promise<void>;
+  markFailed(id: string, failedAt: string, lastError: string, httpStatus: number | null): Promise<void>;
+  retry(id: string, nextAttemptAt: string): Promise<boolean>;
+}
+
 export interface ReportingRepository {
   countTasksByProject(projectIds: string[]): Promise<TaskStatusCountEntity[]>;
   listMyOpenTasks(assigneeId: string, limit: number): Promise<ReportingTaskEntity[]>;
@@ -124,6 +137,7 @@ export interface RepositorySet {
   automations: AutomationRepository;
   notifications: NotificationRepository;
   activity: ActivityRepository;
+  webhookDeliveries: WebhookDeliveryRepository;
   reporting: ReportingRepository;
   tokens: ApiTokenRepository;
   search: SearchRepository;

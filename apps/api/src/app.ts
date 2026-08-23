@@ -5,7 +5,10 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { ApplicationError } from "./application/errors.js";
 import { config } from "./config.js";
-import "./db/database.js";
+import { db } from "./db/database.js";
+import { createUnitOfWork } from "./infrastructure/database.js";
+import { decryptSecret } from "./lib/token-crypto.js";
+import { WebhookDispatcher } from "./lib/webhook.js";
 import { installAuth } from "./lib/auth.js";
 import { authRoutes } from "./routes/auth.js";
 import { projectRoutes } from "./routes/projects.js";
@@ -20,8 +23,14 @@ import { automationRoutes } from "./routes/automations.js";
 import { activityRoutes } from "./routes/activity.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 
-export async function buildApp() {
+export async function buildApp(options: { startWebhookDispatcher?: boolean } = {}) {
   const app = Fastify({ logger: !process.env.TEST });
+  const webhookDispatcher = new WebhookDispatcher(createUnitOfWork(db), (ciphertext) => decryptSecret(ciphertext, config.tokenEncryptionKey), {
+    logger: {
+      info: (details, message) => app.log.info(details, message),
+      warn: (details, message) => app.log.warn(details, message),
+    },
+  });
   await app.register(cors, { origin: config.corsOrigins });
   await app.register(swagger, {
     openapi: {
@@ -31,6 +40,10 @@ export async function buildApp() {
   });
   await app.register(swaggerUi, { routePrefix: "/docs" });
   installAuth(app);
+  if (options.startWebhookDispatcher ?? !process.env.TEST) {
+    app.addHook("onReady", async () => webhookDispatcher.start());
+    app.addHook("onClose", async () => webhookDispatcher.stop());
+  }
 
   app.setErrorHandler((error, _request, reply) => {
     const applicationStatuses = { UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, VALIDATION: 400, INTERNAL: 500 } as const;
