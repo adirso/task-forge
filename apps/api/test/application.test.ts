@@ -38,13 +38,13 @@ test("activity service owns project and task access decisions", async () => {
   const repositories = {
     tasks: { findById: async () => task() },
     memberships: { isMember: async () => isMember },
-    activity: { list: async () => [{ id: "activity-1" }] },
+    activity: { list: async (filters: { page: { limit: number } }) => { assert.equal(filters.page.limit, 20); return { items: [{ id: "activity-1" }], page: { limit: 20, hasMore: false, nextCursor: null } }; } },
   } as unknown as RepositorySet;
   const service = new ActivityApplicationService(unitOfWork(repositories));
-  assert.equal((await service.list(memberContext, { taskId: "task-1", limit: 20 }))[0]?.id, "activity-1");
+  assert.equal((await service.list(memberContext, { taskId: "task-1", page: { limit: 20 } })).items[0]?.id, "activity-1");
   isMember = false;
-  await assert.rejects(() => service.list(memberContext, { projectId: "project-1" }), ForbiddenError);
-  await assert.rejects(() => service.list(memberContext, {}), /Provide a projectId or taskId/);
+  await assert.rejects(() => service.list(memberContext, { projectId: "project-1", page: { limit: 20 } }), ForbiddenError);
+  await assert.rejects(() => service.list(memberContext, { page: { limit: 20 } }), /Provide a projectId or taskId/);
 });
 
 test("user service assembles agent operations and enforces admin access", async () => {
