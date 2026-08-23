@@ -17,6 +17,8 @@ export const projectAvailableStatusesSchema = z.array(taskStatusSchema)
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const taskTypeSchema = z.enum(["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
+export const webhookEventTypeSchema = z.enum(["task.assigned", "task.update_added"]);
+export const webhookDeliveryStatusSchema = z.enum(["PENDING", "RETRYING", "DELIVERED", "FAILED"]);
 export const taskTagNameSchema = z.string().trim().min(1).max(32)
   .regex(/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/, "Tags may contain letters, numbers, hyphens, and underscores")
   .transform((value) => value.toLowerCase());
@@ -88,7 +90,19 @@ export const agentCreateSchema = z.object({
 });
 
 export const agentWebhookSchema = z.object({
-  webhookUrl: z.string().url().nullable(),
+  webhookUrl: z.string().url().nullable().superRefine((value, context) => {
+    if (!value) return;
+    let url: URL;
+    try { url = new URL(value); } catch { return; }
+    if (!(["http:", "https:"] as string[]).includes(url.protocol)) context.addIssue({ code: "custom", message: "Webhook URLs must use HTTP or HTTPS" });
+    if (url.username || url.password) context.addIssue({ code: "custom", message: "Webhook URLs must not contain credentials" });
+  }),
+});
+
+export const webhookDeliveryQuerySchema = z.object({
+  agentId: z.string().uuid().optional(),
+  status: webhookDeliveryStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
 export const taskClaimSchema = z.object({
@@ -149,6 +163,8 @@ export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 export type TaskType = z.infer<typeof taskTypeSchema>;
 export type PullRequestState = z.infer<typeof pullRequestStateSchema>;
+export type WebhookEventType = z.infer<typeof webhookEventTypeSchema>;
+export type WebhookDeliveryStatus = z.infer<typeof webhookDeliveryStatusSchema>;
 export type ProjectCreate = z.infer<typeof projectCreateSchema>;
 export type TaskCreate = z.infer<typeof taskCreateSchema>;
 export type TaskUpdate = z.infer<typeof taskUpdateSchema>;
@@ -163,7 +179,28 @@ export interface User {
   role: UserRole;
   avatarUrl: string | null;
   webhookUrl?: string | null;
+  webhookSecretConfigured?: boolean;
   createdAt: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  agentId: string;
+  agentName: string;
+  taskId: string | null;
+  taskNumber: number | null;
+  projectKey: string | null;
+  eventType: WebhookEventType;
+  status: WebhookDeliveryStatus;
+  attemptCount: number;
+  nextAttemptAt: string;
+  lastAttemptAt: string | null;
+  deliveredAt: string | null;
+  failedAt: string | null;
+  lastError: string | null;
+  httpStatus: number | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProjectMember extends User {

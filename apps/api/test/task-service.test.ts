@@ -13,6 +13,8 @@ function repositories(overrides: Partial<RepositorySet> = {}): RepositorySet {
     dependencies: { replaceForTask: async () => undefined } as never,
     activity: { record: async () => undefined } as never,
     notifications: { notify: async () => undefined } as never,
+    webhookDeliveries: { create: async (delivery: unknown) => delivery } as never,
+    reporting: {} as never,
     users: {} as never, updates: {} as never, tokens: {} as never, search: {} as never,
     ...overrides,
   };
@@ -78,14 +80,8 @@ test("task claiming reports actionable workflow configuration errors", async () 
   await assert.rejects(() => service.claimTask(context), /requires at least one claim source status \(BACKLOG, TODO, READY_FOR_DEV\).*project settings/);
 });
 
-test("adding an update dispatches a webhook to the assigned agent", async (t) => {
-  const dispatched: Array<{ url: string; payload: Record<string, unknown> }> = [];
-  const originalFetch = globalThis.fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
-  globalThis.fetch = async (input, init) => {
-    dispatched.push({ url: String(input), payload: JSON.parse(String(init?.body)) as Record<string, unknown> });
-    return new Response(null, { status: 204 });
-  };
+test("adding an update durably enqueues an event and prevents an assignee loop", async () => {
+  const deliveries: Array<Record<string, unknown>> = [];
   const task = {
     id: "task-39", projectId: "project-1", number: 39, title: "Update webhook", description: "", definitionOfDone: "Adding an update triggers webhook",
     status: "IN_PROGRESS", priority: "MEDIUM", type: "FEATURE", assigneeId: "agent-1", creatorId: "owner-1", parentId: null, branch: "agent/tas-39",
@@ -95,14 +91,19 @@ test("adding an update dispatches a webhook to the assigned agent", async (t) =>
     tasks: { findById: async () => task } as never,
     updates: { create: async (update: unknown) => update } as never,
     users: { findById: async (id: string) => id === "agent-1" ? { id, name: "Builder", kind: "AGENT", webhookUrl: "https://agent.example.test/webhook" } : { id, name: "Owner", kind: "HUMAN" } } as never,
+    webhookDeliveries: { create: async (delivery: Record<string, unknown>) => { deliveries.push(delivery); return delivery; } } as never,
   });
-  const service = new TaskApplicationService({ run: async (work) => work(set) }, () => "2026-08-20T13:30:00.000Z", () => "update-1");
+  const ids = ["update-1", "event-1", "update-2"];
+  const service = new TaskApplicationService({ run: async (work) => work(set) }, () => "2026-08-20T13:30:00.000Z", () => ids.shift()!);
 
   await service.addUpdate({ actor: { userId: "owner-1", name: "Owner", kind: "HUMAN", role: "ADMIN", tokenScopes: null } }, task.id, "Please take another look.");
 
-  assert.equal(dispatched.length, 1);
-  assert.equal(dispatched[0]?.url, "https://agent.example.test/webhook");
-  assert.deepEqual(dispatched[0]?.payload, {
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0]?.id, "event-1");
+  assert.equal(deliveries[0]?.status, "PENDING");
+  assert.equal(deliveries[0]?.attemptCount, 0);
+  assert.deepEqual(JSON.parse(String(deliveries[0]?.payload)), {
+    id: "event-1",
     event: "task.update_added",
     task: {
       id: "task-39", number: 39, title: "Update webhook", description: "", definitionOfDone: "Adding an update triggers webhook",
@@ -114,7 +115,31 @@ test("adding an update dispatches a webhook to the assigned agent", async (t) =>
     timestamp: "2026-08-20T13:30:00.000Z",
   });
 
-  dispatched.length = 0;
   await service.addUpdate({ actor: { userId: "agent-1", name: "Builder", kind: "AGENT", role: "MEMBER", tokenScopes: null } }, task.id, "Work is in progress.");
-  assert.equal(dispatched.length, 0, "an agent's own update must not trigger its webhook");
+  assert.equal(deliveries.length, 1, "an agent's own update must not enqueue its webhook");
+});
+
+test("assignment events are enqueued only for another agent actor", async () => {
+  const deliveries: Array<Record<string, unknown>> = [];
+  const existing = {
+    id: "task-51", projectId: "project-1", number: 51, title: "Durable delivery", description: "", definitionOfDone: "",
+    status: "TODO", priority: "HIGH", type: "SECURITY", assigneeId: null, creatorId: "owner-1", parentId: null, branch: null,
+    dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null,
+    position: 0, createdAt: "2026-08-23T10:00:00.000Z", updatedAt: "2026-08-23T10:00:00.000Z",
+  } as const;
+  const set = repositories({
+    tasks: { findById: async () => existing, update: async (_id: string, input: Record<string, unknown>) => ({ ...existing, ...input }) } as never,
+    users: { findById: async (id: string) => id === "agent-1" ? { id, name: "Builder", kind: "AGENT", webhookUrl: "https://agent.example/webhook" } : null } as never,
+    webhookDeliveries: { create: async (delivery: Record<string, unknown>) => { deliveries.push(delivery); return delivery; } } as never,
+  });
+  const ids = ["event-1", "event-2"];
+  const service = new TaskApplicationService({ run: async (work) => work(set) }, () => "2026-08-23T10:00:00.000Z", () => ids.shift()!);
+
+  await service.update({ actor: { userId: "owner-1", name: "Owner", kind: "HUMAN", role: "ADMIN", tokenScopes: null } }, existing.id, { assigneeId: "agent-1" });
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0]?.eventType, "task.assigned");
+  assert.equal(JSON.parse(String(deliveries[0]?.payload)).id, "event-1");
+
+  await service.update({ actor: { userId: "agent-1", name: "Builder", kind: "AGENT", role: "MEMBER", tokenScopes: null } }, existing.id, { assigneeId: "agent-1" });
+  assert.equal(deliveries.length, 1, "an agent assigning itself must not enqueue its own webhook");
 });

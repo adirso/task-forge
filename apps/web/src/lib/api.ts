@@ -1,4 +1,4 @@
-import { TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type Notification, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User } from "@taskforge/contracts";
+import { TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type Notification, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
@@ -295,6 +295,10 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
   if (/^\/users\/[^/]+\/tokens$/.test(pathname) && method === "POST") return { token: "tf_mock_token", prefix: "tf_mock", expiresAt: null, warning: "Mock mode token" } as T;
   if (/^\/users\/[^/]+\/tokens\/[^/]+\/reveal$/.test(pathname) && method === "POST") return { token: "tf_mock_token" } as T;
   if (/^\/users\/tokens\/[^/]+$/.test(pathname) && method === "DELETE") return undefined as T;
+  if (/^\/users\/[^/]+\/webhook$/.test(pathname) && method === "PATCH") return { user: { ...MOCK_AGENT, webhookUrl: (options.body as { webhookUrl: string | null }).webhookUrl, webhookSecretConfigured: true }, webhookSecret: "whsec_mock" } as T;
+  if (/^\/users\/[^/]+\/webhook-secret\/rotate$/.test(pathname) && method === "POST") return { user: { ...MOCK_AGENT, webhookSecretConfigured: true }, webhookSecret: "whsec_mock_rotated" } as T;
+  if (pathname === "/users/webhook-deliveries" && method === "GET") return { deliveries: [] } as T;
+  if (/^\/users\/webhook-deliveries\/[^/]+\/retry$/.test(pathname) && method === "POST") throw new ApiError("Mock delivery not found", 404);
 
   // Mutations used by settings and project management can no-op in mock mode.
   if (method !== "GET") return undefined as T;
@@ -378,7 +382,10 @@ export const api = {
   projectActivity: (projectId: string, limit = 50) => request<{ activity: ActivityEvent[] }>(`/activity?projectId=${projectId}&limit=${limit}`),
   activityFeed: (limit = 50) => request<{ activity: ActivityEvent[] }>(`/activity?limit=${limit}`),
   agentOps: () => request<{ agents: AgentOpsEntry[] }>("/users/agents/ops"),
-  updateAgentWebhook: (agentId: string, webhookUrl: string | null) => request<{ user: User }>(`/users/${agentId}/webhook`, { method: "PATCH", body: { webhookUrl } }),
+  updateAgentWebhook: (agentId: string, webhookUrl: string | null) => request<{ user: User; webhookSecret?: string }>(`/users/${agentId}/webhook`, { method: "PATCH", body: { webhookUrl } }),
+  rotateAgentWebhookSecret: (agentId: string) => request<{ user: User; webhookSecret: string }>(`/users/${agentId}/webhook-secret/rotate`, { method: "POST" }),
+  webhookDeliveries: (filters: { agentId?: string; status?: WebhookDeliveryStatus; limit?: number } = {}) => request<{ deliveries: WebhookDelivery[] }>(`/users/webhook-deliveries?${new URLSearchParams(Object.entries(filters).filter((entry): entry is [string, string | number] => entry[1] !== undefined).map(([key, value]) => [key, String(value)])).toString()}`),
+  retryWebhookDelivery: (deliveryId: string) => request<{ delivery: WebhookDelivery }>(`/users/webhook-deliveries/${deliveryId}/retry`, { method: "POST" }),
   claimTask: (projectId: string, opts?: { phaseId?: string | null; priority?: string }) => request<{ task: Task }>(`/projects/${projectId}/tasks/claim`, { method: "POST", body: opts ?? {} }),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
 };

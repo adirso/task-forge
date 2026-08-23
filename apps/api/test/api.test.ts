@@ -302,6 +302,61 @@ test("task lifecycle supports assignment and status changes", async () => {
   assert.deepEqual(reusable.json().tags.map((tag: { name: string }) => tag.name), ["api", "backend", "frontend"]);
 });
 
+test("administrators manage signed webhook secrets and durable deliveries", async () => {
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  assert.equal(memberLogin.statusCode, 200, memberLogin.body);
+  const memberToken = memberLogin.json().token as string;
+
+  const forbiddenConfig = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${memberToken}` }, payload: { webhookUrl: "https://agent.example/webhook" } });
+  assert.equal(forbiddenConfig.statusCode, 403, forbiddenConfig.body);
+  const credentialUrl = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "https://user:password@agent.example/webhook" } });
+  assert.equal(credentialUrl.statusCode, 400, credentialUrl.body);
+
+  const configured = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "https://agent.example/webhook" } });
+  assert.equal(configured.statusCode, 200, configured.body);
+  assert.match(configured.json().webhookSecret, /^whsec_/);
+  assert.equal(configured.json().user.webhookSecretConfigured, true);
+  const firstSecret = configured.json().webhookSecret as string;
+
+  const savedAgain = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "https://agent.example/updated" } });
+  assert.equal(savedAgain.statusCode, 200, savedAgain.body);
+  assert.equal(savedAgain.json().webhookSecret, undefined, "an existing signing secret must not be revealed again");
+
+  const rotated = await app.inject({ method: "POST", url: `/api/users/${agentId}/webhook-secret/rotate`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(rotated.statusCode, 200, rotated.body);
+  assert.match(rotated.json().webhookSecret, /^whsec_/);
+  assert.notEqual(rotated.json().webhookSecret, firstSecret);
+
+  const webhookTask = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Webhook outbox coverage", assigneeId: agentId, status: "TODO" } });
+  assert.equal(webhookTask.statusCode, 201, webhookTask.body);
+  const webhookTaskId = webhookTask.json().task.id as string;
+  const update = await app.inject({ method: "POST", url: `/api/tasks/${webhookTaskId}/updates`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { body: "Please process this update." } });
+  assert.equal(update.statusCode, 201, update.body);
+
+  const rows = await db.prepare("SELECT id, event_type, payload, status FROM webhook_deliveries WHERE task_id = ? ORDER BY created_at").all(webhookTaskId);
+  assert.deepEqual(rows.map((row) => row.event_type), ["task.assigned", "task.update_added"]);
+  assert.ok(rows.every((row) => row.status === "PENDING"));
+  for (const row of rows) {
+    const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+    assert.equal(payload.id, row.id, "the persisted event ID is also the receiver idempotency key");
+  }
+
+  const listed = await app.inject({ method: "GET", url: `/api/users/webhook-deliveries?agentId=${agentId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(listed.statusCode, 200, listed.body);
+  assert.equal(listed.json().deliveries.length, 2);
+  assert.equal("payload" in listed.json().deliveries[0], false, "operators must not receive stored payload credentials");
+  assert.equal((await app.inject({ method: "GET", url: "/api/users/webhook-deliveries", headers: { authorization: `Bearer ${memberToken}` } })).statusCode, 403);
+
+  const failedId = String(rows[0]!.id);
+  await db.prepare("UPDATE webhook_deliveries SET status = 'FAILED', attempt_count = 5, failed_at = ?, last_error = 'HTTP 503' WHERE id = ?").run(new Date().toISOString(), failedId);
+  const retried = await app.inject({ method: "POST", url: `/api/users/webhook-deliveries/${failedId}/retry`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(retried.statusCode, 200, retried.body);
+  assert.equal(retried.json().delivery.status, "RETRYING");
+  assert.equal(retried.json().delivery.attemptCount, 0);
+  assert.equal((await app.inject({ method: "POST", url: `/api/users/webhook-deliveries/${failedId}/retry`, headers: { authorization: `Bearer ${jwtToken}` } })).statusCode, 400);
+  await db.prepare("DELETE FROM notifications WHERE user_id = ? AND task_id = ?").run(agentId, webhookTaskId);
+});
+
 test("reporting endpoints preserve access, dashboard, and agent operations behavior", async () => {
   const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
   assert.equal(memberLogin.statusCode, 200, memberLogin.body);

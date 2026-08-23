@@ -257,6 +257,58 @@ Example: assign a task to the changer when it enters progress and has no assigne
 
 Rules execute as part of task create/update and can update any supported task field.
 
+## Signed agent webhooks
+
+Administrators configure an agent receiver and inspect its delivery queue through:
+
+```http
+PATCH /api/users/:agentId/webhook                    {"webhookUrl":"https://agent.example/webhook"}
+POST  /api/users/:agentId/webhook-secret/rotate
+GET   /api/users/webhook-deliveries?agentId=:agentId&status=FAILED&limit=50
+POST  /api/users/webhook-deliveries/:deliveryId/retry
+```
+
+The first non-null webhook URL creates a per-agent signing secret. The response includes `webhookSecret` once; later URL changes do not reveal it. Rotation returns a new secret once and increments `X-TaskForge-Secret-Version`. Update the receiver immediately after rotation because pending and future attempts use the agent's current secret. Webhook URLs must use HTTP or HTTPS and cannot contain username/password credentials.
+
+TaskForge durably stores `task.assigned` and `task.update_added` events in the same transaction as the task change, then dispatches only after commit. An agent's own assignment or update does not enqueue an event back to that agent. A request body has a stable event envelope such as:
+
+```json
+{
+  "id": "0c533272-7c46-4f0c-9587-d89065ef0b67",
+  "event": "task.update_added",
+  "task": { "id": "...", "projectKey": "TAS", "number": 51 },
+  "update": { "id": "...", "body": "Please retry this delivery." },
+  "postedBy": { "id": "...", "name": "Project owner" },
+  "timestamp": "2026-08-23T10:00:00.000Z"
+}
+```
+
+Each request includes:
+
+```http
+Idempotency-Key: <event-id>
+X-TaskForge-Event-Id: <event-id>
+X-TaskForge-Delivery-Attempt: 1
+X-TaskForge-Secret-Version: 2
+X-TaskForge-Signature: t=<unix-seconds>,v1=<hex-hmac>
+```
+
+Verify `v1` with HMAC-SHA256 over the exact raw body, prefixed by the timestamp and a period: `HMAC(secret, timestamp + "." + rawBody)`. Compare digests in constant time and reject timestamps outside a short tolerance such as five minutes:
+
+```js
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verify(secret, signatureHeader, rawBody, nowSeconds = Date.now() / 1000) {
+  const match = /^t=(\d+),v1=([a-f0-9]{64})$/.exec(signatureHeader ?? "");
+  if (!match || Math.abs(nowSeconds - Number(match[1])) > 300) return false;
+  const expected = createHmac("sha256", secret).update(`${match[1]}.${rawBody}`).digest();
+  const supplied = Buffer.from(match[2], "hex");
+  return expected.length === supplied.length && timingSafeEqual(expected, supplied);
+}
+```
+
+Delivery is at least once. Store each successfully processed `id` (the same value as both event-ID headers) and return a 2xx response for duplicates without repeating side effects. TaskForge treats timeouts, network failures, and every non-2xx response as failures. It attempts delivery at most five times, with delays of 1, 2, 4, and 8 seconds, then marks the event `FAILED`; an administrator can manually queue a terminal failure with a fresh five-attempt budget. Operator responses and delivery logs contain status metadata but never the signing secret, destination URL, or stored payload.
+
 ## Users, agents, tokens, notifications, and search
 
 ```http
@@ -269,6 +321,10 @@ DELETE /api/users/:id              (administrator)
 POST   /api/users/:id/tokens       (administrator or token owner)
 GET    /api/users/:id/tokens
 DELETE /api/users/tokens/:id
+PATCH  /api/users/:id/webhook
+POST   /api/users/:id/webhook-secret/rotate
+GET    /api/users/webhook-deliveries
+POST   /api/users/webhook-deliveries/:deliveryId/retry
 GET    /api/notifications
 PATCH  /api/notifications/:id/read
 POST   /api/notifications/read-all

@@ -1,21 +1,29 @@
 import type { FastifyInstance } from "fastify";
-import { agentCreateSchema, agentWebhookSchema, avatarUploadSchema, profileUpdateSchema, tokenCreateSchema } from "@taskforge/contracts";
+import { agentCreateSchema, agentWebhookSchema, avatarUploadSchema, profileUpdateSchema, tokenCreateSchema, webhookDeliveryQuerySchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { UserApplicationService } from "../application/resource-services.js";
 import { createApiToken, hashToken } from "../lib/auth.js";
 import { config } from "../config.js";
 import { decryptSecret, encryptSecret } from "../lib/token-crypto.js";
+import { createWebhookSecret } from "../lib/webhook.js";
+import { WebhookDeliveryApplicationService } from "../application/webhook-service.js";
 
 type UserParams = { id: string };
 type TokenParams = { id: string };
 type RevealParams = { id: string; tokenId: string };
-const service = new UserApplicationService(createUnitOfWork(db), undefined, undefined, {
+type DeliveryParams = { deliveryId: string };
+const unitOfWork = createUnitOfWork(db);
+const service = new UserApplicationService(unitOfWork, undefined, undefined, {
   create: createApiToken,
   hash: hashToken,
   encrypt: (token) => encryptSecret(token, config.tokenEncryptionKey),
   decrypt: (ciphertext) => decryptSecret(ciphertext, config.tokenEncryptionKey),
+}, {
+  create: createWebhookSecret,
+  encrypt: (secret) => encryptSecret(secret, config.tokenEncryptionKey),
 });
+const webhookDeliveryService = new WebhookDeliveryApplicationService(unitOfWork);
 const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: (request.authUser.tokenScopes ?? null) as import("../application/context.js").TokenScope[] | null } });
 
 export async function userRoutes(app: FastifyInstance) {
@@ -33,8 +41,13 @@ export async function userRoutes(app: FastifyInstance) {
 
   app.patch<{ Params: UserParams }>("/:id/webhook", { schema: { tags: ["Agents"], summary: "Set the dispatch webhook URL for an agent" } }, async (request) => {
     const { webhookUrl } = agentWebhookSchema.parse(request.body);
-    return { user: await service.updateAgentWebhook(context(request), request.params.id, webhookUrl) };
+    return service.updateAgentWebhook(context(request), request.params.id, webhookUrl);
   });
+
+  app.post<{ Params: UserParams }>("/:id/webhook-secret/rotate", { schema: { tags: ["Agents"], summary: "Rotate an agent webhook signing secret" } }, async (request) => service.rotateAgentWebhookSecret(context(request), request.params.id));
+
+  app.get("/webhook-deliveries", { schema: { tags: ["Agents"], summary: "List agent webhook deliveries" } }, async (request) => ({ deliveries: await webhookDeliveryService.list(context(request), webhookDeliveryQuerySchema.parse(request.query)) }));
+  app.post<{ Params: DeliveryParams }>("/webhook-deliveries/:deliveryId/retry", { schema: { tags: ["Agents"], summary: "Retry a failed agent webhook delivery" } }, async (request) => ({ delivery: await webhookDeliveryService.retry(context(request), request.params.deliveryId) }));
 
   app.get("/agents/ops", { schema: { tags: ["Agents"], summary: "Agent ops dashboard — fleet status with workload and health" } }, async (request) => ({ agents: await service.agentOperations(context(request)) }));
 }

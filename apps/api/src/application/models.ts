@@ -1,4 +1,4 @@
-import type { PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole } from "@taskforge/contracts";
+import type { PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
 
 export interface UserEntity {
   id: string;
@@ -8,7 +8,36 @@ export interface UserEntity {
   role: UserRole;
   avatarUrl: string | null;
   webhookUrl?: string | null;
+  webhookSecretConfigured?: boolean;
   createdAt: string;
+}
+
+export interface WebhookDeliveryEntity {
+  id: string;
+  agentId: string;
+  taskId: string | null;
+  eventType: WebhookEventType;
+  payload: string;
+  status: WebhookDeliveryStatus;
+  attemptCount: number;
+  nextAttemptAt: string;
+  lockedUntil: string | null;
+  lastAttemptAt: string | null;
+  deliveredAt: string | null;
+  failedAt: string | null;
+  lastError: string | null;
+  httpStatus: number | null;
+  createdAt: string;
+  updatedAt: string;
+  agentName?: string;
+  taskNumber?: number | null;
+  projectKey?: string | null;
+}
+
+export interface AgentWebhookConfiguration {
+  webhookUrl: string | null;
+  secretCiphertext: string | null;
+  secretVersion: number;
 }
 
 export interface ActivityEntity {

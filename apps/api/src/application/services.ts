@@ -1,4 +1,4 @@
-import type { AgentOpsEntry, DashboardSummary } from "@taskforge/contracts";
+import type { AgentOpsEntry, DashboardSummary, WebhookDelivery, WebhookDeliveryStatus } from "@taskforge/contracts";
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
@@ -68,7 +68,8 @@ export interface UserService {
   list(context: RequestContext): Promise<UserEntity[]>;
   updateProfile(context: RequestContext, input: { name: string; email: string }): Promise<UserEntity>;
   updateAvatar(context: RequestContext, userId: string, avatarUrl: string | null): Promise<UserEntity>;
-  updateAgentWebhook(context: RequestContext, agentId: string, webhookUrl: string | null): Promise<UserEntity>;
+  updateAgentWebhook(context: RequestContext, agentId: string, webhookUrl: string | null): Promise<{ user: UserEntity; webhookSecret?: string }>;
+  rotateAgentWebhookSecret(context: RequestContext, agentId: string): Promise<{ user: UserEntity; webhookSecret: string }>;
   createAgent(context: RequestContext, input: { name: string; email?: string }): Promise<UserEntity>;
   deleteAgent(context: RequestContext, agentId: string): Promise<void>;
   listTokens(context: RequestContext, userId: string): Promise<ApiTokenEntity[]>;
@@ -76,6 +77,11 @@ export interface UserService {
   revealToken(context: RequestContext, userId: string, tokenId: string): Promise<{ token: string }>;
   revokeToken(context: RequestContext, tokenId: string): Promise<void>;
   agentOperations(context: RequestContext): Promise<AgentOpsEntry[]>;
+}
+
+export interface WebhookDeliveryService {
+  list(context: RequestContext, filters: { agentId?: string; status?: WebhookDeliveryStatus; limit: number }): Promise<WebhookDelivery[]>;
+  retry(context: RequestContext, deliveryId: string): Promise<WebhookDelivery>;
 }
 
 export interface NotificationService {
