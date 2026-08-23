@@ -108,6 +108,24 @@ test("project owners can update project details", async () => {
   assert.equal(persisted.json().project.name, "Updated API project");
 });
 
+test("phase summaries include completed and cancelled task counts", async () => {
+  const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `SUM${randomUUID().slice(0, 4)}`, name: "Phase summary", description: "Counts", color: "#123456" } });
+  const summaryProjectId = createdProject.json().project.id as string;
+  const initialPhases = await app.inject({ method: "GET", url: `/api/projects/${summaryProjectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` } });
+  const summaryPhaseId = initialPhases.json().phases[0].id as string;
+  const done = await app.inject({ method: "POST", url: `/api/projects/${summaryProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Completed phase task", phaseId: summaryPhaseId, status: "DONE" } });
+  assert.equal(done.statusCode, 201, done.body);
+  const cancelled = await app.inject({ method: "POST", url: `/api/projects/${summaryProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Cancelled phase task", phaseId: summaryPhaseId, status: "CANCELLED" } });
+  assert.equal(cancelled.statusCode, 201, cancelled.body);
+  const response = await app.inject({ method: "GET", url: `/api/projects/${summaryProjectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` } });
+  const summary = response.json().phases.find((phase: { id: string }) => phase.id === summaryPhaseId);
+  assert.equal(summary.taskCount, 2);
+  assert.equal(summary.completedTaskCount, 1);
+  assert.equal(summary.cancelledTaskCount, 1);
+  const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${summaryProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deleted.statusCode, 204);
+});
+
 test("projects configure available statuses and the default API status", async () => {
   const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "STS", name: "Status project", description: "Custom status coverage", color: "#00A3BF" } });
   assert.equal(created.statusCode, 201, created.body);

@@ -55,7 +55,7 @@ function toProject(row: Row): ProjectEntity {
 }
 
 function toPhase(row: Row): PhaseEntity {
-  return { id: text(row.id), projectId: text(row.project_id), number: Number(row.number), goal: text(row.goal), isActive: Boolean(row.is_active), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}) };
+  return { id: text(row.id), projectId: text(row.project_id), number: Number(row.number), goal: text(row.goal), isActive: Boolean(row.is_active), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}), ...(row.completed_task_count !== undefined ? { completedTaskCount: Number(row.completed_task_count) } : {}), ...(row.cancelled_task_count !== undefined ? { cancelledTaskCount: Number(row.cancelled_task_count) } : {}) };
 }
 
 function toTask(row: Row): TaskEntity {
@@ -193,7 +193,7 @@ function createMembershipRepository(db: DatabasePort): MembershipRepository {
 
 function createPhaseRepository(db: DatabasePort): PhaseRepository {
   return {
-    async list(projectId) { return (await db.prepare("SELECT p.*, COUNT(t.id) AS task_count FROM phases p LEFT JOIN tasks t ON t.phase_id = p.id WHERE p.project_id = ? GROUP BY p.id ORDER BY p.number DESC").all(projectId)).map(toPhase); },
+    async list(projectId) { return (await db.prepare("SELECT p.*, COUNT(t.id) AS task_count, SUM(CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END) AS completed_task_count, SUM(CASE WHEN t.status = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled_task_count FROM phases p LEFT JOIN tasks t ON t.phase_id = p.id WHERE p.project_id = ? GROUP BY p.id ORDER BY p.number DESC").all(projectId)).map(toPhase); },
     async findById(id) { const row = await db.prepare("SELECT * FROM phases WHERE id = ?").get(id); return row ? toPhase(row) : null; },
     async findActive(projectId) { const row = await db.prepare("SELECT * FROM phases WHERE project_id = ? AND is_active = 1").get(projectId); return row ? toPhase(row) : null; },
     async deactivateOthers(projectId, phaseId) { await db.prepare("UPDATE phases SET is_active = 0, updated_at = ? WHERE project_id = ? AND (? IS NULL OR id != ?)").run(new Date().toISOString(), projectId, phaseId ?? null, phaseId ?? null); },
