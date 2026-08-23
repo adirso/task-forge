@@ -1,5 +1,6 @@
 import "fastify";
 import type { UserKind, UserRole } from "@taskforge/contracts";
+import type { RateLimiter } from "../lib/rate-limit.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -15,5 +16,6 @@ declare module "fastify" {
 
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    securityRateLimiter: RateLimiter;
   }
 }

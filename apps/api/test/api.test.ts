@@ -689,3 +689,18 @@ test("administrators can delete an unused agent identity", async () => {
   const users = await app.inject({ method: "GET", url: "/api/users", headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(users.json().users.some((user: { id: string }) => user.id === disposableId), false);
 });
+
+test("login throttles by account and records redacted audit metadata", async () => {
+  const account = `unknown-${randomUUID()}@example.com`;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const response = await app.inject({ method: "POST", url: "/api/auth/login", headers: { "x-forwarded-for": "198.51.100.10" }, payload: { email: account, password: "not-the-password" } });
+    assert.equal(response.statusCode, 401);
+  }
+  const throttled = await app.inject({ method: "POST", url: "/api/auth/login", headers: { "x-forwarded-for": "198.51.100.10" }, payload: { email: account, password: "not-the-password" } });
+  assert.equal(throttled.statusCode, 429);
+  const audit = await db.prepare("SELECT outcome, ip_address, account FROM security_audit_events WHERE account = ? AND outcome = 'throttled' ORDER BY created_at DESC LIMIT 1").get(account) as { outcome: string; ip_address: string; account: string };
+  assert.equal(audit.outcome, "throttled");
+  assert.equal(audit.ip_address, "127.0.0.1");
+  assert.equal(audit.account, account);
+  assert.doesNotMatch(JSON.stringify(audit), /not-the-password/);
+});

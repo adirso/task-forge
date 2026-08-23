@@ -20,6 +20,12 @@ export const config = {
     .map((origin) => origin.trim())
     .filter(Boolean),
   isProduction: process.env.NODE_ENV === "production",
+  trustedProxy: process.env.TRUST_PROXY === "true" ? true : (process.env.TRUST_PROXY ? process.env.TRUST_PROXY.split(",").map((value) => value.trim()).filter(Boolean) : false),
+  loginRateLimitIp: Number(process.env.LOGIN_RATE_LIMIT_IP ?? 20),
+  loginRateLimitAccount: Number(process.env.LOGIN_RATE_LIMIT_ACCOUNT ?? 8),
+  sensitiveRateLimit: Number(process.env.SENSITIVE_RATE_LIMIT ?? 30),
+  rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000),
+  rateLimitMaxBackoffMs: Number(process.env.RATE_LIMIT_MAX_BACKOFF_MS ?? 15 * 60_000),
 };
 
 if (!(["sqlite", "mysql"] as const).includes(config.databaseDriver)) {
