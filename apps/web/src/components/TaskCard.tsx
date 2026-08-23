@@ -8,7 +8,7 @@ import { TaskTypePill } from "./TaskTypePill";
 
 export function TaskCard({ task, project, onOpen }: { task: Task; project: Project; onOpen: () => void }) {
   return (
-    <article className="task-card" draggable onDragStart={(event) => event.dataTransfer.setData("text/task-id", task.id)} onClick={onOpen}>
+    <article className="task-card" role="button" tabIndex={0} aria-label={`${project.key}-${task.number}: ${task.title}`} draggable onDragStart={(event) => event.dataTransfer.setData("text/task-id", task.id)} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }}>
       <div className="card-top"><TaskTypePill type={task.type} /><span className={`priority priority-${task.priority.toLowerCase()}`}>{priorityMeta[task.priority].symbol} {priorityMeta[task.priority].label}</span><span className="task-key">{project.key}-{task.number}</span></div>
       <h3>{task.title}</h3>
       <TaskTagPills tags={task.tags} limit={3} />

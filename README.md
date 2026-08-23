@@ -64,7 +64,7 @@ npm run admin:bootstrap # Create or rotate the production administrator
 
 ## Continuous integration
 
-Every pull request and push to `main` runs the required **Quality and SQLite** and **API on MySQL 8** checks. See the [CI guide](docs/CI.md) for their exact scope, local equivalents, and failure diagnostics.
+Every pull request and push to `main` runs the required **Quality and SQLite**, **API on MySQL 8**, and **Browser E2E** checks. See the [CI guide](docs/CI.md) for their exact scope, local equivalents, and failure diagnostics. Browser E2E can be run locally with `npm run test:e2e` after `npm run test:e2e:install`.
 
 ## Dashboard examples
 

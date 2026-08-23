@@ -14,9 +14,12 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "db:seed": "npm run db:seed -w @taskforge/api",
-    "admin:bootstrap": "npm run admin:bootstrap -w @taskforge/api"
+    "admin:bootstrap": "npm run admin:bootstrap -w @taskforge/api",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "concurrently": "^9.1.2",
     "typescript": "^5.7.3"
   },

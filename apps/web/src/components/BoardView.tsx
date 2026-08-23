@@ -12,7 +12,7 @@ export function BoardView({ tasks, project, onOpen, onCreate, onMove }: {
       {project.availableStatuses.map((status) => {
         const statusTasks = tasks.filter((task) => task.status === status);
         return (
-          <section className="board-column" key={status} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData("text/task-id"); if (id) onMove(id, status); }}>
+          <section className="board-column" key={status} aria-label={`${statusMeta[status].label} tasks`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData("text/task-id"); if (id) onMove(id, status); }}>
             <header><span className={`status-dot ${statusMeta[status].tone}`} /> <strong>{statusMeta[status].label}</strong><span>{statusTasks.length}</span><button onClick={() => onCreate(status)}><Plus /></button></header>
             <div className="column-body">
               {statusTasks.map((task) => <TaskCard key={task.id} task={task} project={project} onOpen={() => onOpen(task)} />)}
