@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Notification, Phase, Project, Tag, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
-import { Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Menu, Plus, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
+import { BarChart3, Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Menu, Plus, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
@@ -17,12 +17,13 @@ import { ProjectMembersModal } from "./components/ProjectMembersModal";
 import { ProjectHeaderActions } from "./components/ProjectHeaderActions";
 import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
 import { AutomationManager } from "./components/AutomationManager";
+import { ProjectDashboard } from "./components/ProjectDashboard";
 import { DashboardPage } from "./components/DashboardPage";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
 import { statusMeta } from "./lib/ui";
 
 type DefaultView = "board" | "list";
-type View = DefaultView | "phases" | "automations";
+type View = DefaultView | "dashboard" | "phases" | "automations";
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -77,7 +78,8 @@ export default function App() {
     const userData = me.role === "ADMIN" ? await api.users() : { users: [me] };
     setUser(me); setProjects(projectList); setAllUsers(userData.users); setNotifications(notificationData.notifications);
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("view") === "phases") setView("phases");
+    if (urlParams.get("view") === "dashboard") setView("dashboard");
+    else if (urlParams.get("view") === "phases") setView("phases");
     else if (urlParams.get("view") === "automations") setView("automations");
     else if (urlParams.get("view") === "list") setView("list");
     else if (urlParams.get("view") === "board") setView("board");
@@ -290,9 +292,9 @@ export default function App() {
                 />
               </div>
             </div>
-            <div className="project-tabs"><button className={view === "board" ? "active" : ""} onClick={() => changeDefaultView("board")}><Kanban /> Board</button><button className={view === "list" ? "active" : ""} onClick={() => changeDefaultView("list")}><LayoutList /> List</button><button className={view === "phases" ? "active" : ""} onClick={() => setView("phases")}><Flag /> Phases</button><button className={view === "automations" ? "active" : ""} onClick={() => setView("automations")}><Zap /> Automations</button>{currentProject.repoUrl?.trim() && <a href={currentProject.repoUrl} target="_blank" rel="noreferrer"><Link2 /> Repository</a>}</div>
+            <div className="project-tabs"><button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}><BarChart3 /> Dashboard</button><button className={view === "board" ? "active" : ""} onClick={() => changeDefaultView("board")}><Kanban /> Board</button><button className={view === "list" ? "active" : ""} onClick={() => changeDefaultView("list")}><LayoutList /> List</button><button className={view === "phases" ? "active" : ""} onClick={() => setView("phases")}><Flag /> Phases</button><button className={view === "automations" ? "active" : ""} onClick={() => setView("automations")}><Zap /> Automations</button>{currentProject.repoUrl?.trim() && <a href={currentProject.repoUrl} target="_blank" rel="noreferrer"><Link2 /> Repository</a>}</div>
           </header>
-          {view !== "phases" && view !== "automations" && <section className="content-toolbar">
+          {view !== "dashboard" && view !== "phases" && view !== "automations" && <section className="content-toolbar">
             <div className="search-field"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks…" />{query && <button onClick={() => setQuery("")}><X /></button>}</div>
             <button
               type="button"
@@ -315,7 +317,8 @@ export default function App() {
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
           {view === "automations" && <AutomationManager project={currentProject} users={allUsers} phases={phases} />}
-          <section className={`content-area${view === "automations" ? " automations-hidden" : ""}`}>
+          {view === "dashboard" && <ProjectDashboard project={currentProject} tasks={tasks} phases={phases} />}
+          <section className={`content-area${view === "automations" ? " automations-hidden" : ""}${view === "dashboard" ? " dashboard-hidden" : ""}`}>
             {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={(updated) => { setPhases(updated); setBoardPhaseId((selectedId) => updated.some((phase) => phase.id === selectedId) ? selectedId : resolveBoardPhase(updated)?.id ?? null); setTasks((items) => items.map((task) => task.phaseId && !updated.some((phase) => phase.id === task.phaseId) ? { ...task, phaseId: null } : task)); }} /> : view === "board" ? <>{selectedBoardPhase ? <><div className={`active-phase-banner${selectedBoardPhase.isActive ? "" : " viewing-phase"}`}><span className="phase-number-badge">{selectedBoardPhase.number}</span><div className="phase-banner-copy"><span>{selectedBoardPhase.isActive ? "Active phase" : "Viewing phase"}</span><strong>Phase {selectedBoardPhase.number}</strong><p>{selectedBoardPhase.goal}</p></div><label className="board-phase-selector"><span>Board phase</span><div><select aria-label="Board phase" value={selectedBoardPhase.id} onChange={(event) => setBoardPhaseId(event.target.value)}>{[...phases].sort((a, b) => a.number - b.number).map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select><ChevronDown /></div></label><small>{boardTasks.length} {boardTasks.length === 1 ? "task" : "tasks"}</small><button className="button button-secondary" onClick={() => setView("phases")}>Manage phases</button></div>{selectedPhaseHasTasks ? <BoardView tasks={boardTasks} project={currentProject} onOpen={setSelectedTask} onCreate={setNewTaskStatus} onMove={moveTask} /> : <div className="empty-board-phase"><Flag /><strong>No tasks in Phase {selectedBoardPhase.number}</strong><span>This phase is ready for its first task.</span><button className="button button-primary" onClick={() => setNewTaskStatus(currentProject.defaultStatus)}><Plus /> Create task</button></div>}</> : <div className="no-active-phase"><Flag /><div><strong>No active phase</strong><span>Choose an active phase to populate the board.</span></div><button className="button button-primary" onClick={() => setView("phases")}>Manage phases</button></div>}</> : <ListView tasks={visibleTasks} phases={phases} project={currentProject} onOpen={setSelectedTask} />}
           </section>
         </> : <DashboardPage currentUser={user} />}
