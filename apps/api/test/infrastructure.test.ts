@@ -115,7 +115,7 @@ test("large task pages use a bounded number of relationship queries", async () =
   assert.equal(result.items.length, 75);
   assert.equal(result.page.hasMore, false);
   assert.ok(queries.length <= 6, `expected at most 6 queries for 75 tasks, received ${queries.length}`);
-  assert.equal(queries.filter((sql) => sql.includes("task_id IN")).length, 3, "task relationships are loaded in batches");
+  assert.equal(queries.filter((sql) => sql.includes("task_id IN")).length, 4, "task relationships and durations are loaded in batches");
   queries.length = 0;
   const search = await createRepositories(database).search.searchAccessible({ actorId: "owner-1", isAdmin: true, query: "Task", page: { limit: 100 } });
   assert.equal(search.items.length, 75);

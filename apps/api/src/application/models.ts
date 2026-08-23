@@ -133,6 +133,7 @@ export interface TaskEntity {
   pullRequestUrl: string | null;
   pullRequestTitle: string | null;
   pullRequestState: PullRequestState | null;
+  statusDurations?: Partial<Record<TaskStatus, number>>;
   position: number;
   createdAt: string;
   updatedAt: string;
