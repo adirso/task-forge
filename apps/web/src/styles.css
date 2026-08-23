@@ -98,8 +98,8 @@ svg { flex: 0 0 auto; }
 .project-actions-dropdown > button.danger { color: #bf2600; }
 .project-actions-dropdown > button.danger:hover { background: #ffebe6; }
 .project-actions-dropdown > button.danger svg { color: #bf2600; }
-.project-tabs { display: flex; align-items: center; gap: 5px; margin-top: 25px; }
-.project-tabs button, .project-tabs a { height: 41px; border: 0; background: transparent; padding: 0 14px; display: flex; align-items: center; gap: 7px; color: #6b778c; font-weight: 600; font-size: 13px; text-decoration: none; position: relative; }
+.project-tabs { display: flex; align-items: center; gap: 12px; margin-top: 25px; }
+.project-tabs button, .project-tabs a { height: 41px; border: 0; background: transparent; padding: 0 16px; display: flex; align-items: center; gap: 7px; color: #6b778c; font-weight: 600; font-size: 13px; text-decoration: none; position: relative; }
 .project-tabs button:hover, .project-tabs a:hover { color: #403294; }
 .project-tabs button.active { color: #5243aa; }
 .project-tabs button.active::after { content: ""; position: absolute; height: 2px; background: #6554c0; inset: auto 7px -1px; }
