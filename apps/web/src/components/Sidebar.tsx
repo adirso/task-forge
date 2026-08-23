@@ -12,7 +12,7 @@ export function Sidebar({ projects, currentId, user, unreadCount, settingsActive
     const [moved] = next.splice(sourceIndex, 1); next.splice(targetIndex, 0, moved!); onReorder(next.map((project) => project.id));
   }
   return (
-    <aside className={`sidebar${className ? ` ${className}` : ""}`}>
+    <aside className={`sidebar${className ? ` ${className}` : ""}`} aria-label={className?.includes("mobile-sidebar") ? "Mobile navigation" : undefined}>
       <div className="brand-lockup"><span className="brand-mark"><Layers3 /></span>TaskForge</div>
       <nav className="main-nav">
         <button className={dashboardActive ? "active" : ""} onClick={() => { onHome(); onNavigate?.(); }}><LayoutDashboard /><span>Home</span></button>

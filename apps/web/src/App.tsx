@@ -73,8 +73,9 @@ export default function App() {
   }, []);
 
   const loadWorkspace = useCallback(async () => {
-    const [{ user: me }, { projects: projectList }, { users }, notificationData] = await Promise.all([api.me(), api.projects(), api.users(), api.notifications()]);
-    setUser(me); setProjects(projectList); setAllUsers(users); setNotifications(notificationData.notifications);
+    const [{ user: me }, { projects: projectList }, notificationData] = await Promise.all([api.me(), api.projects(), api.notifications()]);
+    const userData = me.role === "ADMIN" ? await api.users() : { users: [me] };
+    setUser(me); setProjects(projectList); setAllUsers(userData.users); setNotifications(notificationData.notifications);
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("view") === "phases") setView("phases");
     else if (urlParams.get("view") === "automations") setView("automations");

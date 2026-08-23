@@ -4,6 +4,9 @@ dist/
 .env.local
 data/*.db
 data/*.db-*
+.e2e-data/
+playwright-report/
+test-results/
 coverage/
 .DS_Store
 *.log
