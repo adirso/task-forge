@@ -194,6 +194,8 @@ const sqliteSchema = [
   `CREATE INDEX IF NOT EXISTS idx_activity_project_page ON activity(project_id, created_at, id)`,
   `CREATE INDEX IF NOT EXISTS idx_activity_task_page ON activity(task_id, created_at, id)`,
   `CREATE INDEX IF NOT EXISTS idx_activity_actor_page ON activity(actor_id, created_at, id)`,
+  `CREATE TABLE IF NOT EXISTS security_audit_events (id TEXT PRIMARY KEY, action TEXT NOT NULL, outcome TEXT NOT NULL CHECK (outcome IN ('success', 'failure', 'throttled')), ip_address TEXT NOT NULL, account TEXT, user_id TEXT REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_audit_created ON security_audit_events(created_at, id)`,
   `CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE, task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE, type TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', read_at TEXT, created_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, read_at, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_user_page ON notifications(user_id, created_at, id)`,
@@ -220,6 +222,7 @@ const mysqlSchema = [
   `CREATE TABLE IF NOT EXISTS task_tags (task_id CHAR(36) NOT NULL, tag_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, PRIMARY KEY (task_id, tag_id), INDEX idx_task_tags_tag_task (tag_id, task_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS task_dependencies (task_id CHAR(36) NOT NULL, depends_on_task_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, PRIMARY KEY (task_id, depends_on_task_id), INDEX idx_task_dependencies_dependency (depends_on_task_id, task_id), CHECK (task_id <> depends_on_task_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (depends_on_task_id) REFERENCES tasks(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS activity (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, task_id CHAR(36), actor_id CHAR(36) NOT NULL, action VARCHAR(80) NOT NULL, metadata TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, INDEX idx_activity_project_page (project_id, created_at, id), INDEX idx_activity_task_page (task_id, created_at, id), INDEX idx_activity_actor_page (actor_id, created_at, id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (actor_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS security_audit_events (id CHAR(36) PRIMARY KEY, action VARCHAR(80) NOT NULL, outcome VARCHAR(16) NOT NULL CHECK (outcome IN ('success', 'failure', 'throttled')), ip_address VARCHAR(160) NOT NULL, account VARCHAR(320), user_id CHAR(36), created_at VARCHAR(30) NOT NULL, INDEX idx_security_audit_created (created_at, id), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS notifications (id CHAR(36) PRIMARY KEY, user_id CHAR(36) NOT NULL, project_id CHAR(36), task_id CHAR(36), type VARCHAR(60) NOT NULL, title VARCHAR(240) NOT NULL, message TEXT NOT NULL, read_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, INDEX idx_notifications_user_unread (user_id, read_at, created_at), INDEX idx_notifications_user_page (user_id, created_at, id), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS task_updates (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, author_id CHAR(36) NOT NULL, body TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_task_updates_task_created (task_id, created_at), INDEX idx_task_updates_task_page (task_id, created_at, id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (author_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS task_attachments (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, file_name VARCHAR(255) NOT NULL, mime_type VARCHAR(160) NOT NULL, file_size BIGINT NOT NULL, storage_key VARCHAR(255) NOT NULL UNIQUE, uploaded_by_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, INDEX idx_task_attachments_task_created (task_id, created_at), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (uploaded_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -374,6 +377,15 @@ export const migrations: readonly Migration[] = [
       for (const [table, index, columns] of mysqlIndexes) {
         if (!(await hasIndex(executor, dialect, table, index))) await executor.run(`CREATE INDEX ${index} ON ${table} (${columns})`, []);
       }
+    },
+  },
+  {
+    version: "0006_security_audit_events",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS security_audit_events (id CHAR(36) PRIMARY KEY, action VARCHAR(80) NOT NULL, outcome VARCHAR(16) NOT NULL CHECK (outcome IN ('success', 'failure', 'throttled')), ip_address VARCHAR(160) NOT NULL, account VARCHAR(320), user_id CHAR(36), created_at VARCHAR(30) NOT NULL, INDEX idx_security_audit_created (created_at, id), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS security_audit_events (id TEXT PRIMARY KEY, action TEXT NOT NULL, outcome TEXT NOT NULL CHECK (outcome IN ('success', 'failure', 'throttled')), ip_address TEXT NOT NULL, account TEXT, user_id TEXT REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL)", []);
+      if (dialect === "sqlite") await executor.run("CREATE INDEX IF NOT EXISTS idx_security_audit_created ON security_audit_events(created_at, id)", []);
     },
   },
 ];

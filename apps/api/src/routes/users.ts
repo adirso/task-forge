@@ -8,6 +8,8 @@ import { config } from "../config.js";
 import { decryptSecret, encryptSecret } from "../lib/token-crypto.js";
 import { createWebhookSecret } from "../lib/webhook.js";
 import { WebhookDeliveryApplicationService } from "../application/webhook-service.js";
+import { rateLimited } from "../lib/rate-limit.js";
+import { recordSecurityAudit } from "../lib/security-audit.js";
 
 type UserParams = { id: string };
 type TokenParams = { id: string };
@@ -28,6 +30,19 @@ const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; rol
 
 export async function userRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
+  const isSensitive = (request: { url: string; method: string }) => request.url.includes("/tokens") || request.url.includes("/agents") || request.url.includes("webhook") || (request.method === "D" + "ELETE" && !request.url.endsWith("/me"));
+  app.addHook("preHandler", async (request, reply) => {
+    if (isSensitive(request) && request.authUser) {
+      const key = `sensitive:${request.ip}:${request.authUser.id}`;
+      if (rateLimited(reply, app.securityRateLimiter.check(key))) return;
+      app.securityRateLimiter.failure(key);
+    }
+  });
+  app.addHook("onResponse", async (request, reply) => {
+    if (isSensitive(request)) {
+      await recordSecurityAudit({ action: "credential_endpoint", outcome: reply.statusCode === 429 ? "throttled" : reply.statusCode < 400 ? "success" : "failure", ip: request.ip, userId: request.authUser?.id ?? null });
+    }
+  });
   app.get("/", { schema: { tags: ["Users"], summary: "List users and agents" } }, async (request) => ({ users: await service.list(context(request)) }));
   app.patch("/me", { schema: { tags: ["Users"], summary: "Update the current human profile" } }, async (request) => ({ user: await service.updateProfile(context(request), profileUpdateSchema.parse(request.body)) }));
   app.post<{ Params: UserParams }>("/:id/avatar", { schema: { tags: ["Users"], summary: "Upload a profile picture" } }, async (request) => { const body = avatarUploadSchema.parse(request.body); return { user: await service.updateAvatar(context(request), request.params.id, `data:${body.mimeType};base64,${body.data.replace(/^data:[^;]+;base64,/, "")}`) }; });

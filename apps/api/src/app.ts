@@ -22,9 +22,11 @@ import { attachmentRoutes } from "./routes/attachments.js";
 import { automationRoutes } from "./routes/automations.js";
 import { activityRoutes } from "./routes/activity.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
+import { RateLimiter } from "./lib/rate-limit.js";
 
 export async function buildApp(options: { startWebhookDispatcher?: boolean } = {}) {
-  const app = Fastify({ logger: !process.env.TEST });
+  const app = Fastify({ logger: !process.env.TEST, trustProxy: config.trustedProxy });
+  app.decorate("securityRateLimiter", new RateLimiter(config.rateLimitWindowMs, config.sensitiveRateLimit, config.rateLimitMaxBackoffMs));
   const webhookDispatcher = new WebhookDispatcher(createUnitOfWork(db), (ciphertext) => decryptSecret(ciphertext, config.tokenEncryptionKey), {
     logger: {
       info: (details, message) => app.log.info(details, message),
