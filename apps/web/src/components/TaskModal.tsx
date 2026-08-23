@@ -112,6 +112,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
           <div className="activity-list">{activity.map((event) => <div className="activity-event" key={event.id}><span className="activity-dot" /><span className="activity-body"><strong>{event.actorName}</strong>{event.actorKind === "AGENT" && <em>Agent</em>}<span>{activityLabel(event.action, event.metadata)}</span><time>{new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(event.createdAt))}</time></span></div>)}</div>
         </section>}
         {error && <div className="form-error">{error}</div>}
+        {task && task.statusDurations && Object.keys(task.statusDurations).length > 0 && <section className="task-status-duration"><div className="section-heading"><span>Time in status</span></div><div>{Object.entries(task.statusDurations).map(([status, seconds]) => <span key={status}><strong>{statusMeta[status as TaskStatus]?.label ?? status}</strong>{formatDuration(seconds ?? 0)}</span>)}</div></section>}
         <footer>{onDelete ? <button type="button" className="button button-danger-quiet" onClick={onDelete}><Trash2 /> Delete</button> : <span />}<div><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving}>{saving ? "Saving…" : task ? "Save changes" : "Create task"}</button></div></footer>
         {showSendToAI && task && <SendToAI project={project} task={task} phaseNumber={phases.find((phase) => phase.id === task.phaseId)?.number ?? null} onClose={() => setShowSendToAI(false)} />}
       </form>
@@ -137,4 +138,11 @@ function activityLabel(action: string, metadata: Record<string, unknown>): strin
     }
     default: return action.replace("task.", "").replace(/_/g, " ");
   }
+}
+
+function formatDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return ` ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return ` ${hours}h ${minutes % 60}m`;
 }

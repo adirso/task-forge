@@ -70,6 +70,8 @@ function toTask(row: Row): TaskEntity {
   };
 }
 
+const terminalStatuses = new Set(["DONE", "CANCELLED"]);
+
 function toReportingTask(row: Row): ReportingTaskEntity {
   return {
     id: text(row.id),
@@ -120,12 +122,13 @@ async function hydrateTasks(db: DatabasePort, tasks: TaskEntity[]): Promise<Task
   const placeholders = ids.map(() => "?").join(",");
   const assigneeIds = [...new Set(tasks.map((task) => task.assigneeId).filter((id): id is string => Boolean(id)))];
   const phaseIds = [...new Set(tasks.map((task) => task.phaseId).filter((id): id is string => Boolean(id)))];
-  const [tagRows, dependencyRows, attachmentRows, assigneeRows, phaseRows] = await Promise.all([
+  const [tagRows, dependencyRows, attachmentRows, assigneeRows, phaseRows, durationRows] = await Promise.all([
     db.prepare(`SELECT tg.*, tt.task_id AS hydrated_task_id FROM tags tg JOIN task_tags tt ON tt.tag_id = tg.id WHERE tt.task_id IN (${placeholders}) ORDER BY tg.name`).all(...ids),
     db.prepare(`SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.\`key\` AS project_key, dep.number, dep.title, dep.status FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id JOIN projects p ON p.id = dep.project_id WHERE td.task_id IN (${placeholders}) ORDER BY dep.number`).all(...ids),
     db.prepare(`SELECT a.*, u.id AS uploaded_user_id, u.email AS uploaded_email, u.name AS uploaded_name, u.kind AS uploaded_kind, u.role AS uploaded_role, u.avatar_url AS uploaded_avatar_url, u.created_at AS uploaded_created_at FROM task_attachments a JOIN users u ON u.id = a.uploaded_by_id WHERE a.task_id IN (${placeholders}) ORDER BY a.created_at DESC, a.id`).all(...ids),
     assigneeIds.length ? db.prepare(`SELECT * FROM users WHERE id IN (${assigneeIds.map(() => "?").join(",")})`).all(...assigneeIds) : Promise.resolve([]),
     phaseIds.length ? db.prepare(`SELECT * FROM phases WHERE id IN (${phaseIds.map(() => "?").join(",")})`).all(...phaseIds) : Promise.resolve([]),
+    db.prepare(`SELECT task_id, status, entered_at, exited_at, duration_seconds FROM task_status_history WHERE task_id IN (${placeholders}) ORDER BY entered_at, id`).all(...ids),
   ]);
   const grouped = <T>(rows: T[], key: (row: T) => string) => {
     const result = new Map<string, T[]>();
@@ -137,6 +140,16 @@ async function hydrateTasks(db: DatabasePort, tasks: TaskEntity[]): Promise<Task
   const attachments = grouped(attachmentRows, (row) => text(row.task_id));
   const assignees = new Map(assigneeRows.map((row) => [text(row.id), toUser(row)]));
   const phases = new Map(phaseRows.map((row) => [text(row.id), toPhase(row)]));
+  const durations = new Map<string, Partial<Record<TaskStatus, number>>>();
+  for (const row of durationRows) {
+    const status = text(row.status) as TaskStatus;
+    if (terminalStatuses.has(status)) continue;
+    const stored = Number(row.duration_seconds ?? 0);
+    const live = row.exited_at == null ? Math.max(0, (Date.now() - Date.parse(date(row.entered_at))) / 1000) : 0;
+    const current = durations.get(text(row.task_id)) ?? {};
+    current[status] = (current[status] ?? 0) + stored + live;
+    durations.set(text(row.task_id), current);
+  }
   return tasks.map((task) => ({
     ...task,
     tags: (tags.get(task.id) ?? []).map(toTag),
@@ -144,6 +157,7 @@ async function hydrateTasks(db: DatabasePort, tasks: TaskEntity[]): Promise<Task
     attachments: (attachments.get(task.id) ?? []).map((row) => ({ ...toAttachment(row), uploadedBy: { id: text(row.uploaded_user_id), email: nullableText(row.uploaded_email), name: text(row.uploaded_name), kind: row.uploaded_kind as UserEntity["kind"], role: row.uploaded_role as UserEntity["role"], avatarUrl: nullableText(row.uploaded_avatar_url), createdAt: date(row.uploaded_created_at) } })),
     assignee: task.assigneeId ? assignees.get(task.assigneeId) ?? null : null,
     phase: task.phaseId ? phases.get(task.phaseId) ?? null : null,
+    ...(durations.has(task.id) ? { statusDurations: durations.get(task.id) } : {}),
   }));
 }
 
@@ -204,6 +218,16 @@ function createPhaseRepository(db: DatabasePort): PhaseRepository {
 }
 
 function createTaskRepository(db: DatabasePort): TaskRepository {
+  async function recordStatusTransition(taskId: string, fromStatus: string | null, toStatus: string, changedAt: string, fallbackEnteredAt: string) {
+    const active = await db.prepare("SELECT id, status, entered_at FROM task_status_history WHERE task_id = ? AND exited_at IS NULL ORDER BY entered_at DESC, id DESC LIMIT 1").get(taskId);
+    if (active) {
+      const seconds = terminalStatuses.has(String(active.status)) ? 0 : Math.max(0, Math.floor((Date.parse(changedAt) - Date.parse(String(active.entered_at))) / 1000));
+      await db.prepare("UPDATE task_status_history SET exited_at = ?, duration_seconds = ? WHERE id = ?").run(changedAt, seconds, active.id);
+    } else if (fromStatus && !terminalStatuses.has(fromStatus)) {
+      await db.prepare("INSERT INTO task_status_history (id, task_id, status, entered_at, exited_at, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)").run(randomUUID(), taskId, fromStatus, fallbackEnteredAt, changedAt, Math.max(0, Math.floor((Date.parse(changedAt) - Date.parse(fallbackEnteredAt)) / 1000)));
+    }
+    if (!terminalStatuses.has(toStatus)) await db.prepare("INSERT INTO task_status_history (id, task_id, status, entered_at, exited_at, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)").run(randomUUID(), taskId, toStatus, changedAt, null, null);
+  }
   return {
     async findById(id) { const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); return row ? (await hydrateTasks(db, [toTask(row)]))[0]! : null; },
     async findByProjectNumber(projectId, number) { const row = await db.prepare("SELECT * FROM tasks WHERE project_id = ? AND number = ?").get(projectId, number); return row ? (await hydrateTasks(db, [toTask(row)]))[0]! : null; },
@@ -223,8 +247,15 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       return toPage(mapped, page, (task) => [task.status, task.position, task.createdAt, task.id]);
     },
     async allocateNumber(projectId, status) { const project = await db.prepare(`SELECT next_task_number FROM projects WHERE id = ?${db.dialect === "mysql" ? " FOR UPDATE" : ""}`).get(projectId); if (!project) throw new Error("Project not found"); const positionRow = await db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM tasks WHERE project_id = ? AND status = ?").get(projectId, status); const position = Number(positionRow?.next ?? 0); await db.prepare("UPDATE projects SET next_task_number = next_task_number + 1, updated_at = ? WHERE id = ?").run(new Date().toISOString(), projectId); return { number: Number(project.next_task_number), position }; },
-    async create(input) { await db.prepare(`INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.id, input.projectId, input.number, input.title, input.description, input.definitionOfDone, input.status, input.priority, input.type, input.assigneeId, input.creatorId, input.parentId, input.branch, input.dueDate, input.estimatePoints, input.phaseId, input.pullRequestUrl, input.pullRequestTitle, input.pullRequestState, input.position, input.createdAt, input.updatedAt); return (await hydrateTasks(db, [input]))[0]!; },
-    async update(id, input) { const columns: Record<string, string> = { title: "title", description: "description", definitionOfDone: "definition_of_done", status: "status", priority: "priority", type: "type", assigneeId: "assignee_id", parentId: "parent_id", branch: "branch", dueDate: "due_date", estimatePoints: "estimate_points", phaseId: "phase_id", pullRequestUrl: "pull_request_url", pullRequestTitle: "pull_request_title", pullRequestState: "pull_request_state", position: "position" }; const fields: string[] = []; const values: unknown[] = []; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values); } const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); if (!row) throw new Error("Task not found after update"); return (await hydrateTasks(db, [toTask(row)]))[0]!; },
+    async create(input) { await db.prepare(`INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.id, input.projectId, input.number, input.title, input.description, input.definitionOfDone, input.status, input.priority, input.type, input.assigneeId, input.creatorId, input.parentId, input.branch, input.dueDate, input.estimatePoints, input.phaseId, input.pullRequestUrl, input.pullRequestTitle, input.pullRequestState, input.position, input.createdAt, input.updatedAt); if (!terminalStatuses.has(input.status)) await db.prepare("INSERT INTO task_status_history (id, task_id, status, entered_at, exited_at, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)").run(randomUUID(), input.id, input.status, input.createdAt, null, null); return (await hydrateTasks(db, [input]))[0]!; },
+    async update(id, input) {
+      const existing = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); if (!existing) throw new Error("Task not found");
+      const columns: Record<string, string> = { title: "title", description: "description", definitionOfDone: "definition_of_done", status: "status", priority: "priority", type: "type", assigneeId: "assignee_id", parentId: "parent_id", branch: "branch", dueDate: "due_date", estimatePoints: "estimate_points", phaseId: "phase_id", pullRequestUrl: "pull_request_url", pullRequestTitle: "pull_request_title", pullRequestState: "pull_request_state", position: "position" }; const fields: string[] = []; const values: unknown[] = [];
+      for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); values.push(input[key as keyof typeof input] ?? null); }
+      const changedAt = new Date().toISOString(); if (fields.length) { fields.push("updated_at = ?"); values.push(changedAt, id); await db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values); }
+      if (input.status && input.status !== existing.status) await recordStatusTransition(id, String(existing.status), input.status, changedAt, date(existing.created_at));
+      const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); if (!row) throw new Error("Task not found after update"); return (await hydrateTasks(db, [toTask(row)]))[0]!;
+    },
     async delete(id) { await db.prepare("DELETE FROM tasks WHERE id = ?").run(id); },
     async listForAssignee(assigneeId, status) {
       const where = ["t.assignee_id = ?"];

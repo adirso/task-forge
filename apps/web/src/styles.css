@@ -667,3 +667,4 @@ html[data-text-size="large"] body { zoom: 1.08; }
 .widget-picker-text { display: flex; flex-direction: column; gap: 2px; }
 .widget-picker-text strong { font-size: 13px; color: #172b4d; }
 .widget-picker-text small { font-size: 11px; color: #8993a4; line-height: 1.4; }
+.task-status-duration { border-top: 1px solid #ebecf0; padding-top: 12px; }.task-status-duration > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }.task-status-duration > div:last-child > span { display: inline-flex; gap: 5px; padding: 5px 8px; border-radius: 6px; background: #f4f5f7; color: #6b778c; font-size: 11px; }.task-status-duration strong { color: #42526e; }

@@ -276,6 +276,10 @@ test("task lifecycle supports assignment and status changes", async () => {
   assert.deepEqual(updated.json().task.dependencies.map((dependency: { dependsOnTaskId: string }) => dependency.dependsOnTaskId), [blockerId]);
   assert.equal(updated.json().task.dependencies[0].projectKey, "API");
   assert.equal(updated.json().task.dependencies[0].isBlocking, true);
+  assert.ok(updated.json().task.statusDurations.TODO !== undefined);
+  assert.ok(updated.json().task.statusDurations.IN_PROGRESS !== undefined);
+  assert.equal(updated.json().task.statusDurations.DONE, undefined);
+  assert.equal(updated.json().task.statusDurations.CANCELLED, undefined);
 
   const postedDependencies = await app.inject({
     method: "POST", url: `/api/tasks/${taskId}/dependencies`, headers: { authorization: `Bearer ${jwtToken}` },
