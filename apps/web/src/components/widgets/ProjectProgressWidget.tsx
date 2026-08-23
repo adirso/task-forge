@@ -26,7 +26,8 @@ export function ProjectProgressWidget() {
             <div className="wpp-track">
               <div className="wpp-fill" style={{ width: `${pct}%`, background: p.color }} />
             </div>
-            <div className="wpp-sub">{p.counts.DONE} of {eligible} non-cancelled tasks done</div>
+            <div className="wpp-sub">{p.counts.DONE} of {eligible} non-cancelled tasks done · {p.nonDoneTaskCount} remaining · {p.cancelledTaskCount} cancelled</div>
+            <div className="wpp-sub">{p.nonDonePhaseCount} non-done phases</div>
           </button>
         );
       })}

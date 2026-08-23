@@ -396,6 +396,8 @@ test("reporting endpoints preserve access, dashboard, and agent operations behav
   const projectSummary = dashboard.json().projects.find((project: { id: string }) => project.id === projectId);
   assert.ok(projectSummary);
   assert.ok(projectSummary.counts.total >= 4);
+  assert.equal(projectSummary.cancelledTaskCount, projectSummary.counts.CANCELLED);
+  assert.equal(projectSummary.nonDoneTaskCount, projectSummary.counts.total - projectSummary.counts.DONE - projectSummary.counts.CANCELLED);
   assert.ok(dashboard.json().myTasks.some((task: { id: string }) => task.id === myTask.json().task.id));
   assert.ok(dashboard.json().stuckTasks.some((task: { id: string }) => task.id === taskId));
 

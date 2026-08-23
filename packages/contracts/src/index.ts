@@ -233,6 +233,7 @@ export interface Phase {
   createdAt: string;
   updatedAt: string;
   taskCount?: number;
+  nonDoneTaskCount?: number;
   completedTaskCount?: number;
   cancelledTaskCount?: number;
 }
@@ -395,6 +396,9 @@ export interface DashboardSummaryProject {
   key: string;
   color: string;
   counts: Record<TaskStatus, number> & { total: number };
+  nonDoneTaskCount: number;
+  cancelledTaskCount: number;
+  nonDonePhaseCount: number;
 }
 
 export interface DashboardSummaryTask {
