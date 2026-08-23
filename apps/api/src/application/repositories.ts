@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentLastActiveEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -45,7 +45,7 @@ export interface PhaseRepository {
 export interface TaskRepository {
   findById(id: string): Promise<TaskEntity | null>;
   findByProjectNumber(projectId: string, number: number): Promise<TaskEntity | null>;
-  listByProject(projectId: string, filters?: TaskFilters): Promise<TaskEntity[]>;
+  listByProject(projectId: string, filters: TaskFilters | undefined, page: PageRequest): Promise<Page<TaskEntity>>;
   listForAssignee(assigneeId: string, status?: string): Promise<TaskEntity[]>;
   listUsedStatuses(projectId: string): Promise<TaskEntity["status"][]>;
   claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"] }, options?: { phaseId?: string | null; priority?: string }): Promise<TaskEntity | null>;
@@ -68,7 +68,7 @@ export interface TaskDependencyRepository {
 }
 
 export interface TaskUpdateRepository {
-  listForTask(taskId: string): Promise<TaskUpdateEntity[]>;
+  listForTask(taskId: string, page: PageRequest): Promise<Page<TaskUpdateEntity>>;
   create(input: TaskUpdateEntity): Promise<TaskUpdateEntity>;
 }
 
@@ -83,7 +83,7 @@ export interface AutomationRepository { listForProject(projectId: string): Promi
 
 export interface NotificationRepository {
   notify(input: { userId: string; projectId?: string | null; taskId?: string | null; type: string; title: string; message: string }): Promise<void>;
-  listForUser(userId: string): Promise<NotificationEntity[]>;
+  listForUser(userId: string, page: PageRequest): Promise<Page<NotificationEntity> & { unreadCount: number }>;
   markRead(userId: string, id: string): Promise<NotificationEntity>;
   markAllRead(userId: string): Promise<number>;
 }
@@ -96,12 +96,12 @@ export interface ApiTokenRepository {
 }
 
 export interface SearchRepository {
-  searchAccessible(input: { actorId: string; isAdmin: boolean; query: string }): Promise<TaskEntity[]>;
+  searchAccessible(input: { actorId: string; isAdmin: boolean; query: string; page: PageRequest }): Promise<Page<TaskEntity>>;
 }
 
 export interface ActivityRepository {
   record(input: { projectId: string; taskId?: string | null; actorId: string; action: string; metadata?: unknown }): Promise<void>;
-  list(filters: { projectId?: string; taskId?: string; actorId?: string; limit?: number }): Promise<ActivityEntity[]>;
+  list(filters: { projectId?: string; taskId?: string; actorId?: string; page: PageRequest }): Promise<Page<ActivityEntity>>;
 }
 
 export interface WebhookDeliveryRepository {

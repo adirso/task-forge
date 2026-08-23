@@ -1,7 +1,7 @@
 import { TASK_STATUSES, type DashboardSummary, type DashboardSummaryTask, type TaskStatus } from "@taskforge/contracts";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { RequestContext } from "./context.js";
-import type { NotificationEntity, ReportingTaskEntity, TaskEntity } from "./models.js";
+import type { PageRequest, ReportingTaskEntity } from "./models.js";
 import type { ActivityService, ContextService, DashboardService, NotificationService, SearchService } from "./services.js";
 import type { UnitOfWork } from "./repositories.js";
 
@@ -21,19 +21,19 @@ const toDashboardTask = (task: ReportingTaskEntity): DashboardSummaryTask => ({
 
 export class NotificationApplicationService implements NotificationService {
   constructor(private readonly unitOfWork: UnitOfWork) {}
-  async list(context: RequestContext) { return this.unitOfWork.run((repositories) => repositories.notifications.listForUser(context.actor.userId)); }
+  async list(context: RequestContext, page: PageRequest) { return this.unitOfWork.run((repositories) => repositories.notifications.listForUser(context.actor.userId, page)); }
   async markRead(context: RequestContext, notificationId: string) { return this.unitOfWork.run(async (repositories) => { try { return await repositories.notifications.markRead(context.actor.userId, notificationId); } catch { throw new NotFoundError("Notification"); } }); }
   async markAllRead(context: RequestContext) { return this.unitOfWork.run((repositories) => repositories.notifications.markAllRead(context.actor.userId)); }
 }
 
 export class SearchApplicationService implements SearchService {
   constructor(private readonly unitOfWork: UnitOfWork) {}
-  async search(context: RequestContext, query: string): Promise<TaskEntity[]> { return this.unitOfWork.run((repositories) => repositories.search.searchAccessible({ actorId: context.actor.userId, isAdmin: context.actor.role === "ADMIN", query })); }
+  async search(context: RequestContext, query: string, page: PageRequest) { return this.unitOfWork.run((repositories) => repositories.search.searchAccessible({ actorId: context.actor.userId, isAdmin: context.actor.role === "ADMIN", query, page })); }
 }
 
 export class ActivityApplicationService implements ActivityService {
   constructor(private readonly unitOfWork: UnitOfWork) {}
-  async list(context: RequestContext, filters: { projectId?: string; taskId?: string; actorId?: string; limit?: number }) {
+  async list(context: RequestContext, filters: { projectId?: string; taskId?: string; actorId?: string; page: PageRequest }) {
     return this.unitOfWork.run(async (repositories) => {
       let resolvedProjectId = filters.projectId;
       if (!resolvedProjectId && filters.taskId) {
@@ -101,10 +101,9 @@ export class ContextApplicationService implements ContextService {
       if (!task) return { project, task: null };
       const [phase, updates] = await Promise.all([
         task.phaseId ? repositories.phases.findById(task.phaseId) : Promise.resolve(null),
-        repositories.updates.listForTask(task.id),
+        repositories.updates.listForTask(task.id, { limit: 50 }),
       ]);
-      const hydratedUpdates = await Promise.all(updates.map(async (update) => ({ ...update, author: await repositories.users.findById(update.authorId) ?? undefined })));
-      return { project, task: { ...task, phase, updates: hydratedUpdates } };
+      return { project, task: { ...task, phase, updates: updates.items, updatesPage: updates.page } };
     });
   }
 }

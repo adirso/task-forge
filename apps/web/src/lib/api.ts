@@ -1,4 +1,4 @@
-import { TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type Notification, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
@@ -351,13 +351,31 @@ export const api = {
   updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),
-  tasks: (projectId: string) => request<{ tasks: Task[] }>(`/projects/${projectId}/tasks`),
+  tasks: async (projectId: string) => {
+    const tasks: Task[] = [];
+    let cursor: string | null = null;
+    do {
+      const response: { tasks: Task[]; page?: PageInfo } = await request<{ tasks: Task[]; page?: PageInfo }>(`/projects/${projectId}/tasks?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      tasks.push(...response.tasks);
+      cursor = response.page?.nextCursor ?? null;
+    } while (cursor);
+    return { tasks };
+  },
   tags: (projectId: string) => request<{ tags: Tag[] }>(`/projects/${projectId}/tags`),
   task: (id: string) => request<{ task: Task }>(`/tasks/${id}`),
   createTask: (projectId: string, input: TaskCreate) => request<{ task: Task }>(`/projects/${projectId}/tasks`, { method: "POST", body: input }),
   updateTask: (id: string, input: TaskUpdate) => request<{ task: Task }>(`/tasks/${id}`, { method: "PATCH", body: input }),
   deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: "DELETE" }),
-  taskUpdates: (id: string) => request<{ updates: TaskNote[] }>(`/tasks/${id}/updates`),
+  taskUpdates: async (id: string) => {
+    const updates: TaskNote[] = [];
+    let cursor: string | null = null;
+    do {
+      const response: { updates: TaskNote[]; page?: PageInfo } = await request<{ updates: TaskNote[]; page?: PageInfo }>(`/tasks/${id}/updates?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      updates.push(...response.updates);
+      cursor = response.page?.nextCursor ?? null;
+    } while (cursor);
+    return { updates };
+  },
   addTaskUpdate: (id: string, body: string) => request<{ update: TaskNote }>(`/tasks/${id}/updates`, { method: "POST", body: { body } }),
   taskAttachments: (id: string) => request<{ attachments: Attachment[] }>(`/tasks/${id}/attachments`),
   uploadTaskAttachment: (id: string, input: { fileName: string; mimeType: string; data: string }) => request<{ attachment: Attachment }>(`/tasks/${id}/attachments`, { method: "POST", body: input }),
@@ -373,14 +391,14 @@ export const api = {
   createAgentToken: (userId: string, input: { name: string; expiresInDays: number | null; permissions?: string[] | null }) => request<{ token: string; prefix: string; expiresAt: string | null; warning: string }>(`/users/${userId}/tokens`, { method: "POST", body: input }),
   revealAgentToken: (userId: string, tokenId: string) => request<{ token: string }>(`/users/${userId}/tokens/${tokenId}/reveal`, { method: "POST" }),
   revokeAgentToken: (id: string) => request<void>(`/users/tokens/${id}`, { method: "DELETE" }),
-  notifications: () => request<{ notifications: Notification[]; unreadCount: number }>("/notifications"),
+  notifications: () => request<{ notifications: Notification[]; unreadCount: number; page?: PageInfo }>("/notifications"),
   readNotification: (id: string) => request<{ notification: Notification }>(`/notifications/${id}/read`, { method: "PATCH" }),
   readAllNotifications: () => request<{ updated: number }>("/notifications/read-all", { method: "POST" }),
-  search: (query: string) => request<{ results: TaskSearchResult[] }>(`/search?q=${encodeURIComponent(query)}`),
+  search: (query: string) => request<{ results: TaskSearchResult[]; page?: PageInfo }>(`/search?q=${encodeURIComponent(query)}`),
   context: (params: { project?: string; task?: string }) => request<{ project: Project; task: Task | null }>(`/context?${new URLSearchParams(Object.entries(params).filter((entry): entry is [string, string] => Boolean(entry[1]))).toString()}`),
-  taskActivity: (taskId: string, limit = 30) => request<{ activity: ActivityEvent[] }>(`/activity?taskId=${taskId}&limit=${limit}`),
-  projectActivity: (projectId: string, limit = 50) => request<{ activity: ActivityEvent[] }>(`/activity?projectId=${projectId}&limit=${limit}`),
-  activityFeed: (limit = 50) => request<{ activity: ActivityEvent[] }>(`/activity?limit=${limit}`),
+  taskActivity: (taskId: string, limit = 30) => request<{ activity: ActivityEvent[]; page?: PageInfo }>(`/activity?taskId=${taskId}&limit=${limit}`),
+  projectActivity: (projectId: string, limit = 50) => request<{ activity: ActivityEvent[]; page?: PageInfo }>(`/activity?projectId=${projectId}&limit=${limit}`),
+  activityFeed: (limit = 50) => request<{ activity: ActivityEvent[]; page?: PageInfo }>(`/activity?limit=${limit}`),
   agentOps: () => request<{ agents: AgentOpsEntry[] }>("/users/agents/ops"),
   updateAgentWebhook: (agentId: string, webhookUrl: string | null) => request<{ user: User; webhookSecret?: string }>(`/users/${agentId}/webhook`, { method: "PATCH", body: { webhookUrl } }),
   rotateAgentWebhookSecret: (agentId: string) => request<{ user: User; webhookSecret: string }>(`/users/${agentId}/webhook-secret/rotate`, { method: "POST" }),

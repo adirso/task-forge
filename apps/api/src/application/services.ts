@@ -1,6 +1,6 @@
 import type { AgentOpsEntry, DashboardSummary, WebhookDelivery, WebhookDeliveryStatus } from "@taskforge/contracts";
 import type { ProjectContext, RequestContext } from "./context.js";
-import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, NotificationEntity, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
 export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
@@ -46,13 +46,13 @@ export interface PhaseService {
 }
 
 export interface TaskService {
-  list(context: ProjectContext, filters?: TaskFilters): Promise<TaskEntity[]>;
+  list(context: ProjectContext, filters: TaskFilters | undefined, page: PageRequest): Promise<Page<TaskEntity>>;
   get(context: RequestContext, taskId: string): Promise<TaskEntity>;
   create(context: ProjectContext, input: TaskCreateInput): Promise<TaskEntity>;
   update(context: RequestContext, taskId: string, input: TaskUpdateInput): Promise<TaskEntity>;
   delete(context: RequestContext, taskId: string): Promise<void>;
   addUpdate(context: RequestContext, taskId: string, body: string): Promise<TaskUpdateEntity>;
-  listUpdates(context: RequestContext, taskId: string): Promise<TaskUpdateEntity[]>;
+  listUpdates(context: RequestContext, taskId: string, page: PageRequest): Promise<Page<TaskUpdateEntity>>;
   listTags(context: ProjectContext): Promise<Array<{ id: string; projectId: string; name: string; createdAt: string; taskCount: number }>>;
   claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string }): Promise<TaskEntity>;
 }
@@ -85,17 +85,17 @@ export interface WebhookDeliveryService {
 }
 
 export interface NotificationService {
-  list(context: RequestContext): Promise<NotificationEntity[]>;
+  list(context: RequestContext, page: PageRequest): Promise<Page<NotificationEntity> & { unreadCount: number }>;
   markRead(context: RequestContext, notificationId: string): Promise<NotificationEntity>;
   markAllRead(context: RequestContext): Promise<number>;
 }
 
 export interface SearchService {
-  search(context: RequestContext, query: string): Promise<TaskEntity[]>;
+  search(context: RequestContext, query: string, page: PageRequest): Promise<Page<TaskEntity>>;
 }
 
 export interface ActivityService {
-  list(context: RequestContext, filters: { projectId?: string; taskId?: string; actorId?: string; limit?: number }): Promise<ActivityEntity[]>;
+  list(context: RequestContext, filters: { projectId?: string; taskId?: string; actorId?: string; page: PageRequest }): Promise<Page<ActivityEntity>>;
 }
 
 export interface DashboardService {

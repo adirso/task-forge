@@ -3,12 +3,13 @@ import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { SearchApplicationService } from "../application/cross-cutting-services.js";
 import { taskResponse } from "../lib/task-response.js";
+import { pageRequest } from "../infrastructure/pagination.js";
 
-type SearchQuery = { q?: string };
+type SearchQuery = { q?: string; cursor?: string; limit?: string };
 const service = new SearchApplicationService(createUnitOfWork(db));
 const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: (request.authUser.tokenScopes ?? null) as import("../application/context.js").TokenScope[] | null } });
 
 export async function searchRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
-  app.get<{ Querystring: SearchQuery }>("/", { schema: { tags: ["Search"], summary: "Search accessible tasks across projects" } }, async (request) => ({ results: request.query.q?.trim() ? (await service.search(context(request), request.query.q.trim())).map(taskResponse) : [] }));
+  app.get<{ Querystring: SearchQuery }>("/", { schema: { tags: ["Search"], summary: "Search accessible tasks across projects" } }, async (request) => { const page = pageRequest(request.query); if (!request.query.q?.trim()) return { results: [], page: { limit: page.limit, hasMore: false, nextCursor: null } }; const result = await service.search(context(request), request.query.q.trim(), page); return { results: result.items.map(taskResponse), page: result.page }; });
 }

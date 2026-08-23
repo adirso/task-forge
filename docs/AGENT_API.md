@@ -60,7 +60,17 @@ curl -sS "http://127.0.0.1:4000/api/context?project=TAS&task=TAS-4" \
   -H "Authorization: Bearer $AGENT_TOKEN"
 ```
 
-`project` accepts a project key or UUID. `task` accepts a readable key such as `TAS-4` or a task UUID. When a task is resolved, `task.updates` contains its notes newest-first with each note's `author` hydrated, so agents do not need a separate `GET /api/tasks/:id/updates` request to read them.
+`project` accepts a project key or UUID. `task` accepts a readable key such as `TAS-4` or a task UUID. When a task is resolved, `task.updates` contains the first page of notes newest-first with each note's `author` hydrated. `task.updatesPage` has the same continuation shape as the notes endpoint; follow it with `GET /api/tasks/:id/updates` when `hasMore` is true.
+
+## Pagination
+
+Project task lists, search, task updates, notifications, and activity are bounded cursor-paginated endpoints. They keep their existing first-page array fields (`tasks`, `results`, `updates`, `notifications`, or `activity`) and add:
+
+```json
+{"page":{"limit":50,"hasMore":true,"nextCursor":"opaque-value"}}
+```
+
+Pass `limit` (1–100, default 50; activity retains its existing maximum of 200) and the returned opaque `cursor` to request the next page. Do not parse or modify cursors. A final page has `hasMore: false` and `nextCursor: null`. Results use deterministic keyset ordering with an ID tie-breaker, so equal timestamps do not duplicate or disappear at a page boundary. Filters and authorization are applied before the page limit. Notification `unreadCount` is the total unread count for the current user, not just the current page.
 
 ## Projects
 
@@ -150,7 +160,7 @@ curl -sS -X POST "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks" \
   }'
 ```
 
-List filters are query parameters: `status`, `assigneeId`, `priority`, `type`, `phaseId`, `tag`, `minPoints`, `maxPoints`, and `q` (searches title/description). Task responses include `phaseId` plus a `phase` object (`id`, `number`, `goal`, and `isActive`), as well as `tags`, `dependencies` (with `isBlocking`), `attachments`, and the hydrated `assignee`.
+List filters are query parameters: `status`, `assigneeId`, `priority`, `type`, `phaseId`, `tag`, `minPoints`, `maxPoints`, and `q` (searches title/description), plus the shared `limit` and `cursor` pagination parameters. Task responses include `phaseId` plus a `phase` object (`id`, `number`, `goal`, and `isActive`), as well as `tags`, `dependencies` (with `isBlocking`), `attachments`, and the hydrated `assignee`.
 
 ### Project workflow and task claiming
 
@@ -329,6 +339,7 @@ GET    /api/notifications
 PATCH  /api/notifications/:id/read
 POST   /api/notifications/read-all
 GET    /api/search?q=retry
+GET    /api/activity?projectId=...&limit=50
 ```
 
 Agent token metadata can be listed, but the secret itself is never returned after issuance. Profile pictures accept PNG, JPEG, GIF, or WebP data URLs and are visible on assignees and task updates.
