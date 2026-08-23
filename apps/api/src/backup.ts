@@ -261,8 +261,8 @@ async function restoreSqlite(databasePath: string, sourcePath: string, attachmen
     if (hadDb) await fs.rename(databasePath, oldDb);
     await fs.rename(stagedDb, databasePath);
     attachmentSwap = await swapDirectory(stagedAttachments, attachmentsPath);
-    await fs.rm(oldDb, { force: true }).catch(() => {});
-    if (attachmentSwap.hadOld) await fs.rm(attachmentSwap.old, { recursive: true, force: true }).catch(() => {});
+    // Keep the previous paths until the operator has verified the restore.
+    // They are the recovery point if post-restore checks expose a problem.
   } catch (error) {
     await fs.rm(stagedDb, { force: true });
     if (attachmentSwap) await rollbackDirectory(attachmentsPath, attachmentSwap.old, attachmentSwap.hadOld);
@@ -302,7 +302,8 @@ async function restoreMysql(databaseUrl: string, sourcePath: string, attachments
     }
     await connection.query("SET FOREIGN_KEY_CHECKS = 1");
     await connection.commit();
-    if (attachmentSwap.hadOld) await fs.rm(attachmentSwap.old, { recursive: true, force: true }).catch(() => {});
+    // Keep the previous attachment directory until the operator has verified
+    // the restore, matching the SQLite recovery behavior above.
   } catch (error) {
     await connection.rollback().catch(() => {});
     if (attachmentSwap) await rollbackDirectory(attachmentsPath, attachmentSwap.old, attachmentSwap.hadOld);

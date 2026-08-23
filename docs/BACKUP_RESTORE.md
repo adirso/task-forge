@@ -42,6 +42,6 @@ After restore, verify:
 3. `schema_migrations` contains the expected versions.
 4. Redacted archives have had human passwords and agent tokens re-established through the normal bootstrap/rotation flows.
 
-Keep the pre-restore database and attachment rollback paths until these checks and a normal backup have succeeded. Never edit `manifest.json`, migration rows, or checksums to force an archive through validation.
+On a forced restore, the pre-restore database and attachment paths are retained beside the targets as `.previous-*` recovery copies. Keep them until these checks and a normal backup have succeeded, then remove them during a planned cleanup. Never edit `manifest.json`, migration rows, or checksums to force an archive through validation.
 
 Round-trip tests live in `apps/api/test/backup.test.ts` and cover representative data, redaction and explicit secure mode, missing files, corrupted archives, and failed recovery without partial overwrite. Run `npm test` for SQLite; set `TEST_DATABASE_URL` to a disposable MySQL 8 database to include the MySQL round-trip.

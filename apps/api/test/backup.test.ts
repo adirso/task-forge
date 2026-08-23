@@ -106,6 +106,14 @@ test("corrupt and incomplete archives fail before overwriting an existing restor
   const originalDatabase = await fs.readFile(targetDatabase);
   const originalAttachment = await fs.readFile(path.join(targetAttachments, ids.attachment));
 
+  await backup.restoreBackup({ inputPath: sourceArchive, databasePath: targetDatabase, attachmentsPath: targetAttachments, databaseDriver: "sqlite", force: true });
+  const retainedDatabaseCopies = (await fs.readdir(root)).filter((entry) => entry.startsWith("failure-target.db.previous-"));
+  const retainedAttachmentCopies = (await fs.readdir(root)).filter((entry) => entry.startsWith("failure-attachments.previous-"));
+  assert.equal(retainedDatabaseCopies.length, 1);
+  assert.equal(retainedAttachmentCopies.length, 1);
+  assert.deepEqual(await fs.readFile(path.join(root, retainedDatabaseCopies[0])), originalDatabase);
+  assert.deepEqual(await fs.readFile(path.join(root, retainedAttachmentCopies[0], ids.attachment)), originalAttachment);
+
   const missingArchive = path.join(root, "missing-file.tar.gz");
   await rewriteArchive(sourceArchive, missingArchive, async (staging) => { await fs.rm(path.join(staging, "attachments", ids.attachment)); });
   await assert.rejects(backup.restoreBackup({ inputPath: missingArchive, databasePath: targetDatabase, attachmentsPath: targetAttachments, databaseDriver: "sqlite", force: true }), /missing|checksum|attachment/i);
