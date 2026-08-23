@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  NODE_VERSION: 22
+
+jobs:
+  quality-sqlite:
+    name: Quality and SQLite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Prepare diagnostics
+        run: mkdir -p artifacts
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck workspaces
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee artifacts/typecheck.log
+
+      - name: Build workspaces
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee artifacts/build.log
+
+      - name: Test workspaces with SQLite
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee artifacts/workspace-tests.log
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: quality-sqlite-diagnostics
+          path: |
+            artifacts/*.log
+            ~/.npm/_logs/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  api-mysql:
+    name: API on MySQL 8
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: taskforge-ci-root
+          MYSQL_DATABASE: taskforge_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -ptaskforge-ci-root --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      TEST_DATABASE_URL: mysql://root:taskforge-ci-root@127.0.0.1:3306/taskforge_test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Prepare diagnostics
+        run: mkdir -p artifacts
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared contracts
+        run: npm run build -w @taskforge/contracts
+
+      - name: Test API with MySQL
+        run: |
+          set -o pipefail
+          npm run test:mysql -w @taskforge/api 2>&1 | tee artifacts/api-mysql.log
+
+      - name: Capture MySQL service logs
+        if: failure()
+        run: docker logs "${{ job.services.mysql.id }}" > artifacts/mysql-service.log 2>&1 || true
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-mysql-diagnostics
+          path: |
+            artifacts/*.log
+            ~/.npm/_logs/*.log
+          if-no-files-found: ignore
+          retention-days: 7

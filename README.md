@@ -20,7 +20,7 @@ TaskForge is a local-first project and task manager for teams made of people and
 
 ## Quick start
 
-Requirements: Node.js 20 or newer.
+Requirements: Node.js 22 or newer. CI uses Node.js 22 LTS.
 
 ```bash
 npm install
@@ -48,6 +48,7 @@ packages/
   contracts/  Shared Zod validation and TypeScript domain types
 docs/
   AGENT_API.md  Agent authentication and API examples
+  CI.md         Required CI checks and local equivalents
 ```
 
 ## Commands
@@ -56,10 +57,14 @@ docs/
 npm run dev        # API on :4000 and web app on :5173
 npm run build      # Production builds for all workspaces
 npm run typecheck  # Strict TypeScript checks
-npm test           # API integration tests
+npm test           # Tests for every workspace
 npm run db:seed    # Idempotent demo seed
 npm run admin:bootstrap # Create or rotate the production administrator
 ```
+
+## Continuous integration
+
+Every pull request and push to `main` runs the required **Quality and SQLite** and **API on MySQL 8** checks. See the [CI guide](docs/CI.md) for their exact scope, local equivalents, and failure diagnostics.
 
 ## Dashboard examples
 
