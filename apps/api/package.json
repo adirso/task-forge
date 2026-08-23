@@ -9,6 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "test:mysql": "node --import tsx --test test/*.test.ts",
+    "backup:create": "node --import tsx src/backup.ts create",
+    "backup:restore": "node --import tsx src/backup.ts restore",
     "db:seed": "node --import tsx src/db/seed.ts",
     "admin:bootstrap": "node --import tsx src/db/bootstrap-admin.ts"
   },
