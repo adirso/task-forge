@@ -20,7 +20,7 @@ TaskForge is a local-first project and task manager for teams made of people and
 
 ## Quick start
 
-Requirements: Node.js 22 or newer. CI uses Node.js 24 LTS.
+Requirements: Node.js 22 or newer. CI uses Node.js 22 LTS.
 
 ```bash
 npm install

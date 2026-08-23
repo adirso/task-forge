@@ -5,7 +5,7 @@ GitHub Actions runs CI for every pull request and every push to `main`. Branch p
 - **Quality and SQLite** installs the locked dependency graph, typechecks and builds every workspace, and runs every workspace test with the API's default SQLite database.
 - **API on MySQL 8** runs the complete API suite against an ephemeral MySQL 8.4 service.
 
-Both jobs use Node.js 24 and `npm ci`. The npm cache is keyed from `package-lock.json`; `node_modules` is never cached. The MySQL credentials are temporary values scoped to the job, so the workflow does not require repository secrets.
+Both jobs use Node.js 22 LTS and `npm ci`. The npm cache is keyed from `package-lock.json`; `node_modules` is never cached. The MySQL credentials are temporary values scoped to the job, so the workflow does not require repository secrets.
 
 When a job fails, its command output and npm logs are uploaded for seven days. The MySQL job also captures the database service logs. Download `quality-sqlite-diagnostics` or `api-mysql-diagnostics` from the failed workflow run.
 
