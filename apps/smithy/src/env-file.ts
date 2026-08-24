@@ -1,4 +1,5 @@
 import { access, readFile, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 export interface SmithyProviderValues {
@@ -45,4 +46,18 @@ export async function writeProviders(file: string, providers: Record<string, Smi
 
 export function defaultEnvFile(cwd = process.cwd()): string {
   return path.join(cwd, ".env");
+}
+
+/** Load a small dotenv subset without replacing values explicitly exported by the operator. */
+export function loadEnvFile(file: string, target: NodeJS.ProcessEnv = process.env): boolean {
+  if (!existsSync(file)) return false;
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    const key = match?.[1];
+    if (!key || target[key] !== undefined) continue;
+    let value = match[2] ?? "";
+    if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) value = value.slice(1, -1);
+    target[key] = value;
+  }
+  return true;
 }
