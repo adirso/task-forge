@@ -6,14 +6,14 @@ import type { RepositorySet } from "../src/application/repositories.js";
 const task = { id: "task-1", projectId: "project-1", creatorId: "owner-1", status: "IN_REVIEW", pullRequestState: "OPEN" } as never;
 const project = { id: "project-1", ownerId: "owner-1", availableStatuses: ["IN_REVIEW", "READY_FOR_REVIEW"] } as never;
 function setup() {
-  let gate: any = null;
-  const set = { projects: { findById: async () => project }, memberships: { isMember: async () => true }, tasks: { findById: async () => task, update: async (_id: string, input: unknown) => ({ ...task, ...input }) }, activity: { record: async () => undefined }, gates: {
+  let gate: any = null; const findings: any[] = [];
+  const set = { projects: { findById: async () => project }, memberships: { isMember: async () => true }, tasks: { findById: async () => task, update: async (_id: string, input: unknown) => ({ ...task, ...input }) }, findings: { listForTask: async () => findings }, activity: { record: async () => undefined }, gates: {
     findByTask: async () => gate,
     save: async (input: any) => { gate = input; return input; },
     approve: async (_id: string, headSha: string, actorId: string, now: string) => { if (!gate || gate.headSha !== headSha) return null; gate = { ...gate, approvedHeadSha: headSha, approvedById: actorId, approvedAt: now }; return gate; },
     merge: async (_id: string, headSha: string, actorId: string, now: string) => { if (!gate || gate.headSha !== headSha || gate.approvedHeadSha !== headSha) return null; gate = { ...gate, mergedHeadSha: headSha, mergedById: actorId, mergedAt: now }; return gate; },
   } } as unknown as RepositorySet;
-  return { set, service: new TaskGateApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T12:00:00.000Z") };
+  return { set, findings, service: new TaskGateApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T12:00:00.000Z") };
 }
 
 const human = { actor: { userId: "owner-1", kind: "HUMAN" as const, role: "ADMIN" as const, name: "Owner", tokenScopes: null } };
@@ -50,4 +50,13 @@ test("ordinary project members cannot fabricate gate evidence", async () => {
   const { service } = setup();
   const member = { actor: { userId: "member-1", kind: "HUMAN" as const, role: "MEMBER" as const, name: "Member", tokenScopes: null } };
   await assert.rejects(() => service.record(member, task.id, { headSha: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }] }), /authorized CI agent/);
+});
+
+test("approval is blocked by unresolved P1 findings", async () => {
+  const { service, findings } = setup(); const head = "ffffffffffffffffffffffffffffffffffffffff";
+  await service.record(human, task.id, { headSha: head, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha: head }] });
+  findings.push({ id: "finding-1", severity: "P1", disposition: "OPEN" });
+  await assert.rejects(() => service.approve(codex, task.id, head), /Blocking review findings/);
+  findings[0].disposition = "ACCEPTED";
+  await service.approve(codex, task.id, head);
 });

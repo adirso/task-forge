@@ -41,6 +41,8 @@ export class TaskFindingApplicationService implements TaskFindingService {
       if (input.disposition === "FIX_NEEDED") {
         const fixStatus = project.availableStatuses.includes("FIX_NEEDED") ? "FIX_NEEDED" : project.availableStatuses.includes("IN_PROGRESS") ? "IN_PROGRESS" : null;
         if (!fixStatus) throw new ValidationError("Project workflow must enable FIX_NEEDED or IN_PROGRESS before requesting fixes");
+        const gate = await r.gates.findByTask(task.id);
+        if (gate) await r.gates.save({ ...gate, approvedHeadSha: null, approvedById: null, approvedAt: null, mergedHeadSha: null, mergedById: null, mergedAt: null, updatedAt: now });
         await r.tasks.update(task.id, { status: fixStatus });
         const attemptCount = await r.runs.countForTask(task.id); if (attemptCount >= 6) throw new ValidationError("Task has reached the maximum autonomous delivery cycle limit");
         await r.runs.create({ id: this.newId(), taskId: task.id, projectId: task.projectId, requestedById: context.actor.userId, kind: "FIX", status: "PENDING", attemptCount: 0, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: now, updatedAt: now, completedAt: null });

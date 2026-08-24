@@ -31,6 +31,8 @@ export class TaskGateApplicationService implements TaskGateService {
     return this.unitOfWork.run(async (r) => {
       const task = await r.tasks.findById(taskId); if (!task) throw new NotFoundError("Task"); await this.authorize(r, context, task.projectId);
       if (context.actor.kind !== "AGENT" || !context.actor.tokenScopes?.includes("task:gate:approve")) throw new ForbiddenError("Only an agent with the task:gate:approve capability can approve a task gate");
+      const blockingFindings = r.findings ? (await r.findings.listForTask(taskId)).filter((finding) => ["P0", "P1", "P2"].includes(finding.severity) && ["OPEN", "FIX_NEEDED", "DEFERRED", "ESCALATED"].includes(finding.disposition)) : [];
+      if (blockingFindings.length) throw new ValidationError(`Blocking review findings must be resolved before approval: ${blockingFindings.map((finding) => finding.id).join(", ")}`);
       const gate = await this.requireReady(r, taskId, headSha); const approved = await r.gates.approve(taskId, headSha, context.actor.userId, this.now()); if (!approved) throw new ValidationError("The PR head changed before approval");
       await r.activity.record({ projectId: task.projectId, taskId, actorId: context.actor.userId, action: "task.gate_approved", metadata: { headSha, requiredChecks: gate.requiredChecks } }); return approved;
     });
