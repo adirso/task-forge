@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -126,12 +126,6 @@ export interface AgentRunRepository {
   complete(id: string, owner: string, status: "SUCCEEDED" | "FAILED" | "CANCELLED", now: string, error?: string | null): Promise<boolean>;
   cancel(id: string, now: string, error?: string | null): Promise<boolean>;
 }
-export interface TaskGateRepository {
-  findByTask(taskId: string): Promise<TaskGateEntity | null>;
-  save(input: TaskGateEntity): Promise<TaskGateEntity>;
-  approve(taskId: string, headSha: string, actorId: string, now: string): Promise<TaskGateEntity | null>;
-  merge(taskId: string, headSha: string, actorId: string, now: string): Promise<TaskGateEntity | null>;
-}
 
 export interface ReportingRepository {
   countTasksByProject(projectIds: string[]): Promise<TaskStatusCountEntity[]>;
@@ -160,7 +154,6 @@ export interface RepositorySet {
   tokens: ApiTokenRepository;
   search: SearchRepository;
   runs: AgentRunRepository;
-  gates: TaskGateRepository;
 }
 
 export interface UnitOfWork {

@@ -117,23 +117,6 @@ test("agent-run repository enforces expiry, task-scoped claims, and lease-indepe
   assert.doesNotMatch(cancel?.sql?.split(" WHERE ")[1] ?? "", /lease_owner/);
 });
 
-test("gate repository persists SHA-bound evidence and conditional approvals", async () => {
-  const queries: string[] = [];
-  const database: DatabasePort = {
-    dialect: "sqlite",
-    prepare(sql) {
-      return { async get(..._params) { queries.push(sql); return undefined; }, async all(..._params) { queries.push(sql); return []; }, async run(..._params) { queries.push(sql); return { changes: 1 }; } };
-    },
-    transaction(callback) { return callback; },
-  };
-  const gate = createRepositories(database).gates;
-  await gate.save({ taskId: "task-1", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }], approvedHeadSha: null, approvedById: null, approvedAt: null, mergedHeadSha: null, mergedById: null, mergedAt: null, updatedAt: "2026-08-24T12:00:00.000Z" });
-  await gate.approve("task-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "codex-1", "2026-08-24T12:00:00.000Z");
-  await gate.merge("task-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner-1", "2026-08-24T12:00:00.000Z");
-  assert.ok(queries.some((sql) => sql.includes("head_sha = ?")));
-  assert.ok(queries.some((sql) => sql.includes("approved_head_sha = ?")));
-});
-
 test("large task pages use a bounded number of relationship queries", async () => {
   const queries: string[] = [];
   const taskRows = Array.from({ length: 75 }, (_, index) => ({

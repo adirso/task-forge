@@ -55,21 +55,6 @@ export interface AgentRunEntity {
   completedAt: string | null;
 }
 
-export type GateCheckStatus = "PASS" | "FAIL" | "PENDING";
-export interface TaskGateEntity {
-  taskId: string;
-  headSha: string;
-  requiredChecks: string[];
-  checks: Array<{ name: string; status: GateCheckStatus; headSha: string; detailsUrl?: string | null }>;
-  approvedHeadSha: string | null;
-  approvedById: string | null;
-  approvedAt: string | null;
-  mergedHeadSha: string | null;
-  mergedById: string | null;
-  mergedAt: string | null;
-  updatedAt: string;
-}
-
 export interface AgentWebhookConfiguration {
   webhookUrl: string | null;
   secretCiphertext: string | null;
