@@ -34,6 +34,27 @@ export interface WebhookDeliveryEntity {
   projectKey?: string | null;
 }
 
+export type AgentRunKind = "IMPLEMENTATION" | "REVIEW";
+export type AgentRunStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+export interface AgentRunEntity {
+  id: string;
+  taskId: string;
+  projectId: string;
+  requestedById: string;
+  kind: AgentRunKind;
+  status: AgentRunStatus;
+  attemptCount: number;
+  maxAttempts: number;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+  heartbeatAt: string | null;
+  timeoutAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
 export interface AgentWebhookConfiguration {
   webhookUrl: string | null;
   secretCiphertext: string | null;

@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentLastActiveEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -115,6 +115,14 @@ export interface WebhookDeliveryRepository {
   markFailed(id: string, failedAt: string, lastError: string, httpStatus: number | null): Promise<void>;
   retry(id: string, nextAttemptAt: string): Promise<boolean>;
 }
+export interface AgentRunRepository {
+  create(input: AgentRunEntity): Promise<AgentRunEntity>;
+  findById(id: string): Promise<AgentRunEntity | null>;
+  listForTask(taskId: string): Promise<AgentRunEntity[]>;
+  claim(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
+  heartbeat(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
+  complete(id: string, owner: string, status: "SUCCEEDED" | "FAILED" | "CANCELLED", now: string, error?: string | null): Promise<boolean>;
+}
 
 export interface ReportingRepository {
   countTasksByProject(projectIds: string[]): Promise<TaskStatusCountEntity[]>;
@@ -142,6 +150,7 @@ export interface RepositorySet {
   reporting: ReportingRepository;
   tokens: ApiTokenRepository;
   search: SearchRepository;
+  runs: AgentRunRepository;
 }
 
 export interface UnitOfWork {

@@ -22,6 +22,7 @@ import { attachmentRoutes } from "./routes/attachments.js";
 import { automationRoutes } from "./routes/automations.js";
 import { activityRoutes } from "./routes/activity.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
+import { runRoutes } from "./routes/runs.js";
 import { RateLimiter } from "./lib/rate-limit.js";
 
 export async function buildApp(options: { startWebhookDispatcher?: boolean } = {}) {
@@ -79,6 +80,7 @@ export async function buildApp(options: { startWebhookDispatcher?: boolean } = {
   await app.register(automationRoutes, { prefix: "/api" });
   await app.register(activityRoutes, { prefix: "/api/activity" });
   await app.register(dashboardRoutes, { prefix: "/api/dashboard" });
+  await app.register(runRoutes, { prefix: "/api" });
 
   return app;
 }
