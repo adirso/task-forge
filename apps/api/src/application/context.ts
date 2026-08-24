@@ -1,4 +1,4 @@
-import type { UserKind, UserRole } from "@taskforge/contracts";
+import type { TokenScope, UserKind, UserRole } from "@taskforge/contracts";
 
 /**
  * Token scopes that restrict what an API token can do.
@@ -15,15 +15,7 @@ import type { UserKind, UserRole } from "@taskforge/contracts";
  *   task:update:branch — update branch and pull-request fields
  *   task:update:meta   — update title, description, priority, type, assignee, phase, etc.
  */
-export type TokenScope =
-  | "task:read"
-  | "task:create"
-  | "task:delete"
-  | "task:claim"
-  | "task:update:status"
-  | "task:update:notes"
-  | "task:update:branch"
-  | "task:update:meta";
+export type { TokenScope };
 
 /** The only actor information an application service should need from HTTP auth. */
 export interface ActorContext {
