@@ -63,7 +63,7 @@ export class TaskApplicationService implements TaskService {
         this.assertStatusTransition(project.availableStatuses, existing.status, input.status);
       }
       await this.validateRelations(repositories, existing.projectId, taskId, input);
-      const { tags, dependencyIds, ...fields } = input;
+      const { tags, dependencyIds, runId, ...fields } = input;
       const now = this.now();
       const task = Object.keys(fields).length ? await repositories.tasks.update(taskId, fields) : existing;
       if (!Object.keys(fields).length) await repositories.tasks.update(taskId, { updatedAt: now });
@@ -75,7 +75,7 @@ export class TaskApplicationService implements TaskService {
       if (input.status && reviewStatuses.has(input.status) && !reviewStatuses.has(existing.status) && existing.creatorId !== context.actor.userId) await this.notify(repositories, existing.creatorId, { ...existing, ...task, title: input.title ?? existing.title }, context, "REVIEW_REQUESTED", "Review requested");
       const automated = await this.automationEngine.apply(repositories, context, existing, { ...task, updatedAt: now }, "TASK_UPDATED");
       if (assigneeChanged && input.assigneeId && input.assigneeId !== context.actor.userId) await this.enqueueAssignmentWebhook(repositories, { ...task, assigneeId: input.assigneeId }, context);
-      if (automated.status !== existing.status && automated.assigneeId !== context.actor.userId) await this.enqueueStatusWebhook(repositories, automated, existing.status, context);
+      if (automated.status !== existing.status && automated.assigneeId !== context.actor.userId) await this.enqueueStatusWebhook(repositories, automated, existing.status, context, runId ?? null);
       return repositories.tasks.findById ? await repositories.tasks.findById(automated.id) ?? automated : automated;
     });
   }
@@ -228,7 +228,7 @@ export class TaskApplicationService implements TaskService {
     await repositories.webhookDeliveries.create({ id, agentId: assignee.id, taskId: task.id, eventType: "task.update_added", payload: JSON.stringify(payload), status: "PENDING", attemptCount: 0, nextAttemptAt: update.createdAt, lockedUntil: null, lastAttemptAt: null, deliveredAt: null, failedAt: null, lastError: null, httpStatus: null, createdAt: update.createdAt, updatedAt: update.createdAt });
   }
 
-  private async enqueueStatusWebhook(repositories: RepositorySet, task: TaskEntity, previousStatus: TaskStatus, context: RequestContext) {
+  private async enqueueStatusWebhook(repositories: RepositorySet, task: TaskEntity, previousStatus: TaskStatus, context: RequestContext, runId: string | null = null) {
     if (!task.assigneeId) return;
     const assignee = await repositories.users.findById(task.assigneeId);
     if (!assignee || assignee.kind !== "AGENT" || !assignee.webhookUrl) return;
@@ -247,6 +247,7 @@ export class TaskApplicationService implements TaskService {
         assigneeId: task.assigneeId,
       },
       previousStatus,
+      runId,
       changedBy: { id: context.actor.userId, name: context.actor.name },
       timestamp,
     };

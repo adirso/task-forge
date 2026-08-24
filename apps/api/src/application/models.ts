@@ -34,7 +34,7 @@ export interface WebhookDeliveryEntity {
   projectKey?: string | null;
 }
 
-export type AgentRunKind = "IMPLEMENTATION" | "REVIEW";
+export type AgentRunKind = "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
 export type AgentRunStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
 export interface AgentRunEntity {
   id: string;

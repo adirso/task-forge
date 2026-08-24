@@ -6,7 +6,7 @@ import { AgentRunApplicationService } from "../application/run-service.js";
 
 const service = new AgentRunApplicationService(createUnitOfWork(db));
 const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: request.authUser.tokenScopes as import("../application/context.js").TokenScope[] | null } });
-const createSchema = z.object({ kind: z.enum(["IMPLEMENTATION", "REVIEW"]), maxAttempts: z.number().int().min(1).max(10).optional(), timeoutAt: z.string().datetime().nullable().optional() });
+const createSchema = z.object({ kind: z.enum(["IMPLEMENTATION", "REVIEW", "RE_REVIEW", "FIX"]), maxAttempts: z.number().int().min(1).max(10).optional(), timeoutAt: z.string().datetime().nullable().optional() });
 const leaseSchema = z.object({ leaseMs: z.number().int().min(5_000).max(900_000).optional() });
 const completeSchema = z.object({ status: z.enum(["SUCCEEDED", "FAILED", "CANCELLED"]), error: z.string().trim().max(1000).nullable().optional() });
 

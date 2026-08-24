@@ -78,6 +78,7 @@ export const taskCreateSchema = z.object({
 
 export const taskUpdateSchema = taskCreateSchema.partial().extend({
   position: z.number().int().min(0).optional(),
+  runId: z.string().uuid().nullable().optional(),
 });
 
 export const memberAddSchema = z.object({

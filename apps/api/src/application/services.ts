@@ -5,7 +5,7 @@ import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, NotificationEnti
 export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
 export type TaskCreateInput = TaskInputFields & { tags?: string[]; dependencyIds?: string[] };
-export type TaskUpdateInput = Partial<TaskInputFields> & { tags?: string[]; dependencyIds?: string[] };
+export type TaskUpdateInput = Partial<TaskInputFields> & { tags?: string[]; dependencyIds?: string[]; runId?: string | null };
 export interface TaskFilters {
   status?: string;
   assigneeId?: string;

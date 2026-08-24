@@ -167,6 +167,7 @@ test("status changes enqueue a signed-delivery event for another agent", async (
     event: "task.status_changed",
     task: { id: "task-62", number: 62, title: "Workflow status", description: "", definitionOfDone: "", status: "READY_FOR_REVIEW", priority: "HIGH", type: "INFRA", branch: null, projectId: "project-1", projectKey: "TAS", projectName: "Task Forge", assigneeId: "agent-1" },
     previousStatus: "IN_PROGRESS",
+    runId: null,
     changedBy: { id: "owner-1", name: "Owner" },
     timestamp: "2026-08-24T10:05:00.000Z",
   });

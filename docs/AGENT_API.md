@@ -316,6 +316,20 @@ X-TaskForge-Secret-Version: 2
 X-TaskForge-Signature: t=<unix-seconds>,v1=<hex-hmac>
 ```
 
+## Autonomous runs and leases
+
+TaskForge stores orchestration bookkeeping but never starts a provider process. A runner creates and owns a run through these endpoints:
+
+```http
+GET  /api/tasks/:taskId/runs
+POST /api/tasks/:taskId/runs        { "kind": "IMPLEMENTATION|REVIEW|RE_REVIEW|FIX", "maxAttempts": 3, "timeoutAt": "..." }
+POST /api/runs/:id/claim           { "leaseMs": 60000 }
+POST /api/runs/:id/heartbeat       { "leaseMs": 60000 }
+POST /api/runs/:id/complete        { "status": "SUCCEEDED|FAILED|CANCELLED", "error": "..." }
+```
+
+Claims are atomic and leases are exclusive. Heartbeats and completion require the lease owner. Expired leases/timeouts become retryable `FAILED` runs subject to the per-run attempt budget and a task-level delivery-cycle cap. Only a project owner or administrator can cancel a run. When changing a task status for a run, include its `runId` in the task PATCH; the resulting `task.status_changed` webhook carries that ID. A runner must persist run IDs and treat callbacks as idempotent.
+
 Verify `v1` with HMAC-SHA256 over the exact raw body, prefixed by the timestamp and a period: `HMAC(secret, timestamp + "." + rawBody)`. Compare digests in constant time and reject timestamps outside a short tolerance such as five minutes:
 
 ```js

@@ -119,6 +119,8 @@ export interface AgentRunRepository {
   create(input: AgentRunEntity): Promise<AgentRunEntity>;
   findById(id: string): Promise<AgentRunEntity | null>;
   listForTask(taskId: string): Promise<AgentRunEntity[]>;
+  countForTask(taskId: string): Promise<number>;
+  expire(now: string): Promise<number>;
   claim(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
   heartbeat(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
   complete(id: string, owner: string, status: "SUCCEEDED" | "FAILED" | "CANCELLED", now: string, error?: string | null): Promise<boolean>;
