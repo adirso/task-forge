@@ -29,6 +29,8 @@ npm install
 cp .env.example .env
 npm run db:seed
 npm run dev
+# Optional agent runner (separate loopback process):
+npm run dev:agents
 ```
 
 Open `http://127.0.0.1:5173` and use:
@@ -39,6 +41,8 @@ Password: demo1234
 ```
 
 SQLite is the default for local development and is created at `data/taskforge.db`. Seeding is idempotent and adds a sample project, people, an agent identity, and ten representative tasks.
+
+The Smithy runner is intentionally excluded from `npm run dev`; configure it separately as described in [docs/SMITHY.md](docs/SMITHY.md).
 
 ## Workspace layout
 

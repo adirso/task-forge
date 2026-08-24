@@ -3,9 +3,13 @@ import { test } from "node:test";
 import { renderCommand } from "../src/command.js";
 import { SmithyRunner } from "../src/runner.js";
 import { sign, verifySignature, redact } from "../src/security.js";
+import { MemoryJobStore } from "../src/store.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const secret = "runner-secret";
-const event = { id: "event-1", event: "task.assigned", task: { id: "00000000-0000-4000-8000-000000000064", projectKey: "TAS", title: "Build runner", description: "Implement it", definitionOfDone: "Tests pass" } };
+const event = { id: "event-1", event: "task.assigned", task: { id: "00000000-0000-4000-8000-000000000064", number: 64, projectKey: "TAS", title: "Build runner", description: "Implement it", definitionOfDone: "Tests pass" } };
 const provider = { cmd: "claude -p {prompt}", repo: "/tmp/repo", webhookSecret: secret, apiToken: "tf_test" };
 
 test("signature verification enforces timestamp and exact body", () => {
@@ -17,6 +21,34 @@ test("signature verification enforces timestamp and exact body", () => {
   assert.equal(verifySignature(secret, header, body, timestamp + 301), false);
 });
 
+test("job store deduplicates events and survives status transitions", () => {
+  const store = new MemoryJobStore();
+  const first = store.accept("event-store", "claude", event.task.id, JSON.stringify(event));
+  assert.equal(first.duplicate, false);
+  assert.equal(store.accept("event-store", "claude", event.task.id, JSON.stringify(event)).duplicate, true);
+  store.markRunning("event-store");
+  assert.equal(store.pending()[0]?.status, "RUNNING");
+  store.markComplete("event-store", "SUCCEEDED");
+  assert.equal(store.pending().length, 0);
+});
+
+test("SQLite job store persists dedupe and recovery state", async (t) => {
+  let SqliteJobStore: typeof import("../src/store.js").SqliteJobStore;
+  try { ({ SqliteJobStore } = await import("../src/store.js")); } catch { t.skip("better-sqlite3 is unavailable for this Node ABI"); return; }
+  const directory = await mkdtemp(path.join(tmpdir(), "smithy-"));
+  const file = path.join(directory, "jobs.sqlite");
+  let first: InstanceType<typeof SqliteJobStore>;
+  try { first = new SqliteJobStore(file); } catch { t.skip("better-sqlite3 is unavailable for this Node ABI"); await rm(directory, { recursive: true, force: true }); return; }
+  first.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event));
+  first.markRunning("event-sqlite");
+  first.close?.();
+  const second = new SqliteJobStore(file);
+  assert.equal(second.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event)).duplicate, true);
+  assert.equal(second.pending()[0]?.status, "RUNNING");
+  second.close?.();
+  await rm(directory, { recursive: true, force: true });
+});
+
 test("command templates become argument arrays without shell execution", () => {
   const command = renderCommand("codex exec '{prompt}'", "quote; echo unsafe");
   assert.equal(command.executable, "codex");
@@ -25,19 +57,22 @@ test("command templates become argument arrays without shell execution", () => {
 
 test("runner routes signed events, executes once, and deduplicates delivery", async () => {
   const calls: string[] = [];
-  const api = { request: async (path: string) => { calls.push(path); return path.endsWith("/runs") ? { run: { id: "run-1" } } : {}; } };
+  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return path.endsWith("/runs") ? { run: { id: "run-1" } } : {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "ok", stderr: "" }), () => 1_700_000_000_000);
   const body = JSON.stringify(event);
   const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
   assert.equal((await runner.handle("claude", headers, body)).status, 202);
   assert.equal((await runner.handle("claude", headers, body)).body, JSON.stringify({ accepted: true, duplicate: true }));
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls, [`/api/tasks/${event.task.id}/runs`, "/api/runs/run-1/claim", "/api/runs/run-1/complete"]);
+  assert.ok(calls.includes(`/api/context?project=TAS&task=TAS-64`));
+  assert.ok(calls.includes(`/api/tasks/${event.task.id}/runs`));
+  assert.ok(calls.includes("/api/runs/run-1/claim"));
+  assert.ok(calls.includes("/api/runs/run-1/complete"));
 });
 
 test("runner rejects unknown providers, bad signatures, and missing local commands", async () => {
   const calls: Array<{ path: string; body?: string }> = [];
-  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); return path.endsWith("/runs") ? { run: { id: "run-failed" } } : {}; } };
+  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return path.endsWith("/runs") ? { run: { id: "run-failed" } } : {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: null, stdout: "", stderr: "", error: new Error("spawn ENOENT token=tf_private") }), () => 1_700_000_000_000);
   const body = JSON.stringify(event);
   assert.equal((await runner.handle("cursor", {}, body)).status, 404);

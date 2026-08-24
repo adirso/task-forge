@@ -17,7 +17,9 @@ export SMITHY_PROVIDERS='{
 
 Provider names are routing labels only. The command and repository are operator configuration; Smithy uses `spawn` with `shell: false`, so prompt text is passed as an argument and never interpreted as shell syntax. Keep this configuration outside the repository and use filesystem/secret-manager permissions appropriate for credentials.
 
-TaskForge agent webhook URLs should point to `/agents/claude`, `/agents/codex`, or `/agents/cursor`. The API's `X-TaskForge-Signature` timestamp/HMAC is verified with a five-minute clock-skew tolerance. Duplicate event IDs are acknowledged without starting another process. API calls use the configured bearer token, retry transient failures with bounded exponential backoff, and report `SUCCEEDED` or redacted `FAILED` results through the run endpoints.
+TaskForge agent webhook URLs should point to `/agents/claude`, `/agents/codex`, or `/agents/cursor`. The API's `X-TaskForge-Signature` timestamp/HMAC is verified with a five-minute clock-skew tolerance. Duplicate event IDs are persisted in the SQLite job store, and pending/running jobs are resumed after restart. API calls use the configured bearer token, retry transient failures with bounded exponential backoff, and report progress, status handoffs, and `SUCCEEDED` or redacted `FAILED` results through the public API. A claimed run uses a two-minute lease and sends a heartbeat every 30 seconds while the command executes.
+
+Each task branch gets its own `.smithy-worktrees/<task-id>` worktree under the configured repository, preventing concurrent provider runs from sharing a checkout. The runner binds only to loopback; `SMITHY_HOST=0.0.0.0` is rejected. Start it explicitly with the root `npm run dev:agents` command (or the workspace command for local development).
 
 If a provider executable is not installed, Smithy acknowledges the webhook but records a failed run; install/configure the command and retry the run from TaskForge. Running no Smithy process is supported: TaskForge continues to provide statuses, evidence, reviews, and merge gates without automation.
 

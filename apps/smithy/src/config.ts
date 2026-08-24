@@ -11,11 +11,12 @@ export interface SmithyConfig {
   host: string;
   port: number;
   apiUrl: string;
+  dbPath: string;
   providers: Partial<Record<ProviderLabel, ProviderConfig>>;
 }
 
-function jsonObject(name: string): Record<string, unknown> {
-  const raw = process.env[name];
+function jsonObject(name: string, env: NodeJS.ProcessEnv): Record<string, unknown> {
+  const raw = env[name];
   if (!raw) return {};
   try {
     const value = JSON.parse(raw);
@@ -27,7 +28,7 @@ function jsonObject(name: string): Record<string, unknown> {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): SmithyConfig {
-  const providerValues = jsonObject("SMITHY_PROVIDERS");
+  const providerValues = jsonObject("SMITHY_PROVIDERS", env);
   const providers: Partial<Record<ProviderLabel, ProviderConfig>> = {};
   for (const label of ["claude", "codex", "cursor"] as const) {
     const raw = providerValues[label];
@@ -37,5 +38,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SmithyConfig {
     for (const field of ["cmd", "repo", "webhookSecret", "apiToken"] as const) if (typeof value[field] !== "string" || !value[field]) throw new Error(`SMITHY_PROVIDERS.${label}.${field} is required`);
     providers[label] = { cmd: value.cmd as string, repo: value.repo as string, webhookSecret: value.webhookSecret as string, apiToken: value.apiToken as string };
   }
-  return { host: env.SMITHY_HOST ?? "127.0.0.1", port: Number(env.SMITHY_PORT ?? 4500), apiUrl: (env.TASKFORGE_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, ""), providers };
+  const host = env.SMITHY_HOST ?? "127.0.0.1";
+  if (!(["127.0.0.1", "::1", "localhost"] as string[]).includes(host)) throw new Error("Smithy must bind to loopback; non-loopback SMITHY_HOST is not allowed");
+  return { host, port: Number(env.SMITHY_PORT ?? 4500), apiUrl: (env.TASKFORGE_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, ""), dbPath: env.SMITHY_DB_PATH ?? "./data/smithy.sqlite", providers };
 }
