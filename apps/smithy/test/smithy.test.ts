@@ -94,3 +94,16 @@ test("runner rejects unknown providers, bad signatures, and missing local comman
   assert.match(failed?.body ?? "", /FAILED/);
   assert.doesNotMatch(failed?.body ?? "", /tf_private/);
 });
+
+test("runner ignores an out-of-order status event after the task has moved on", async () => {
+  const calls: string[] = [];
+  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["IN_PROGRESS", "IN_REVIEW"] }, task: { ...event.task, status: "IN_REVIEW" } }; return {}; } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { throw new Error("must not execute"); }, () => 1_700_000_000_000);
+  const stale = { ...event, event: "task.status_changed", task: { ...event.task, status: "IN_PROGRESS" } };
+  const body = JSON.stringify(stale);
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  assert.equal((await runner.handle("claude", headers, body)).status, 202);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(calls.some((path) => path.includes("/api/context")));
+  assert.equal(calls.some((path) => path.includes("/runs")), false);
+});

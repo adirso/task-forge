@@ -60,6 +60,13 @@ export class SmithyRunner {
       const context = await api.request(`/api/context?project=${encodeURIComponent(projectKey)}&task=${encodeURIComponent(`${projectKey}-${taskNumber}`)}`) as unknown as ContextResponse;
       const task = context.task;
       if (!task?.id) throw new Error("Task context was not returned");
+      // Webhooks are at-least-once and can arrive out of order. A status event
+      // that no longer describes the current task must not start another run
+      // or emit a handoff that could loop the workflow backwards.
+      if (event.event === "task.status_changed" && event.task?.status && task.status && event.task.status !== task.status) {
+        this.store.markComplete(event.id, "SUCCEEDED");
+        return;
+      }
       const kind = this.kind({ ...event, task: { ...event.task, ...task } });
       if (!runId) {
         const created = await api.request(`/api/tasks/${task.id}/runs`, { method: "POST", body: JSON.stringify({ kind }) });
