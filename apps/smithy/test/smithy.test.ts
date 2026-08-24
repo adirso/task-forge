@@ -8,6 +8,8 @@ import { loadConfig } from "../src/config.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
+import { readProviders, writeProviders } from "../src/env-file.js";
 
 const secret = "runner-secret";
 const event = { id: "event-1", event: "task.assigned", task: { id: "00000000-0000-4000-8000-000000000064", number: 64, projectKey: "TAS", title: "Build runner", description: "Implement it", definitionOfDone: "Tests pass" } };
@@ -25,6 +27,20 @@ test("signature verification enforces timestamp and exact body", () => {
 test("configuration rejects non-loopback execution hosts", () => {
   assert.throws(() => loadConfig({ SMITHY_HOST: "0.0.0.0", SMITHY_PROVIDERS: "{}" }), /loopback/);
   assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PROVIDERS: "{}" }).host, "127.0.0.1");
+});
+
+test("provider env updates preserve unrelated settings and support custom labels", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "smithy-env-"));
+  const file = path.join(directory, ".env");
+  try {
+    await writeProviders(file, { claude: { cmd: "claude -p {prompt}", webhookSecret: "secret", apiToken: "token" } });
+    const first = await readFile(file, "utf8");
+    await writeProviders(file, { other: { cmd: "my-agent {prompt}", webhookSecret: "secret-2", apiToken: "token-2" } });
+    const second = await readFile(file, "utf8");
+    assert.match(first, /SMITHY_PROVIDERS=/);
+    assert.match(second, /"other"/);
+    assert.deepEqual(await readProviders(file), { other: { cmd: "my-agent {prompt}", webhookSecret: "secret-2", apiToken: "token-2" } });
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test("job store deduplicates events and survives status transitions", () => {
