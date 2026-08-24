@@ -47,6 +47,21 @@ export class SmithyRunner {
     return "IMPLEMENTATION";
   }
 
+  private async moveToStartStatus(api: ApiClient, task: NonNullable<AgentEvent["task"]>, statuses: string[], kind: ReturnType<SmithyRunner["kind"]>, runId: string) {
+    const target = kind === "IMPLEMENTATION" || kind === "FIX" ? "IN_PROGRESS" : kind === "RE_REVIEW" ? "RE_REVIEW" : "IN_REVIEW";
+    if (!statuses.includes(target) || task.status === target) return;
+    // The workflow guard deliberately does not allow BACKLOG/REFINING to jump
+    // straight to IN_PROGRESS. Walk through the project's enabled preparation
+    // status first, preserving the same guard rules a human would use.
+    if (target === "IN_PROGRESS" && (task.status === "BACKLOG" || task.status === "REFINING")) {
+      const bridge = ["READY_FOR_DEV", "TODO"].find((status) => statuses.includes(status));
+      if (!bridge) throw new Error("Project workflow must enable READY_FOR_DEV or TODO before Smithy can start implementation");
+      await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: bridge, runId }) });
+      task.status = bridge;
+    }
+    await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: target, runId }) });
+  }
+
   private async process(config: ProviderConfig | undefined, event: AgentEvent, job = this.store.accept(event.id, "unknown", event.task!.id, JSON.stringify(event)).job) {
     if (!config) return;
     this.store.markRunning(event.id);
@@ -78,8 +93,7 @@ export class SmithyRunner {
       heartbeat.unref?.();
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `Smithy started ${kind.toLowerCase()} run ${runId}.` }) });
       const statuses = context.project.availableStatuses;
-      const startStatus = kind === "IMPLEMENTATION" || kind === "FIX" ? "IN_PROGRESS" : kind === "RE_REVIEW" ? "RE_REVIEW" : "IN_REVIEW";
-      if (statuses.includes(startStatus) && task.status !== startStatus) await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: startStatus, runId }) });
+      await this.moveToStartStatus(api, task, statuses, kind, runId);
       const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${task.title ?? ""}`, task.description ?? "", `Definition of done: ${task.definitionOfDone ?? ""}`, ...(task.updates ?? []).map((update) => `Update: ${update.body}`), "Report progress through the TaskForge API. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
