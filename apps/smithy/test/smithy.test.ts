@@ -135,6 +135,22 @@ test("runner processes a status event when context is still at the previous stat
   assert.ok(calls.some((path) => path.endsWith("/runs")));
 });
 
+test("runner walks BACKLOG through an enabled preparation status before implementation", async () => {
+  const statusUpdates: string[] = [];
+  const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["BACKLOG", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW"] }, task: { ...event.task, status: "BACKLOG" } };
+    if (path.includes("/api/tasks/") && init?.method === "PATCH") statusUpdates.push(String(init.body));
+    if (path.endsWith("/runs")) return { run: { id: "run-backlog" } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "ok", stderr: "" }), () => 1_700_000_000_000);
+  const body = JSON.stringify(event);
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  assert.equal((await runner.handle("claude", headers, body)).status, 202);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(statusUpdates.map((value) => JSON.parse(value).status), ["READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW"]);
+});
+
 test("runner resumes a persisted pending job with the same event and run correlation", async () => {
   const store = new MemoryJobStore(); const accepted = store.accept("event-resume", "claude", event.task.id, JSON.stringify(event)); store.setRunId("event-resume", "run-existing");
   const calls: string[] = [];
