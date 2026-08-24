@@ -71,7 +71,7 @@ test.describe("workspace browser smoke", () => {
 
     await page.getByRole("button", { name: "List" }).click();
     await expect(page.getByRole("columnheader", { name: "Task" })).toBeVisible();
-    await page.getByRole("button", { name: "Board" }).click();
+    await page.getByRole("button", { name: "Board", exact: true }).click();
     await expect(page.getByRole("region", { name: "In progress tasks" })).toBeVisible();
   });
 

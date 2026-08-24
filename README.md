@@ -2,6 +2,8 @@
 
 TaskForge is a local-first project and task manager for teams made of people and software agents. It combines a workflow board with a structured list, backed by a typed HTTP API.
 
+Autonomous delivery orchestration research and the Phase 5 implementation plan are documented in [docs/AUTONOMOUS_AGENT_ORCHESTRATION.md](docs/AUTONOMOUS_AGENT_ORCHESTRATION.md).
+
 ## What is included
 
 - Human login with 8-hour JWT sessions
