@@ -127,6 +127,8 @@ export const TOKEN_SCOPES = [
   "task:update:notes",
   "task:update:branch",
   "task:update:meta",
+  "task:gate:evidence",
+  "task:gate:approve",
 ] as const;
 export type TokenScope = typeof TOKEN_SCOPES[number];
 
