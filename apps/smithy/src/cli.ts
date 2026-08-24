@@ -57,7 +57,7 @@ async function configure(file: string): Promise<void> {
   } finally { rl.close(); }
 }
 
-const requestedFile = option(process.argv.slice(2), "--env-file");
+const requestedFile = option(process.argv.slice(2), "--file") ?? option(process.argv.slice(2), "--config");
 // npm workspace scripts run from apps/smithy; INIT_CWD preserves the directory
 // from which the operator invoked npm, so repository-root paths still work.
 const file = requestedFile && !path.isAbsolute(requestedFile) && process.env.INIT_CWD
