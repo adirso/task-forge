@@ -32,9 +32,9 @@ The task remains the source of truth. Every automated action is associated with 
 
 The loop uses the shipped keys wherever possible; it does not introduce duplicate vocabulary. The default mapping is:
 
-`READY_FOR_DEV` (ready for agent) → `IN_PROGRESS` (implementing) → `READY_FOR_REVIEW` (waiting for review) → `IN_REVIEW` (reviewing) → `APPROVED` (new key) → `MERGE_PENDING` (new key) → `DONE`
+`READY_FOR_DEV` (ready for agent) → `IN_PROGRESS` (implementing) → `READY_FOR_REVIEW` (waiting for review) → `IN_REVIEW` (first review) → `APPROVED` (new key) → `MERGE_PENDING` (new key) → `DONE`
 
-Exception paths are `CHANGES_REQUESTED`, `PENDING_DECISION`, and `FAILED` (new keys), plus the already-shipped `CANCELLED`. Projects may subset the global keys, so orchestration must discover enabled statuses and either use the mapped key or stop with an actionable workflow error. TAS-62 must choose explicitly between adding only these global keys or introducing a separate per-status metadata model; the latter is out of scope for this plan.
+Review cycles use two explicit additional keys: `FIX_NEEDED` when findings require implementation work, followed by `RE_REVIEW` when the updated PR is ready for another review. Other exception paths are `PENDING_DECISION` and `FAILED` (new keys), plus the already-shipped `CANCELLED`. Projects may subset the global keys, so orchestration must discover enabled statuses and either use the mapped key or stop with an actionable workflow error. TAS-62 must choose explicitly between adding only these global keys or introducing a separate per-status metadata model; the latter is out of scope for this plan.
 
 Under the shipped model, adding a key is a global contract change: `TASK_STATUSES`, project subset ordering, and the SQLite/MySQL task `CHECK` constraints must be updated together through a versioned migration. Inserting a key changes board order for projects that enable it, so the rollout must document the order and preserve the four behavior constants for claiming, review notifications, and completion.
 
@@ -44,8 +44,10 @@ Under the shipped model, adding a key is a global contract change: `TASK_STATUSE
 | `IN_PROGRESS` → `READY_FOR_REVIEW` | branch/PR exists, required tests recorded, agent handoff complete | Claude; PR URL + commit SHA |
 | `READY_FOR_REVIEW` → `IN_REVIEW` | PR is reachable and reviewer lease acquired | Coordinator/Codex; review run |
 | `IN_REVIEW` → `APPROVED` | required CI checks green, no blocking findings, reviewer attestation | Codex; review evidence |
-| `IN_REVIEW` → `CHANGES_REQUESTED` | one or more P0–P2 findings or explicitly selected P3 finding | Codex; finding records |
-| `CHANGES_REQUESTED` → `IN_PROGRESS` | owner accepts a fix request and a new implementation attempt is allowed under the cycle cap | Coordinator; new attempt record |
+| `IN_REVIEW` → `FIX_NEEDED` | one or more P0–P2 findings or explicitly selected P3 finding | Codex; finding records |
+| `FIX_NEEDED` → `IN_PROGRESS` | owner accepts a fix request and a new implementation attempt is allowed under the cycle cap | Coordinator; new attempt record |
+| `READY_FOR_REVIEW` → `RE_REVIEW` | this is a subsequent review cycle for a changed PR head | Coordinator; prior review + new head |
+| `RE_REVIEW` → `APPROVED` | required CI checks green, no blocking findings, reviewer attestation | Codex; review evidence |
 | `IN_REVIEW` → `PENDING_DECISION` | finding needs product/security/owner decision | Human/coordinator; decision note |
 | `APPROVED` → `MERGE_PENDING` | human/project merge policy authorizes merge | Coordinator; authorization record |
 | `APPROVED` → `IN_REVIEW` | PR head SHA changes or approval evidence becomes stale | Coordinator; new head and review run |
@@ -89,7 +91,7 @@ The merge operation is performed by a service account with least privilege and i
 Each finding has severity, file/line evidence, disposition, and author. A finding disposition is distinct from rejecting the whole delivery: the reviewer may reject the implementation/task when it is unsafe, out of scope, or cannot be corrected under policy. For individual findings, the owner may:
 
 - **Accept/no action:** record rationale and continue if policy permits;
-- **Fix and re-review:** return to `CHANGES_REQUESTED`, create a new attempt, and require review on the new SHA;
+- **Fix and re-review:** return to `FIX_NEEDED`, create a new attempt, then use `RE_REVIEW` for the changed SHA;
 - **Defer:** move to `PENDING_DECISION` with an owner and due date;
 - **Reject/close:** record why the finding is invalid or out of scope.
 
@@ -99,7 +101,7 @@ Only the finding owner or an authorized human can change a disposition. A re-rev
 
 These child tasks are intentionally ordered so storage and policy are available before provider execution:
 
-1. **TAS-62 — Workflow statuses and transition guards** — add only missing global orchestration keys (`CHANGES_REQUESTED`, `PENDING_DECISION`, `APPROVED`, `MERGE_PENDING`, `FAILED`) or document an explicit decision to build per-status metadata; preserve the shipped nine-key subset model; do not auto-enable new keys on existing projects—each project must opt in by updating its stored subset; add `task.status_changed` in both dialects; keep claim/review/completion constants synchronized; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
+1. **TAS-62 — Workflow statuses and transition guards** — add only missing global orchestration keys (`APPROVED`, `RE_REVIEW`, `FIX_NEEDED`, `PENDING_DECISION`, `MERGE_PENDING`, `FAILED`) or document an explicit decision to build per-status metadata; preserve the shipped nine-key subset model; do not auto-enable new keys on existing projects—each project must opt in by updating its stored subset; add `task.status_changed` in both dialects; keep claim/review/completion constants synchronized; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
 2. **TAS-63 — Run, lease, and orchestration service** — persist runs/attempts/leases, claim and heartbeat APIs, timeout/cancellation handling, and bounded cycle limits on top of task assignment. DoD: TaskForge never starts provider processes; crash recovery and concurrent claims are deterministic in SQLite and MySQL; a runner can resume or retry using durable run state.
 3. **TAS-64 — Build the optional runner service** — add a separate `apps/smithy` (name pending) service that receives signed agent webhooks, maps agent paths to operator command templates, executes them in configured repositories, and reports through the public API. DoD: Claude/Codex/Cursor are configuration labels only; no provider code or credentials enter `apps/api`; command output and callbacks are authenticated/redacted; the runner is optional and provider failures are retryable.
 4. **TAS-65 — PR/CI evidence and merge authorization** — ingest checks/reviews, invalidate stale approvals, enforce merge guards, and record merge evidence. DoD: no merge occurs without configured checks and authorization; head changes require re-review.
