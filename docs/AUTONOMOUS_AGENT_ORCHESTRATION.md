@@ -2,6 +2,12 @@
 
 This document proposes a controlled delivery loop for TaskForge in which a human starts work, a coordinating agent delegates implementation to Claude, and Codex reviews the resulting pull request. It is a design for Phase 5; existing projects keep their current workflow until the new statuses and guards are enabled explicitly.
 
+## Architecture boundary
+
+TaskForge never runs an agent and never names a provider. The API owns statuses, guards, runs, evidence, merge authorization, and findings. An optional runner service in this monorepo (proposed name `apps/smithy`) receives signed webhooks, executes an operator-configured command, and reports progress and completion through the public API. Without the runner, TaskForge remains useful as a human-operated workflow and evidence system.
+
+Routing is assignment, not a new configuration model. One TaskForge agent identity represents each provider; its existing `webhookUrl` points to the runner path, for example `/agents/claude` or `/agents/codex`. Existing automations can assign an agent when a project/status condition matches. The provider name exists only in the runner's local command configuration, such as `claude -p {prompt}` or `codex exec {prompt}`. TaskForge stores no provider enum and no provider credentials.
+
 ## Current implementation inventory
 
 | Capability | What exists on `main` | Phase 5 gap |
@@ -9,7 +15,7 @@ This document proposes a controlled delivery loop for TaskForge in which a human
 | Workflow selection | Projects select a subset of the global nine-key `TASK_STATUSES`: `BACKLOG`, `REFINING`, `TODO`, `READY_FOR_DEV`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`. | Add only missing orchestration keys and guards; do not invent per-status metadata unless TAS-62 explicitly chooses that larger model. |
 | Claim/review behavior | Module constants define claim sources (`BACKLOG`, `TODO`, `READY_FOR_DEV`), claim target (`IN_PROGRESS`), review keys, and completion (`DONE`). | Keep these constants and the orchestration state machine in lockstep. |
 | Outbound webhooks | `webhook_deliveries` and `WebhookDispatcher` already provide post-commit enqueue, HMAC signing, bounded retries, leasing, admin retry, and self-event suppression for `task.assigned` and `task.update_added`. | Add status-change events, inbound callback authentication, and run-aware routing; do not rebuild the dispatcher. |
-| Durable execution | No run, attempt, or lease tables. | TAS-63 adds them with recovery and cancellation semantics. |
+| Durable execution | No run, attempt, or lease tables. | TAS-63 adds ownership, heartbeat, timeout, attempt, and cancellation bookkeeping; it does not manage processes. |
 
 ## Roles and ownership
 
@@ -57,11 +63,11 @@ Transitions are atomic, validate that the previous status matches, and are idemp
 
 ## Invocation, context, and monitoring
 
-1. A human creates or assigns a task and selects an automation policy (implementation provider, reviewer provider, max attempts, timeout, and merge mode).
-2. The coordinator creates an outbox-backed run and sends the agent an immutable context bundle: task snapshot, project workflow, repository/commit, target branch, acceptance criteria, attachments, prior findings, and allowed API transitions. Secrets are references to scoped credentials, never values in the bundle.
-3. A runner claims a lease with a heartbeat. It may renew only its own lease and may resume an interrupted run from the last durable step. Lease expiry moves the run to retryable `FAILED`/`PENDING_DECISION` according to policy.
-4. Claude reports progress, test output, PR URL, and final commit. The coordinator validates that the branch and repository match the run before moving to review.
-5. Codex receives the same snapshot plus PR diff and CI artifacts, writes structured findings, and chooses approve, changes requested, pending decision, or reject.
+1. A human creates or assigns a task. Existing automations can assign the Claude or Codex agent identity when a project/status condition matches.
+2. The assigned identity receives the existing signed `task.assigned` webhook. The optional runner claims a run and sends the configured command an immutable context bundle: task snapshot, project workflow, repository/commit, target branch, acceptance criteria, attachments, prior findings, and allowed API transitions. Secrets are references to scoped credentials, never values in the bundle.
+3. The runner reports heartbeats and completion through the public API. TaskForge owns the lease and attempt records; it does not spawn, supervise, or authenticate provider CLIs. Lease expiry moves the run to retryable `FAILED`/`PENDING_DECISION` according to policy.
+4. The runner reports progress, test output, PR URL, and final commit. TaskForge validates that the branch and repository match the run before moving to review.
+5. A Codex runner receives the same snapshot plus PR diff and CI artifacts, writes structured findings, and chooses approve, changes requested, pending decision, or reject.
 
 Outbox delivery builds on the existing post-commit `WebhookDispatcher`: signed per-agent delivery, event IDs, idempotency, bounded exponential backoff, leasing, admin retry, and self-event suppression already exist. Phase 5 extends the event CHECK/migration for `task.status_changed`, adds inbound callback authentication, and links events to run IDs. Missing credentials, invalid signatures, exhausted retries, and terminal failures are visible in an operator queue; payloads, passwords, bearer tokens, and webhook secrets are redacted from logs.
 
@@ -94,8 +100,8 @@ Only the finding owner or an authorized human can change a disposition. A re-rev
 These child tasks are intentionally ordered so storage and policy are available before provider execution:
 
 1. **TAS-62 — Workflow statuses and transition guards** — add only missing global orchestration keys (`CHANGES_REQUESTED`, `PENDING_DECISION`, `APPROVED`, `MERGE_PENDING`, `FAILED`) or document an explicit decision to build per-status metadata; preserve the shipped nine-key subset model; do not auto-enable new keys on existing projects—each project must opt in by updating its stored subset; add `task.status_changed` in both dialects; keep claim/review/completion constants synchronized; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
-2. **TAS-63 — Run, lease, and orchestration service** — persist runs/attempts/leases, claim and heartbeat APIs, timeout/cancellation handling, and bounded cycle limits. DoD: crash recovery and concurrent claims are deterministic in SQLite and MySQL.
-3. **TAS-64 — Agent provider adapters and context bundles** — implement Claude/Codex invocation contracts, scoped credentials, immutable context snapshots, and callback authentication. DoD: provider failures are retryable, secrets never enter payloads/logs, and callbacks are idempotent.
+2. **TAS-63 — Run, lease, and orchestration service** — persist runs/attempts/leases, claim and heartbeat APIs, timeout/cancellation handling, and bounded cycle limits on top of task assignment. DoD: TaskForge never starts provider processes; crash recovery and concurrent claims are deterministic in SQLite and MySQL; a runner can resume or retry using durable run state.
+3. **TAS-64 — Build the optional runner service** — add a separate `apps/smithy` (name pending) service that receives signed agent webhooks, maps agent paths to operator command templates, executes them in configured repositories, and reports through the public API. DoD: Claude/Codex/Cursor are configuration labels only; no provider code or credentials enter `apps/api`; command output and callbacks are authenticated/redacted; the runner is optional and provider failures are retryable.
 4. **TAS-65 — PR/CI evidence and merge authorization** — ingest checks/reviews, invalidate stale approvals, enforce merge guards, and record merge evidence. DoD: no merge occurs without configured checks and authorization; head changes require re-review.
 5. **TAS-66 — Findings, decisions, and operator controls** — structured finding UI/API, accept/fix/defer/reject paths, escalation queue, cancellation, and manual retry. DoD: every terminal decision is auditable and a fix creates a new review attempt.
 6. **TAS-67 — Notifications, audit, and recovery hardening** — extend the existing webhook dispatcher with run-aware status events, inbound callback authentication, redaction, metrics, dashboards, retention, and disaster-recovery tests. DoD: existing delivery behavior remains compatible; duplicate/out-of-order events do not loop runs; restore/replay behavior is documented and tested.
@@ -105,6 +111,7 @@ TaskForge dependency edges are configured in the same order: TAS-62 → TAS-63 �
 ## Open product decisions
 
 - Which exact status keys and categories are enabled by default, and whether `APPROVED` is separate from `MERGE_PENDING`.
+- Whether the runner service is named `smithy`, `runner`, or another name.
 - Whether merge authorization is always human-gated or can be granted per project; who may grant it.
 - Supported Claude/Codex execution environments, network access, cost limits, and maximum wall-clock time.
 - Required CI checks and whether external deployments must pass before `DONE`.
