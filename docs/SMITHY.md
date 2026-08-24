@@ -23,6 +23,14 @@ set -a; source apps/smithy/.env.smithy; set +a
 npm run dev:agents
 ```
 
+To add, edit, or remove a provider without hand-editing JSON, run the interactive configurator:
+
+```bash
+npm run configure -w @taskforge/smithy -- --file apps/smithy/.env.smithy
+```
+
+It supports the `claude`, `codex`, and `cursor` labels plus custom labels (`other`). It updates only `SMITHY_PROVIDERS`, preserves other `.env` settings, and never prints token or webhook-secret values. Leave a secret prompt blank when editing to keep the current value. Keep the resulting env file private.
+
 Provider names are routing labels only. Configure each project's **Local Smithy repository path** in TaskForge project settings; Smithy uses that path for the task's worktree. An optional provider `repo` remains a fallback for projects without a path. The GitHub repository URL remains the remote/canonical link. Smithy uses `spawn` with `shell: false`, so prompt text is passed as an argument and never interpreted as shell syntax. Keep credentials outside the repository and use filesystem/secret-manager permissions appropriate for them.
 
 TaskForge agent webhook URLs should point to `/agents/claude`, `/agents/codex`, or `/agents/cursor`. The API's `X-TaskForge-Signature` timestamp/HMAC is verified with a five-minute clock-skew tolerance. Duplicate event IDs are persisted in the SQLite job store, and pending/running jobs are resumed after restart (including the original run ID, so a restart never creates a second run). API calls use the configured bearer token, retry transient failures with bounded exponential backoff, and report progress, status handoffs, and `SUCCEEDED` or redacted `FAILED` results through the public API. A claimed run uses a two-minute lease and sends a heartbeat every 30 seconds while the command executes.

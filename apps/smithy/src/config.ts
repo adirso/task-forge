@@ -1,4 +1,5 @@
-export type ProviderLabel = "claude" | "codex" | "cursor";
+/** Provider names are routing labels; Smithy does not contain provider-specific code. */
+export type ProviderLabel = string;
 
 export interface ProviderConfig {
   cmd: string;
@@ -12,7 +13,7 @@ export interface SmithyConfig {
   port: number;
   apiUrl: string;
   dbPath: string;
-  providers: Partial<Record<ProviderLabel, ProviderConfig>>;
+  providers: Record<ProviderLabel, ProviderConfig>;
 }
 
 function jsonObject(name: string, env: NodeJS.ProcessEnv): Record<string, unknown> {
@@ -29,9 +30,9 @@ function jsonObject(name: string, env: NodeJS.ProcessEnv): Record<string, unknow
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): SmithyConfig {
   const providerValues = jsonObject("SMITHY_PROVIDERS", env);
-  const providers: Partial<Record<ProviderLabel, ProviderConfig>> = {};
-  for (const label of ["claude", "codex", "cursor"] as const) {
-    const raw = providerValues[label];
+  const providers: Record<ProviderLabel, ProviderConfig> = {};
+  for (const [label, raw] of Object.entries(providerValues)) {
+    if (!/^[a-z][a-z0-9_-]{0,63}$/i.test(label)) throw new Error(`SMITHY_PROVIDERS.${label} must be a safe provider label`);
     if (!raw) continue;
     if (typeof raw !== "object" || Array.isArray(raw)) throw new Error(`SMITHY_PROVIDERS.${label} must be an object`);
     const value = raw as Record<string, unknown>;

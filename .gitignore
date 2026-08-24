@@ -3,6 +3,7 @@ dist/
 .env
 .env.local
 apps/smithy/data/
+apps/smithy/.env.smithy
 data/*.db
 data/*.db-*
 .e2e-data/
