@@ -2,6 +2,15 @@
 
 This document proposes a controlled delivery loop for TaskForge in which a human starts work, a coordinating agent delegates implementation to Claude, and Codex reviews the resulting pull request. It is a design for Phase 5; existing projects keep their current workflow until the new statuses and guards are enabled explicitly.
 
+## Current implementation inventory
+
+| Capability | What exists on `main` | Phase 5 gap |
+| --- | --- | --- |
+| Workflow selection | Projects select a subset of the global nine-key `TASK_STATUSES`: `BACKLOG`, `REFINING`, `TODO`, `READY_FOR_DEV`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`. | Add only missing orchestration keys and guards; do not invent per-status metadata unless TAS-62 explicitly chooses that larger model. |
+| Claim/review behavior | Module constants define claim sources (`BACKLOG`, `TODO`, `READY_FOR_DEV`), claim target (`IN_PROGRESS`), review keys, and completion (`DONE`). | Keep these constants and the orchestration state machine in lockstep. |
+| Outbound webhooks | `webhook_deliveries` and `WebhookDispatcher` already provide post-commit enqueue, HMAC signing, bounded retries, leasing, admin retry, and self-event suppression for `task.assigned` and `task.update_added`. | Add status-change events, inbound callback authentication, and run-aware routing; do not rebuild the dispatcher. |
+| Durable execution | No run, attempt, or lease tables. | TAS-63 adds them with recovery and cancellation semantics. |
+
 ## Roles and ownership
 
 | Role | Owns | Must not do |
@@ -15,11 +24,13 @@ The task remains the source of truth. Every automated action is associated with 
 
 ## Proposed state machine
 
-Existing statuses (`TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE`) remain valid. Phase 5 adds these optional semantic statuses to a project workflow:
+The loop uses the shipped keys wherever possible; it does not introduce duplicate vocabulary. The default mapping is:
 
-`READY_FOR_AGENT` -> `IMPLEMENTING` -> `WAITING_FOR_REVIEW` -> `REVIEWING` -> `APPROVED` -> `MERGE_PENDING` -> `DONE`
+`READY_FOR_DEV` (ready for agent) → `IN_PROGRESS` (implementing) → `READY_FOR_REVIEW` (waiting for review) → `IN_REVIEW` (reviewing) → `APPROVED` (new key) → `MERGE_PENDING` (new key) → `DONE`
 
-Exception paths are `CHANGES_REQUESTED` (review findings require a fix), `PENDING_DECISION` (a human decision or external dependency is needed), `CANCELLED`, and `FAILED` (terminal run failure with retry/escalation controls). A project may use different keys, but each enabled key must declare its semantic category and transition capabilities.
+Exception paths are `CHANGES_REQUESTED`, `PENDING_DECISION`, and `FAILED` (new keys), plus the already-shipped `CANCELLED`. Projects may subset the global keys, so orchestration must discover enabled statuses and either use the mapped key or stop with an actionable workflow error. TAS-62 must choose explicitly between adding only these global keys or introducing a separate per-status metadata model; the latter is out of scope for this plan.
+
+Under the shipped model, adding a key is a global contract change: `TASK_STATUSES`, project subset ordering, and the SQLite/MySQL task `CHECK` constraints must be updated together through a versioned migration. Inserting a key changes board order for projects that enable it, so the rollout must document the order and preserve the four behavior constants for claiming, review notifications, and completion.
 
 | Transition | Guard | Owner/evidence |
 | --- | --- | --- |
@@ -32,7 +43,8 @@ Exception paths are `CHANGES_REQUESTED` (review findings require a fix), `PENDIN
 | Approved → Merge pending | human/project merge policy authorizes merge | Coordinator; authorization record |
 | Merge pending → Done | merge SHA exists and post-merge CI/deploy check passes | Coordinator; merge evidence |
 | Any non-terminal → Cancelled | human or authorized coordinator cancellation | Actor + reason |
-| Implementing/Reviewing → Failed | timeout or exhausted retries | Runner; diagnostics + escalation |
+| Reviewing → Failed | timeout or exhausted retries | Runner; diagnostics + escalation |
+| Reviewing → Cancelled (reject delivery) | human/reviewer rejects the whole implementation as unsafe or out of scope | Rejection reason + evidence |
 
 Transitions are atomic, validate that the previous status matches, and are idempotent on `(runId, transitionId)`. Disabled semantic transitions return an actionable workflow-discovery error rather than silently changing to a legacy key.
 
@@ -44,7 +56,7 @@ Transitions are atomic, validate that the previous status matches, and are idemp
 4. Claude reports progress, test output, PR URL, and final commit. The coordinator validates that the branch and repository match the run before moving to review.
 5. Codex receives the same snapshot plus PR diff and CI artifacts, writes structured findings, and chooses approve, changes requested, pending decision, or reject.
 
-Outbox delivery is post-commit, signed per agent, idempotent by event ID, and retried with bounded exponential backoff. A dispatcher wake-up is emitted after enqueue. Missing credentials, invalid signatures, exhausted retries, and terminal failures are visible in an operator queue; payloads, passwords, bearer tokens, and webhook secrets are redacted from logs.
+Outbox delivery builds on the existing post-commit `WebhookDispatcher`: signed per-agent delivery, event IDs, idempotency, bounded exponential backoff, leasing, admin retry, and self-event suppression already exist. Phase 5 extends the event CHECK/migration for `task.status_changed`, adds inbound callback authentication, and links events to run IDs. Missing credentials, invalid signatures, exhausted retries, and terminal failures are visible in an operator queue; payloads, passwords, bearer tokens, and webhook secrets are redacted from logs.
 
 Loop prevention requires the originating run ID and actor on every event, ignores an agent's own update event, rejects duplicate transition IDs, caps implementation/review cycles, and escalates after the cap. Cancellation propagates to the runner, stops new retries, and records the reason. Recovery never replays a merge authorization without a new human decision.
 
@@ -74,12 +86,12 @@ Only the finding owner or an authorized human can change a disposition. A re-rev
 
 These child tasks are intentionally ordered so storage and policy are available before provider execution:
 
-1. **TAS-62 — Workflow statuses and transition guards** — add semantic statuses, role-aware transition policy, atomic transition history, and migration tests. DoD: the full proposed set (`READY_FOR_AGENT`, `IMPLEMENTING`, `WAITING_FOR_REVIEW`, `REVIEWING`, `CHANGES_REQUESTED`, `PENDING_DECISION`, `APPROVED`, `MERGE_PENDING`, `FAILED`, and `CANCELLED`) is representable or explicitly mapped to project-specific keys; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
+1. **TAS-62 — Workflow statuses and transition guards** — add only missing global orchestration keys (`CHANGES_REQUESTED`, `PENDING_DECISION`, `APPROVED`, `MERGE_PENDING`, `FAILED`) or document an explicit decision to build per-status metadata; preserve the shipped nine-key subset model; add `task.status_changed` in both dialects; keep claim/review/completion constants synchronized; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
 2. **TAS-63 — Run, lease, and orchestration service** — persist runs/attempts/leases, claim and heartbeat APIs, timeout/cancellation handling, and bounded cycle limits. DoD: crash recovery and concurrent claims are deterministic in SQLite and MySQL.
 3. **TAS-64 — Agent provider adapters and context bundles** — implement Claude/Codex invocation contracts, scoped credentials, immutable context snapshots, and callback authentication. DoD: provider failures are retryable, secrets never enter payloads/logs, and callbacks are idempotent.
 4. **TAS-65 — PR/CI evidence and merge authorization** — ingest checks/reviews, invalidate stale approvals, enforce merge guards, and record merge evidence. DoD: no merge occurs without configured checks and authorization; head changes require re-review.
 5. **TAS-66 — Findings, decisions, and operator controls** — structured finding UI/API, accept/fix/defer/reject paths, escalation queue, cancellation, and manual retry. DoD: every terminal decision is auditable and a fix creates a new review attempt.
-6. **TAS-67 — Notifications, audit, and recovery hardening** — durable event delivery, redaction, metrics, dashboards, retention, and disaster-recovery tests. DoD: duplicate/out-of-order events do not loop runs and restore/replay behavior is documented and tested.
+6. **TAS-67 — Notifications, audit, and recovery hardening** — extend the existing webhook dispatcher with run-aware status events, inbound callback authentication, redaction, metrics, dashboards, retention, and disaster-recovery tests. DoD: existing delivery behavior remains compatible; duplicate/out-of-order events do not loop runs; restore/replay behavior is documented and tested.
 
 TaskForge dependency edges are configured in the same order: TAS-62 → TAS-63 → TAS-64 → TAS-65 → TAS-66 → TAS-67.
 
