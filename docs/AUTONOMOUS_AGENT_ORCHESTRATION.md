@@ -39,12 +39,18 @@ Under the shipped model, adding a key is a global contract change: `TASK_STATUSE
 | `READY_FOR_REVIEW` → `IN_REVIEW` | PR is reachable and reviewer lease acquired | Coordinator/Codex; review run |
 | `IN_REVIEW` → `APPROVED` | required CI checks green, no blocking findings, reviewer attestation | Codex; review evidence |
 | `IN_REVIEW` → `CHANGES_REQUESTED` | one or more P0–P2 findings or explicitly selected P3 finding | Codex; finding records |
+| `CHANGES_REQUESTED` → `IN_PROGRESS` | owner accepts a fix request and a new implementation attempt is allowed under the cycle cap | Coordinator; new attempt record |
 | `IN_REVIEW` → `PENDING_DECISION` | finding needs product/security/owner decision | Human/coordinator; decision note |
 | `APPROVED` → `MERGE_PENDING` | human/project merge policy authorizes merge | Coordinator; authorization record |
+| `APPROVED` → `IN_REVIEW` | PR head SHA changes or approval evidence becomes stale | Coordinator; new head and review run |
 | `MERGE_PENDING` → `DONE` | merge SHA exists and post-merge CI/deploy check passes | Coordinator; merge evidence |
+| `MERGE_PENDING` → `IN_REVIEW` | merge is blocked before a merge SHA or required pre-merge check fails | Coordinator; failed gate evidence |
+| `MERGE_PENDING` → `FAILED` | merge/post-merge verification fails after bounded recovery attempts | Runner/coordinator; diagnostics + escalation |
 | Any non-terminal → `CANCELLED` | human or authorized coordinator cancellation | Actor + reason |
 | `IN_PROGRESS` → `FAILED` | implementation timeout or exhausted retries | Runner; diagnostics + escalation |
 | `IN_REVIEW` → `FAILED` | review timeout or exhausted retries | Runner; diagnostics + escalation |
+| `PENDING_DECISION` → `IN_PROGRESS` or `IN_REVIEW` | owner records a decision to resume implementation or review | Human/coordinator; decision and target recorded |
+| `FAILED` → `IN_PROGRESS` | authorized retry starts a new run/attempt within policy limits | Coordinator; retry reason and new run ID |
 | `IN_REVIEW` → `CANCELLED` (reject delivery) | human/reviewer rejects the whole implementation as unsafe or out of scope | Human/reviewer; rejection reason + evidence |
 
 Transitions are atomic, validate that the previous status matches, and are idempotent on `(runId, transitionId)`. Disabled semantic transitions return an actionable workflow-discovery error rather than silently changing to a legacy key.
