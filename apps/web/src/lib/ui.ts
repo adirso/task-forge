@@ -11,6 +11,11 @@ export const statusMeta: Record<TaskStatus, { label: string; tone: string }> = {
   IN_REVIEW: { label: "In review", tone: "amber" },
   DONE: { label: "Done", tone: "green" },
   CANCELLED: { label: "Cancelled", tone: "red" },
+  APPROVED: { label: "Approved", tone: "green" },
+  RE_REVIEW: { label: "Re-review", tone: "amber" },
+  FIX_NEEDED: { label: "Fix needed", tone: "red" },
+  PENDING_DECISION: { label: "Pending decision", tone: "orange" },
+  FAILED: { label: "Failed", tone: "red" },
 };
 
 export const priorityMeta: Record<TaskPriority, { label: string; symbol: string }> = {

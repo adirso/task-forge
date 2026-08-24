@@ -74,6 +74,7 @@ export class TaskApplicationService implements TaskService {
       if (input.status && reviewStatuses.has(input.status) && !reviewStatuses.has(existing.status) && existing.creatorId !== context.actor.userId) await this.notify(repositories, existing.creatorId, { ...existing, ...task, title: input.title ?? existing.title }, context, "REVIEW_REQUESTED", "Review requested");
       const automated = await this.automationEngine.apply(repositories, context, existing, { ...task, updatedAt: now }, "TASK_UPDATED");
       if (assigneeChanged && input.assigneeId && input.assigneeId !== context.actor.userId) await this.enqueueAssignmentWebhook(repositories, { ...task, assigneeId: input.assigneeId }, context);
+      if (automated.status !== existing.status && automated.assigneeId !== context.actor.userId) await this.enqueueStatusWebhook(repositories, automated, existing.status, context);
       return repositories.tasks.findById ? await repositories.tasks.findById(automated.id) ?? automated : automated;
     });
   }
@@ -204,5 +205,30 @@ export class TaskApplicationService implements TaskService {
       timestamp: update.createdAt,
     };
     await repositories.webhookDeliveries.create({ id, agentId: assignee.id, taskId: task.id, eventType: "task.update_added", payload: JSON.stringify(payload), status: "PENDING", attemptCount: 0, nextAttemptAt: update.createdAt, lockedUntil: null, lastAttemptAt: null, deliveredAt: null, failedAt: null, lastError: null, httpStatus: null, createdAt: update.createdAt, updatedAt: update.createdAt });
+  }
+
+  private async enqueueStatusWebhook(repositories: RepositorySet, task: TaskEntity, previousStatus: TaskStatus, context: RequestContext) {
+    if (!task.assigneeId) return;
+    const assignee = await repositories.users.findById(task.assigneeId);
+    if (!assignee || assignee.kind !== "AGENT" || !assignee.webhookUrl) return;
+    const project = await repositories.projects.findById(task.projectId);
+    const id = this.newId();
+    const timestamp = this.now();
+    const payload = {
+      id,
+      event: "task.status_changed",
+      task: {
+        id: task.id, number: task.number, title: task.title,
+        description: task.description, definitionOfDone: task.definitionOfDone,
+        status: task.status, priority: task.priority, type: task.type,
+        branch: task.branch, projectId: task.projectId,
+        projectKey: project?.key, projectName: project?.name,
+        assigneeId: task.assigneeId,
+      },
+      previousStatus,
+      changedBy: { id: context.actor.userId, name: context.actor.name },
+      timestamp,
+    };
+    await repositories.webhookDeliveries.create({ id, agentId: assignee.id, taskId: task.id, eventType: "task.status_changed", payload: JSON.stringify(payload), status: "PENDING", attemptCount: 0, nextAttemptAt: timestamp, lockedUntil: null, lastAttemptAt: null, deliveredAt: null, failedAt: null, lastError: null, httpStatus: null, createdAt: timestamp, updatedAt: timestamp });
   }
 }

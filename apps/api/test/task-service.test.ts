@@ -143,3 +143,34 @@ test("assignment events are enqueued only for another agent actor", async () => 
   await service.update({ actor: { userId: "agent-1", name: "Builder", kind: "AGENT", role: "MEMBER", tokenScopes: null } }, existing.id, { assigneeId: "agent-1" });
   assert.equal(deliveries.length, 1, "an agent assigning itself must not enqueue its own webhook");
 });
+
+test("status changes enqueue a signed-delivery event for another agent", async () => {
+  const deliveries: Array<Record<string, unknown>> = [];
+  const existing = {
+    id: "task-62", projectId: "project-1", number: 62, title: "Workflow status", description: "", definitionOfDone: "",
+    status: "IN_PROGRESS", priority: "HIGH", type: "INFRA", assigneeId: "agent-1", creatorId: "owner-1", parentId: null, branch: null,
+    dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null,
+    position: 0, createdAt: "2026-08-24T10:00:00.000Z", updatedAt: "2026-08-24T10:00:00.000Z",
+  } as const;
+  const set = repositories({
+    tasks: { findById: async () => existing, update: async (_id: string, input: Record<string, unknown>) => ({ ...existing, ...input }) } as never,
+    users: { findById: async (id: string) => id === "agent-1" ? { id, name: "Builder", kind: "AGENT", webhookUrl: "https://agent.example/webhook" } : null } as never,
+    webhookDeliveries: { create: async (delivery: Record<string, unknown>) => { deliveries.push(delivery); return delivery; } } as never,
+  });
+  const service = new TaskApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T10:05:00.000Z", () => "event-status-1");
+
+  await service.update({ actor: { userId: "owner-1", name: "Owner", kind: "HUMAN", role: "ADMIN", tokenScopes: null } }, existing.id, { status: "READY_FOR_REVIEW" });
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0]?.eventType, "task.status_changed");
+  assert.deepEqual(JSON.parse(String(deliveries[0]?.payload)), {
+    id: "event-status-1",
+    event: "task.status_changed",
+    task: { id: "task-62", number: 62, title: "Workflow status", description: "", definitionOfDone: "", status: "READY_FOR_REVIEW", priority: "HIGH", type: "INFRA", branch: null, projectId: "project-1", projectKey: "TAS", projectName: "Task Forge", assigneeId: "agent-1" },
+    previousStatus: "IN_PROGRESS",
+    changedBy: { id: "owner-1", name: "Owner" },
+    timestamp: "2026-08-24T10:05:00.000Z",
+  });
+
+  await service.update({ actor: { userId: "agent-1", name: "Builder", kind: "AGENT", role: "MEMBER", tokenScopes: null } }, existing.id, { status: "IN_REVIEW" });
+  assert.equal(deliveries.length, 1, "an agent's own status change must not enqueue its webhook");
+});

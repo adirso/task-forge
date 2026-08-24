@@ -3,7 +3,7 @@ import { z } from "zod";
 export const userKindSchema = z.enum(["HUMAN", "AGENT"]);
 export const userRoleSchema = z.enum(["ADMIN", "MEMBER"]);
 export const projectMemberRoleSchema = z.enum(["OWNER", "MEMBER"]);
-export const TASK_STATUSES = ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"] as const;
+export const TASK_STATUSES = ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED", "APPROVED", "RE_REVIEW", "FIX_NEEDED", "PENDING_DECISION", "FAILED"] as const;
 export const TASK_CLAIM_SOURCE_STATUSES = ["BACKLOG", "TODO", "READY_FOR_DEV"] as const;
 export const TASK_CLAIM_TARGET_STATUS = "IN_PROGRESS" as const;
 export const TASK_REVIEW_STATUSES = ["READY_FOR_REVIEW", "IN_REVIEW"] as const;
@@ -17,7 +17,7 @@ export const projectAvailableStatusesSchema = z.array(taskStatusSchema)
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const taskTypeSchema = z.enum(["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
-export const webhookEventTypeSchema = z.enum(["task.assigned", "task.update_added"]);
+export const webhookEventTypeSchema = z.enum(["task.assigned", "task.update_added", "task.status_changed"]);
 export const webhookDeliveryStatusSchema = z.enum(["PENDING", "RETRYING", "DELIVERED", "FAILED"]);
 export const taskTagNameSchema = z.string().trim().min(1).max(32)
   .regex(/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/, "Tags may contain letters, numbers, hyphens, and underscores")

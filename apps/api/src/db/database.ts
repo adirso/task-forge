@@ -170,6 +170,7 @@ async function runStatements(executor: Executor, statements: string[]) {
 
 const taskStatusSql = TASK_STATUSES.map((status) => `'${status}'`).join(", ");
 const defaultAvailableStatuses = JSON.stringify(TASK_STATUSES);
+const legacyDefaultAvailableStatuses = JSON.stringify(["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
 const legacyAvailableStatuses = JSON.stringify(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"]);
 
 const sqliteSchema = [
@@ -208,7 +209,7 @@ const sqliteSchema = [
   `CREATE INDEX IF NOT EXISTS idx_task_attachments_task_created ON task_attachments(task_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, \`trigger\` TEXT NOT NULL, actor_type TEXT NOT NULL DEFAULT 'ANY', actor_id TEXT REFERENCES users(id) ON DELETE SET NULL, service TEXT, conditions TEXT NOT NULL, actions TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_automations_project ON automations(project_id, enabled)`,
-  `CREATE TABLE IF NOT EXISTS webhook_deliveries (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, event_type TEXT NOT NULL CHECK (event_type IN ('task.assigned', 'task.update_added')), payload TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('PENDING', 'RETRYING', 'DELIVERED', 'FAILED')), attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT NOT NULL, locked_until TEXT, last_attempt_at TEXT, delivered_at TEXT, failed_at TEXT, last_error TEXT, http_status INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS webhook_deliveries (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, event_type TEXT NOT NULL CHECK (event_type IN ('task.assigned', 'task.update_added', 'task.status_changed')), payload TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('PENDING', 'RETRYING', 'DELIVERED', 'FAILED')), attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT NOT NULL, locked_until TEXT, last_attempt_at TEXT, delivered_at TEXT, failed_at TEXT, last_error TEXT, http_status INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due ON webhook_deliveries(status, next_attempt_at, locked_until)`,
   `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_agent ON webhook_deliveries(agent_id, created_at)`,
 ];
@@ -230,12 +231,12 @@ const mysqlSchema = [
   `CREATE TABLE IF NOT EXISTS task_updates (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, author_id CHAR(36) NOT NULL, body TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_task_updates_task_created (task_id, created_at), INDEX idx_task_updates_task_page (task_id, created_at, id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (author_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS task_attachments (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, file_name VARCHAR(255) NOT NULL, mime_type VARCHAR(160) NOT NULL, file_size BIGINT NOT NULL, storage_key VARCHAR(255) NOT NULL UNIQUE, uploaded_by_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, INDEX idx_task_attachments_task_created (task_id, created_at), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (uploaded_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS automations (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, name VARCHAR(120) NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 1, \`trigger\` VARCHAR(30) NOT NULL, actor_type VARCHAR(16) NOT NULL DEFAULT 'ANY', actor_id CHAR(36), service VARCHAR(80), conditions TEXT NOT NULL, actions TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_automations_project (project_id, enabled), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-  `CREATE TABLE IF NOT EXISTS webhook_deliveries (id CHAR(36) PRIMARY KEY, agent_id CHAR(36) NOT NULL, task_id CHAR(36), event_type VARCHAR(40) NOT NULL CHECK (event_type IN ('task.assigned', 'task.update_added')), payload JSON NOT NULL, status VARCHAR(16) NOT NULL CHECK (status IN ('PENDING', 'RETRYING', 'DELIVERED', 'FAILED')), attempt_count INT NOT NULL DEFAULT 0, next_attempt_at VARCHAR(30) NOT NULL, locked_until VARCHAR(30), last_attempt_at VARCHAR(30), delivered_at VARCHAR(30), failed_at VARCHAR(30), last_error VARCHAR(255), http_status INT, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_webhook_deliveries_due (status, next_attempt_at, locked_until), INDEX idx_webhook_deliveries_agent (agent_id, created_at), FOREIGN KEY (agent_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS webhook_deliveries (id CHAR(36) PRIMARY KEY, agent_id CHAR(36) NOT NULL, task_id CHAR(36), event_type VARCHAR(40) NOT NULL CHECK (event_type IN ('task.assigned', 'task.update_added', 'task.status_changed')), payload JSON NOT NULL, status VARCHAR(16) NOT NULL CHECK (status IN ('PENDING', 'RETRYING', 'DELIVERED', 'FAILED')), attempt_count INT NOT NULL DEFAULT 0, next_attempt_at VARCHAR(30) NOT NULL, locked_until VARCHAR(30), last_attempt_at VARCHAR(30), delivered_at VARCHAR(30), failed_at VARCHAR(30), last_error VARCHAR(255), http_status INT, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_webhook_deliveries_due (status, next_attempt_at, locked_until), INDEX idx_webhook_deliveries_agent (agent_id, created_at), FOREIGN KEY (agent_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
 async function migrateSqliteTaskStatusCheck(executor: Executor) {
   const table = await executor.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'", []);
-  if (table?.sql.includes("READY_FOR_REVIEW") && table.sql.includes("CANCELLED")) return;
+  if (table?.sql.includes("APPROVED") && table.sql.includes("PENDING_DECISION") && table.sql.includes("FAILED")) return;
   await executor.run("DROP TABLE IF EXISTS tasks_status_migration", []);
   await executor.run(`CREATE TABLE tasks_status_migration (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition_of_done TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'TODO' CHECK (status IN (${taskStatusSql})), priority TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type TEXT NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL, creator_id TEXT NOT NULL REFERENCES users(id), parent_id TEXT REFERENCES tasks_status_migration(id) ON DELETE CASCADE, branch TEXT, due_date TEXT, estimate_points INTEGER, phase_id TEXT REFERENCES phases(id) ON DELETE SET NULL, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, number))`, []);
   await executor.run("INSERT INTO tasks_status_migration (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) SELECT id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at FROM tasks", []);
@@ -248,12 +249,35 @@ async function migrateSqliteTaskStatusCheck(executor: Executor) {
 async function migrateMysqlTaskStatusCheck(executor: Executor) {
   const checks = await executor.all<{ constraint_name: string; check_clause: string }>(`SELECT tc.CONSTRAINT_NAME AS constraint_name, cc.CHECK_CLAUSE AS check_clause FROM information_schema.TABLE_CONSTRAINTS tc JOIN information_schema.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'tasks' AND tc.CONSTRAINT_TYPE = 'CHECK'`, []);
   const statusChecks = checks.filter((check) => /\bstatus\b/i.test(check.check_clause));
-  if (statusChecks.some((check) => check.check_clause.includes("READY_FOR_REVIEW") && check.check_clause.includes("CANCELLED"))) return;
+  if (statusChecks.some((check) => check.check_clause.includes("APPROVED") && check.check_clause.includes("PENDING_DECISION") && check.check_clause.includes("FAILED"))) return;
   for (const check of statusChecks) {
     if (!/^[A-Za-z0-9_$]+$/.test(check.constraint_name)) throw new Error("Unsafe MySQL task status constraint name");
     await executor.run(`ALTER TABLE tasks DROP CHECK \`${check.constraint_name}\``, []);
   }
   await executor.run(`ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN (${taskStatusSql}))`, []);
+}
+
+async function migrateSqliteWebhookEventCheck(executor: Executor) {
+  const table = await executor.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'", []);
+  if (!table || table.sql.includes("task.status_changed")) return;
+  await executor.run("DROP TABLE IF EXISTS webhook_deliveries_migration", []);
+  await executor.run("CREATE TABLE webhook_deliveries_migration (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, event_type TEXT NOT NULL CHECK (event_type IN ('task.assigned', 'task.update_added', 'task.status_changed')), payload TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('PENDING', 'RETRYING', 'DELIVERED', 'FAILED')), attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT NOT NULL, locked_until TEXT, last_attempt_at TEXT, delivered_at TEXT, failed_at TEXT, last_error TEXT, http_status INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)", []);
+  await executor.run("INSERT INTO webhook_deliveries_migration SELECT id, agent_id, task_id, event_type, payload, status, attempt_count, next_attempt_at, locked_until, last_attempt_at, delivered_at, failed_at, last_error, http_status, created_at, updated_at FROM webhook_deliveries", []);
+  await executor.run("DROP TABLE webhook_deliveries", []);
+  await executor.run("ALTER TABLE webhook_deliveries_migration RENAME TO webhook_deliveries", []);
+  await executor.run("CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due ON webhook_deliveries(status, next_attempt_at, locked_until)", []);
+  await executor.run("CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_agent ON webhook_deliveries(agent_id, created_at)", []);
+}
+
+async function migrateMysqlWebhookEventCheck(executor: Executor) {
+  const checks = await executor.all<{ constraint_name: string; check_clause: string }>(`SELECT tc.CONSTRAINT_NAME AS constraint_name, cc.CHECK_CLAUSE AS check_clause FROM information_schema.TABLE_CONSTRAINTS tc JOIN information_schema.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'webhook_deliveries' AND tc.CONSTRAINT_TYPE = 'CHECK'`, []);
+  const eventChecks = checks.filter((check) => /event_type/i.test(check.check_clause));
+  if (eventChecks.some((check) => check.check_clause.includes("task.status_changed"))) return;
+  for (const check of eventChecks) {
+    if (!/^[A-Za-z0-9_$]+$/.test(check.constraint_name)) throw new Error("Unsafe MySQL webhook event constraint name");
+    await executor.run(`ALTER TABLE webhook_deliveries DROP CHECK \`${check.constraint_name}\``, []);
+  }
+  await executor.run("ALTER TABLE webhook_deliveries ADD CONSTRAINT chk_webhook_event_type CHECK (event_type IN ('task.assigned', 'task.update_added', 'task.status_changed'))", []);
 }
 
 async function tableExists(executor: Executor, dialect: DatabaseDriver, table: string) {
@@ -367,7 +391,7 @@ export const migrations: readonly Migration[] = [
   {
     version: "0004_project_status_defaults",
     async up(executor) {
-      await executor.run("UPDATE projects SET available_statuses = ? WHERE available_statuses = ?", [defaultAvailableStatuses, legacyAvailableStatuses]);
+      await executor.run("UPDATE projects SET available_statuses = ? WHERE available_statuses = ?", [legacyDefaultAvailableStatuses, legacyAvailableStatuses]);
     },
   },
   {
@@ -398,6 +422,27 @@ export const migrations: readonly Migration[] = [
         ? "CREATE TABLE IF NOT EXISTS task_status_history (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, status VARCHAR(32) NOT NULL, entered_at VARCHAR(30) NOT NULL, exited_at VARCHAR(30), duration_seconds INT, INDEX idx_task_status_history_task (task_id, entered_at, id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         : "CREATE TABLE IF NOT EXISTS task_status_history (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, status TEXT NOT NULL, entered_at TEXT NOT NULL, exited_at TEXT, duration_seconds INTEGER)", []);
       if (dialect === "sqlite") await executor.run("CREATE INDEX IF NOT EXISTS idx_task_status_history_task ON task_status_history(task_id, entered_at, id)", []);
+    },
+  },
+  {
+    version: "0008_autonomous_workflow_statuses",
+    before: async (adapter, dialect) => {
+      await preflightTaskStatuses(adapter, dialect);
+      if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = OFF", []);
+    },
+    async up(executor, dialect) {
+      if (dialect === "sqlite") await migrateSqliteTaskStatusCheck(executor);
+      else await migrateMysqlTaskStatusCheck(executor);
+    },
+    after: async (adapter, dialect) => {
+      if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = ON", []);
+    },
+  },
+  {
+    version: "0009_status_changed_webhook_event",
+    async up(executor, dialect) {
+      if (dialect === "sqlite") await migrateSqliteWebhookEventCheck(executor);
+      else await migrateMysqlWebhookEventCheck(executor);
     },
   },
 ];
