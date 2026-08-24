@@ -172,6 +172,7 @@ Claiming uses this fixed semantic mapping:
 - `IN_PROGRESS` is the claim target and must be enabled.
 - At least one claim source must be enabled. A project without `IN_PROGRESS`, or without any enabled claim source, returns `400` with instructions to update project settings.
 - The winning task is selected by priority and position. Assignment, source-status eligibility, and the move to `IN_PROGRESS` are repeated in one conditional update, so concurrent callers cannot both claim the same task.
+- Pass the optional `runId` (UUID) when a runner claims work. It is carried into the resulting `task.status_changed` event so callbacks can be correlated to the durable run.
 
 Claim the next available task, optionally filtering by `phaseId` or `priority`:
 
@@ -328,7 +329,7 @@ POST /api/runs/:id/heartbeat       { "leaseMs": 60000 }
 POST /api/runs/:id/complete        { "status": "SUCCEEDED|FAILED|CANCELLED", "error": "..." }
 ```
 
-Claims are atomic and leases are exclusive. Heartbeats and completion require the lease owner. Expired leases/timeouts become retryable `FAILED` runs subject to the per-run attempt budget and a task-level delivery-cycle cap. Only a project owner or administrator can cancel a run. When changing a task status for a run, include its `runId` in the task PATCH; the resulting `task.status_changed` webhook carries that ID. A runner must persist run IDs and treat callbacks as idempotent.
+Claims are atomic and leases are exclusive. Heartbeats and completion require the lease owner. A background expiry sweep runs every 30 seconds in the API, and every run operation also reaps expired leases/timeouts; these become retryable `FAILED` runs subject to the per-run attempt budget and a task-level delivery-cycle cap. Only a project owner or administrator can cancel a run. When changing a task status for a run, include its `runId` in the task PATCH; the resulting `task.status_changed` webhook carries that ID. A runner must persist run IDs and treat callbacks as idempotent.
 
 Verify `v1` with HMAC-SHA256 over the exact raw body, prefixed by the timestamp and a period: `HMAC(secret, timestamp + "." + rawBody)`. Compare digests in constant time and reject timestamps outside a short tolerance such as five minutes:
 

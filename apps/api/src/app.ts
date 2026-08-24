@@ -22,7 +22,7 @@ import { attachmentRoutes } from "./routes/attachments.js";
 import { automationRoutes } from "./routes/automations.js";
 import { activityRoutes } from "./routes/activity.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
-import { runRoutes } from "./routes/runs.js";
+import { expireAgentRuns, runRoutes } from "./routes/runs.js";
 import { RateLimiter } from "./lib/rate-limit.js";
 
 export async function buildApp(options: { startWebhookDispatcher?: boolean } = {}) {
@@ -34,6 +34,7 @@ export async function buildApp(options: { startWebhookDispatcher?: boolean } = {
       warn: (details, message) => app.log.warn(details, message),
     },
   });
+  let runReaper: ReturnType<typeof setInterval> | null = null;
   await app.register(cors, { origin: config.corsOrigins });
   await app.register(swagger, {
     openapi: {
@@ -46,6 +47,12 @@ export async function buildApp(options: { startWebhookDispatcher?: boolean } = {
   if (options.startWebhookDispatcher ?? !process.env.TEST) {
     app.addHook("onReady", async () => webhookDispatcher.start());
     app.addHook("onClose", async () => webhookDispatcher.stop());
+  }
+  if (!process.env.TEST) {
+    app.addHook("onReady", async () => {
+      runReaper = setInterval(() => void expireAgentRuns().catch((error) => app.log.warn({ error }, "agent run expiry sweep failed")), 30_000);
+    });
+    app.addHook("onClose", async () => { if (runReaper) clearInterval(runReaper); runReaper = null; });
   }
 
   app.setErrorHandler((error, _request, reply) => {

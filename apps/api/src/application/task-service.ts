@@ -80,7 +80,7 @@ export class TaskApplicationService implements TaskService {
     });
   }
 
-  async claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string }) {
+  async claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string; runId?: string | null }) {
     return this.unitOfWork.run(async (repositories) => {
       this.assertScope(context, "task:claim");
       const project = await this.assertProjectAccess(repositories, context);
@@ -94,7 +94,7 @@ export class TaskApplicationService implements TaskService {
       const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS }, options);
       if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
-      if (task.assigneeId !== context.actor.userId) await this.enqueueStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context);
+      if (task.assigneeId !== context.actor.userId) await this.enqueueStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context, options?.runId ?? null);
       return task;
     });
   }

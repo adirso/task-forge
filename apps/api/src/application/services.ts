@@ -54,7 +54,7 @@ export interface TaskService {
   addUpdate(context: RequestContext, taskId: string, body: string): Promise<TaskUpdateEntity>;
   listUpdates(context: RequestContext, taskId: string, page: PageRequest): Promise<Page<TaskUpdateEntity>>;
   listTags(context: ProjectContext): Promise<Array<{ id: string; projectId: string; name: string; createdAt: string; taskCount: number }>>;
-  claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string }): Promise<TaskEntity>;
+  claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string; runId?: string | null }): Promise<TaskEntity>;
 }
 
 export interface AttachmentService {

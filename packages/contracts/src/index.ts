@@ -110,6 +110,7 @@ export const webhookDeliveryQuerySchema = z.object({
 export const taskClaimSchema = z.object({
   phaseId: z.string().uuid().nullable().optional(),
   priority: taskPrioritySchema.optional(),
+  runId: z.string().uuid().nullable().optional(),
 });
 
 export const profileUpdateSchema = z.object({
