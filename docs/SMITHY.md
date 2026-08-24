@@ -26,7 +26,7 @@ npm run dev:agents
 To add, edit, or remove a provider without hand-editing JSON, run the interactive configurator:
 
 ```bash
-npm run configure -w @taskforge/smithy -- --env-file apps/smithy/.env.smithy
+npm run configure -w @taskforge/smithy -- --file apps/smithy/.env.smithy
 ```
 
 It supports the `claude`, `codex`, and `cursor` labels plus custom labels (`other`). It updates only `SMITHY_PROVIDERS`, preserves other `.env` settings, and never prints token or webhook-secret values. Leave a secret prompt blank when editing to keep the current value. Keep the resulting env file private.
