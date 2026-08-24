@@ -32,7 +32,7 @@ The task remains the source of truth. Every automated action is associated with 
 
 The loop uses the shipped keys wherever possible; it does not introduce duplicate vocabulary. The default mapping is:
 
-`READY_FOR_DEV` (ready for agent) → `IN_PROGRESS` (implementing) → `READY_FOR_REVIEW` (waiting for review) → `IN_REVIEW` (first review) → `APPROVED` (new key) → `MERGE_PENDING` (new key) → `DONE`
+`READY_FOR_DEV` (ready for agent) → `IN_PROGRESS` (implementing) → `READY_FOR_REVIEW` (waiting for review) → `IN_REVIEW` (first review) → `APPROVED` (approved and awaiting merge) → `DONE`
 
 Review cycles use two explicit additional keys: `FIX_NEEDED` when findings require implementation work, followed by `RE_REVIEW` when the updated PR is ready for another review. Other exception paths are `PENDING_DECISION` and `FAILED` (new keys), plus the already-shipped `CANCELLED`. Projects may subset the global keys, so orchestration must discover enabled statuses and either use the mapped key or stop with an actionable workflow error. TAS-62 must choose explicitly between adding only these global keys or introducing a separate per-status metadata model; the latter is out of scope for this plan.
 
@@ -43,17 +43,16 @@ Under the shipped model, adding a key is a global contract change: `TASK_STATUSE
 | `READY_FOR_DEV` → `IN_PROGRESS` | task assigned, lease acquired, implementation agent configured | Coordinator; run record |
 | `IN_PROGRESS` → `READY_FOR_REVIEW` | branch/PR exists, required tests recorded, agent handoff complete | Claude; PR URL + commit SHA |
 | `READY_FOR_REVIEW` → `IN_REVIEW` | PR is reachable and reviewer lease acquired | Coordinator/Codex; review run |
-| `IN_REVIEW` → `APPROVED` | required CI checks green, no blocking findings, reviewer attestation | Codex; review evidence |
 | `IN_REVIEW` → `FIX_NEEDED` | one or more P0–P2 findings or explicitly selected P3 finding | Codex; finding records |
 | `FIX_NEEDED` → `IN_PROGRESS` | owner accepts a fix request and a new implementation attempt is allowed under the cycle cap | Coordinator; new attempt record |
 | `READY_FOR_REVIEW` → `RE_REVIEW` | this is a subsequent review cycle for a changed PR head | Coordinator; prior review + new head |
 | `RE_REVIEW` → `APPROVED` | required CI checks green, no blocking findings, reviewer attestation | Codex; review evidence |
 | `IN_REVIEW` → `PENDING_DECISION` | finding needs product/security/owner decision | Human/coordinator; decision note |
-| `APPROVED` → `MERGE_PENDING` | human/project merge policy authorizes merge | Coordinator; authorization record |
+| `IN_REVIEW` → `APPROVED` | required CI checks green, no blocking findings, reviewer attestation, and human/project merge authorization | Codex + authorized human; review and authorization evidence |
 | `APPROVED` → `IN_REVIEW` | PR head SHA changes or approval evidence becomes stale | Coordinator; new head and review run |
-| `MERGE_PENDING` → `DONE` | merge SHA exists and post-merge CI/deploy check passes | Coordinator; merge evidence |
-| `MERGE_PENDING` → `IN_REVIEW` | merge is blocked before a merge SHA or required pre-merge check fails | Coordinator; failed gate evidence |
-| `MERGE_PENDING` → `FAILED` | merge/post-merge verification fails after bounded recovery attempts | Runner/coordinator; diagnostics + escalation |
+| `APPROVED` → `DONE` | merge SHA exists and post-merge CI/deploy check passes | Coordinator; merge evidence |
+| `APPROVED` → `IN_REVIEW` | merge is blocked before a merge SHA or required pre-merge check fails | Coordinator; failed gate evidence |
+| `APPROVED` → `FAILED` | merge/post-merge verification fails after bounded recovery attempts | Runner/coordinator; diagnostics + escalation |
 | Any non-terminal → `CANCELLED` | human or authorized coordinator cancellation | Actor + reason |
 | `IN_PROGRESS` → `FAILED` | implementation timeout or exhausted retries | Runner; diagnostics + escalation |
 | `IN_REVIEW` → `FAILED` | review timeout or exhausted retries | Runner; diagnostics + escalation |
@@ -101,7 +100,7 @@ Only the finding owner or an authorized human can change a disposition. A re-rev
 
 These child tasks are intentionally ordered so storage and policy are available before provider execution:
 
-1. **TAS-62 — Workflow statuses and transition guards** — add only missing global orchestration keys (`APPROVED`, `RE_REVIEW`, `FIX_NEEDED`, `PENDING_DECISION`, `MERGE_PENDING`, `FAILED`) or document an explicit decision to build per-status metadata; preserve the shipped nine-key subset model; do not auto-enable new keys on existing projects—each project must opt in by updating its stored subset; add `task.status_changed` in both dialects; keep claim/review/completion constants synchronized; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
+1. **TAS-62 — Workflow statuses and transition guards** — add only missing global orchestration keys (`APPROVED`, `RE_REVIEW`, `FIX_NEEDED`, `PENDING_DECISION`, `FAILED`) or document an explicit decision to build per-status metadata; preserve the shipped nine-key subset model; do not auto-enable new keys on existing projects—each project must opt in by updating its stored subset; add `task.status_changed` in both dialects; keep claim/review/completion constants synchronized; `APPROVED` is both the approval and awaiting-merge state; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
 2. **TAS-63 — Run, lease, and orchestration service** — persist runs/attempts/leases, claim and heartbeat APIs, timeout/cancellation handling, and bounded cycle limits on top of task assignment. DoD: TaskForge never starts provider processes; crash recovery and concurrent claims are deterministic in SQLite and MySQL; a runner can resume or retry using durable run state.
 3. **TAS-64 — Build the optional runner service** — add a separate `apps/smithy` (name pending) service that receives signed agent webhooks, maps agent paths to operator command templates, executes them in configured repositories, and reports through the public API. DoD: Claude/Codex/Cursor are configuration labels only; no provider code or credentials enter `apps/api`; command output and callbacks are authenticated/redacted; the runner is optional and provider failures are retryable.
 4. **TAS-65 — PR/CI evidence and merge authorization** — ingest checks/reviews, invalidate stale approvals, enforce merge guards, and record merge evidence. DoD: no merge occurs without configured checks and authorization; head changes require re-review.
@@ -112,7 +111,7 @@ TaskForge dependency edges are configured in the same order: TAS-62 → TAS-63 �
 
 ## Open product decisions
 
-- Which exact status keys and categories are enabled by default, and whether `APPROVED` is separate from `MERGE_PENDING`.
+- Which exact status keys and categories are enabled by default; `APPROVED` serves as both approval and awaiting-merge.
 - Whether the runner service is named `smithy`, `runner`, or another name.
 - Whether merge authorization is always human-gated or can be granted per project; who may grant it.
 - Supported Claude/Codex execution environments, network access, cost limits, and maximum wall-clock time.
