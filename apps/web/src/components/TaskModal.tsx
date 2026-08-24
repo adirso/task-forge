@@ -114,7 +114,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
         </section>}
         {task && <section className="task-runs">
           <div className="section-heading"><span>Agent runs <b>{runs.length}</b></span><small>{runs.some((run) => run.status === "RUNNING" || run.status === "PENDING") ? "Refreshing" : ""}</small></div>
-          {runs.length ? <div className="run-list">{runs.map((run) => <article className="run-item" key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{run.timeoutAt && <span>Timeout {formatDate(run.timeoutAt)}</span>}</div>{run.lastError && <p className="run-error">{run.lastError}</p>}</article>)}</div> : <p className="runs-empty">No agent runs yet.</p>}
+          {runs.length ? <div className="run-list">{runs.map((run) => <article className="run-item" key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><span className={`run-health run-health-${runHealth(run).tone}`}>{runHealth(run).label}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{run.timeoutAt && <span>Timeout {formatDate(run.timeoutAt)}</span>}</div>{run.lastError && <p className="run-error">{run.lastError}</p>}</article>)}</div> : <p className="runs-empty">No agent runs yet.</p>}
         </section>}
         {task && activity.length > 0 && <section className="task-activity">
           <div className="section-heading"><span>Activity log <b>{activity.length}</b></span></div>
@@ -157,3 +157,12 @@ function formatDuration(seconds: number) {
 }
 
 function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(value)); }
+
+function runHealth(run: AgentRun): { label: string; tone: "active" | "waiting" | "stale" | "done" } {
+  if (run.status === "PENDING") return { label: "Waiting to be claimed", tone: "waiting" };
+  if (run.status !== "RUNNING") return { label: "Finished", tone: "done" };
+  const now = Date.now();
+  if (run.leaseExpiresAt && Date.parse(run.leaseExpiresAt) <= now) return { label: "Lease expired", tone: "stale" };
+  if (!run.heartbeatAt || now - Date.parse(run.heartbeatAt) > 90_000) return { label: "Heartbeat stale", tone: "stale" };
+  return { label: "Waiting for provider", tone: "active" };
+}
