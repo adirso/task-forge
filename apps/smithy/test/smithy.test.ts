@@ -4,6 +4,7 @@ import { renderCommand } from "../src/command.js";
 import { SmithyRunner } from "../src/runner.js";
 import { sign, verifySignature, redact } from "../src/security.js";
 import { MemoryJobStore } from "../src/store.js";
+import { loadConfig } from "../src/config.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,12 +22,18 @@ test("signature verification enforces timestamp and exact body", () => {
   assert.equal(verifySignature(secret, header, body, timestamp + 301), false);
 });
 
+test("configuration rejects non-loopback execution hosts", () => {
+  assert.throws(() => loadConfig({ SMITHY_HOST: "0.0.0.0", SMITHY_PROVIDERS: "{}" }), /loopback/);
+  assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PROVIDERS: "{}" }).host, "127.0.0.1");
+});
+
 test("job store deduplicates events and survives status transitions", () => {
   const store = new MemoryJobStore();
   const first = store.accept("event-store", "claude", event.task.id, JSON.stringify(event));
   assert.equal(first.duplicate, false);
   assert.equal(store.accept("event-store", "claude", event.task.id, JSON.stringify(event)).duplicate, true);
   store.markRunning("event-store");
+  store.setRunId("event-store", "run-store");
   assert.equal(store.pending()[0]?.status, "RUNNING");
   store.markComplete("event-store", "SUCCEEDED");
   assert.equal(store.pending().length, 0);
@@ -57,7 +64,8 @@ test("command templates become argument arrays without shell execution", () => {
 
 test("runner routes signed events, executes once, and deduplicates delivery", async () => {
   const calls: string[] = [];
-  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return path.endsWith("/runs") ? { run: { id: "run-1" } } : {}; } };
+  const bodies: Record<string, string> = {};
+  const api = { request: async (path: string, init?: RequestInit) => { calls.push(path); bodies[path] = String(init?.body ?? ""); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return path.endsWith("/runs") ? { run: { id: "run-1" } } : {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "ok", stderr: "" }), () => 1_700_000_000_000);
   const body = JSON.stringify(event);
   const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
@@ -68,6 +76,7 @@ test("runner routes signed events, executes once, and deduplicates delivery", as
   assert.ok(calls.includes(`/api/tasks/${event.task.id}/runs`));
   assert.ok(calls.includes("/api/runs/run-1/claim"));
   assert.ok(calls.includes("/api/runs/run-1/complete"));
+  assert.equal(bodies["/api/runs/run-1/claim"], JSON.stringify({ leaseMs: 120000 }));
 });
 
 test("runner rejects unknown providers, bad signatures, and missing local commands", async () => {

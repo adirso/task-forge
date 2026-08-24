@@ -51,7 +51,7 @@ export class SmithyRunner {
     if (!config) return;
     this.store.markRunning(event.id);
     const api = this.apiFactory(config);
-    let runId = event.runId ?? null;
+    let runId = event.runId ?? job.runId ?? null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
     try {
       const projectKey = event.task?.projectKey;
@@ -64,6 +64,7 @@ export class SmithyRunner {
       if (!runId) {
         const created = await api.request(`/api/tasks/${task.id}/runs`, { method: "POST", body: JSON.stringify({ kind }) });
         runId = String((created.run as { id: string }).id);
+        this.store.setRunId(event.id, runId);
       }
       await api.request(`/api/runs/${runId}/claim`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) });
       heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }).catch(() => undefined); }, 30_000);
@@ -76,9 +77,9 @@ export class SmithyRunner {
       const cwd = await this.worktree(config.repo, task.branch ?? event.task?.branch ?? null, task.id);
       const result = await this.execute(config.cmd, prompt, cwd);
       if (result.code !== 0) throw new Error(redact(result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`)));
-      await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `Smithy ${kind.toLowerCase()} run completed successfully.`, }) });
-      const handoffStatus = kind === "REVIEW" || kind === "RE_REVIEW" ? "APPROVED" : "READY_FOR_REVIEW";
-      if (statuses.includes(handoffStatus)) await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: handoffStatus, runId }) });
+      await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });
+      const handoffStatus = kind === "REVIEW" || kind === "RE_REVIEW" ? null : "READY_FOR_REVIEW";
+      if (handoffStatus && statuses.includes(handoffStatus)) await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: handoffStatus, runId }) });
       await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }) });
       this.store.markComplete(event.id, "SUCCEEDED");
     } catch (error) {
