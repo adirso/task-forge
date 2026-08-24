@@ -23,4 +23,12 @@ Each task branch gets its own `.smithy-worktrees/<task-id>` worktree under the c
 
 If a provider executable is not installed, Smithy acknowledges the webhook but records a failed run; install/configure the command and retry the run from TaskForge. Running no Smithy process is supported: TaskForge continues to provide statuses, evidence, reviews, and merge gates without automation.
 
+## Recovery, replay, and ordering
+
+Inbound agent webhooks are authenticated with the per-agent `X-TaskForge-Signature` HMAC and are persisted in the Smithy job store before execution. The event ID is the idempotency key: a duplicate delivery returns `202` without creating a second run. On restart, pending or running jobs are resumed from SQLite with their existing run ID. If a status event arrives after the task has already moved to another status, Smithy records the event as handled and does not start a run or emit a status handoff, preventing an out-of-order delivery from looping the workflow.
+
+TaskForge delivery is at-least-once. Administrators can inspect failed deliveries and use the retry endpoint to replay a terminal failure with a fresh bounded attempt budget. Replay never reuses merge authorization: a changed PR head requires fresh checks and review. Keep the TaskForge database backup and the Smithy job-store file together when recovering an installation; restore the database first, then restart Smithy so its durable event IDs and run IDs remain correlated. Logs contain redacted failure diagnostics only; do not copy webhook secrets, bearer tokens, or command configuration into incident tickets.
+
+Delivery health is available from the administrator-only webhook metrics endpoint. Delivered history can be purged with the retention endpoint after a backup; pending, retrying, and failed deliveries are never removed by retention. A disaster-recovery drill should restore both stores, replay a failed delivery, and verify that duplicate event IDs remain idempotent.
+
 Run tests with `npm test -w @taskforge/smithy`; the suite covers signature verification, path routing, command boundaries, idempotent delivery, redaction, and missing-provider behavior.

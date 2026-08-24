@@ -114,6 +114,8 @@ export interface WebhookDeliveryRepository {
   markRetry(id: string, nextAttemptAt: string, lastError: string, httpStatus: number | null, updatedAt: string): Promise<void>;
   markFailed(id: string, failedAt: string, lastError: string, httpStatus: number | null): Promise<void>;
   retry(id: string, nextAttemptAt: string): Promise<boolean>;
+  metrics(): Promise<Record<WebhookDeliveryEntity["status"], number>>;
+  purgeDelivered(before: string, limit: number): Promise<number>;
 }
 export interface AgentRunRepository {
   create(input: AgentRunEntity): Promise<AgentRunEntity>;

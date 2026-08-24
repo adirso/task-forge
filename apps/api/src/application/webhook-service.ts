@@ -47,4 +47,15 @@ export class WebhookDeliveryApplicationService implements WebhookDeliveryService
       return response(retried);
     });
   }
+
+  async metrics(context: RequestContext) {
+    if (context.actor.role !== "ADMIN") throw new ForbiddenError("Administrator access required");
+    return this.unitOfWork.run((repositories) => repositories.webhookDeliveries.metrics());
+  }
+
+  async purge(context: RequestContext, before: string, limit: number) {
+    if (context.actor.role !== "ADMIN") throw new ForbiddenError("Administrator access required");
+    if (Number.isNaN(Date.parse(before))) throw new ValidationError("before must be an ISO timestamp");
+    return this.unitOfWork.run((repositories) => repositories.webhookDeliveries.purgeDelivered(before, Math.max(1, Math.min(10_000, limit))));
+  }
 }

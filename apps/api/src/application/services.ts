@@ -93,6 +93,8 @@ export interface UserService {
 export interface WebhookDeliveryService {
   list(context: RequestContext, filters: { agentId?: string; status?: WebhookDeliveryStatus; limit: number }): Promise<WebhookDelivery[]>;
   retry(context: RequestContext, deliveryId: string): Promise<WebhookDelivery>;
+  metrics(context: RequestContext): Promise<Record<WebhookDeliveryStatus, number>>;
+  purge(context: RequestContext, before: string, limit: number): Promise<number>;
 }
 
 export interface NotificationService {

@@ -277,6 +277,8 @@ PATCH /api/users/:agentId/webhook                    {"webhookUrl":"https://agen
 POST  /api/users/:agentId/webhook-secret/rotate
 GET   /api/users/webhook-deliveries?agentId=:agentId&status=FAILED&limit=50
 POST  /api/users/webhook-deliveries/:deliveryId/retry
+GET   /api/users/webhook-deliveries/metrics
+DELETE /api/users/webhook-deliveries/retention?before=<ISO timestamp>&limit=1000
 ```
 
 The first non-null webhook URL creates a per-agent signing secret. The response includes `webhookSecret` once; later URL changes do not reveal it. Rotation returns a new secret once and increments `X-TaskForge-Secret-Version`. Update the receiver immediately after rotation because pending and future attempts use the agent's current secret. Webhook URLs must use HTTP or HTTPS and cannot contain username/password credentials.
@@ -316,6 +318,8 @@ X-TaskForge-Delivery-Attempt: 1
 X-TaskForge-Secret-Version: 2
 X-TaskForge-Signature: t=<unix-seconds>,v1=<hex-hmac>
 ```
+
+Delivery is at-least-once. Duplicate event IDs are acknowledged without repeating side effects; Smithy also ignores status events whose target and previous statuses are both different from the live task status. Administrators can inspect `metrics`, retry failed deliveries, and explicitly purge only delivered history older than a chosen timestamp. Keep the TaskForge backup and Smithy job-store backup together for disaster recovery; restoring both preserves event IDs and run correlation. Secrets, bearer tokens, URLs, and payload bodies are redacted from diagnostics.
 
 ## PR gates and merge authorization
 
