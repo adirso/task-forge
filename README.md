@@ -50,6 +50,7 @@ packages/
   contracts/  Shared Zod validation and TypeScript domain types
 docs/
   AGENT_API.md  Agent authentication and API examples
+  SMITHY.md     Optional signed runner for configured agent commands
   CI.md         Required CI checks and local equivalents
 ```
 
