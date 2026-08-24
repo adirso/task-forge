@@ -5,7 +5,7 @@ import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, NotificationEnti
 export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
 export type TaskCreateInput = TaskInputFields & { tags?: string[]; dependencyIds?: string[] };
-export type TaskUpdateInput = Partial<TaskInputFields> & { tags?: string[]; dependencyIds?: string[] };
+export type TaskUpdateInput = Partial<TaskInputFields> & { tags?: string[]; dependencyIds?: string[]; runId?: string | null };
 export interface TaskFilters {
   status?: string;
   assigneeId?: string;
@@ -54,7 +54,7 @@ export interface TaskService {
   addUpdate(context: RequestContext, taskId: string, body: string): Promise<TaskUpdateEntity>;
   listUpdates(context: RequestContext, taskId: string, page: PageRequest): Promise<Page<TaskUpdateEntity>>;
   listTags(context: ProjectContext): Promise<Array<{ id: string; projectId: string; name: string; createdAt: string; taskCount: number }>>;
-  claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string }): Promise<TaskEntity>;
+  claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string; runId?: string | null }): Promise<TaskEntity>;
 }
 
 export interface AttachmentService {

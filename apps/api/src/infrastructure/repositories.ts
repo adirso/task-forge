@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
-import type { ActivityEntity, AgentLastActiveEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
-import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
+import type { AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 import { decodeCursor, toPage } from "./pagination.js";
 
@@ -270,6 +270,7 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       const sourcePlaceholders = workflow.sourceStatuses.map(() => "?").join(", ");
       const where = ["project_id = ?", `status IN (${sourcePlaceholders})`, "assignee_id IS NULL"];
       const params: unknown[] = [projectId, ...workflow.sourceStatuses];
+      if (options.taskId) { where.push("id = ?"); params.push(options.taskId); }
       if (options.phaseId !== undefined && options.phaseId !== null) { where.push("phase_id = ?"); params.push(options.phaseId); }
       if (options.priority) { where.push("priority = ?"); params.push(options.priority); }
       const orderExpr = "CASE priority WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, position";
@@ -380,6 +381,24 @@ function createWebhookDeliveryRepository(db: DatabasePort): WebhookDeliveryRepos
   };
 }
 
+function toAgentRun(row: Record<string, unknown>): AgentRunEntity {
+  return { id: text(row.id), taskId: text(row.task_id), projectId: text(row.project_id), requestedById: text(row.requested_by_id), kind: row.kind as AgentRunEntity["kind"], status: row.status as AgentRunEntity["status"], attemptCount: Number(row.attempt_count), maxAttempts: Number(row.max_attempts), leaseOwner: nullableText(row.lease_owner), leaseExpiresAt: nullableText(row.lease_expires_at), heartbeatAt: nullableText(row.heartbeat_at), timeoutAt: nullableText(row.timeout_at), lastError: nullableText(row.last_error), createdAt: date(row.created_at), updatedAt: date(row.updated_at), completedAt: nullableText(row.completed_at) };
+}
+
+function createAgentRunRepository(db: DatabasePort): AgentRunRepository {
+  return {
+    async create(input) { await db.prepare("INSERT INTO agent_runs (id, task_id, project_id, requested_by_id, kind, status, attempt_count, max_attempts, lease_owner, lease_expires_at, heartbeat_at, timeout_at, last_error, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.projectId, input.requestedById, input.kind, input.status, input.attemptCount, input.maxAttempts, input.leaseOwner, input.leaseExpiresAt, input.heartbeatAt, input.timeoutAt, input.lastError, input.createdAt, input.updatedAt, input.completedAt); return input; },
+    async findById(id) { const row = await db.prepare("SELECT * FROM agent_runs WHERE id = ?").get(id); return row ? toAgentRun(row) : null; },
+    async listForTask(taskId) { return (await db.prepare("SELECT * FROM agent_runs WHERE task_id = ? ORDER BY created_at DESC, id DESC").all(taskId)).map(toAgentRun); },
+    async countForTask(taskId) { const row = await db.prepare("SELECT COUNT(*) AS count FROM agent_runs WHERE task_id = ?").get(taskId); return Number(row?.count ?? 0); },
+    async expire(now) { return (await db.prepare("UPDATE agent_runs SET status = 'FAILED', last_error = COALESCE(last_error, 'Run lease or timeout expired'), completed_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE status IN ('PENDING', 'RUNNING') AND ((timeout_at IS NOT NULL AND timeout_at <= ?) OR (lease_expires_at IS NOT NULL AND lease_expires_at <= ?))").run(now, now, now, now)).changes; },
+    async claim(id, owner, now, leaseExpiresAt) { return Boolean((await db.prepare("UPDATE agent_runs SET status = 'RUNNING', attempt_count = attempt_count + 1, lease_owner = ?, lease_expires_at = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status IN ('PENDING', 'FAILED') AND attempt_count < max_attempts").run(owner, leaseExpiresAt, now, now, id)).changes); },
+    async heartbeat(id, owner, now, leaseExpiresAt) { return Boolean((await db.prepare("UPDATE agent_runs SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'RUNNING' AND lease_owner = ?").run(now, leaseExpiresAt, now, id, owner)).changes); },
+    async complete(id, owner, status, now, error = null) { return Boolean((await db.prepare("UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = 'RUNNING' AND lease_owner = ?").run(status, error, now, now, id, owner)).changes); },
+    async cancel(id, now, error = null) { return Boolean((await db.prepare("UPDATE agent_runs SET status = 'CANCELLED', last_error = ?, completed_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status IN ('PENDING', 'RUNNING', 'FAILED')").run(error, now, now, id)).changes); },
+  };
+}
+
 function createReportingRepository(db: DatabasePort): ReportingRepository {
   return {
     async countTasksByProject(projectIds) {
@@ -424,5 +443,5 @@ function createSearchRepository(db: DatabasePort): SearchRepository {
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db), runs: createAgentRunRepository(db) };
 }

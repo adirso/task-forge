@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentLastActiveEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -48,7 +48,7 @@ export interface TaskRepository {
   listByProject(projectId: string, filters: TaskFilters | undefined, page: PageRequest): Promise<Page<TaskEntity>>;
   listForAssignee(assigneeId: string, status?: string): Promise<TaskEntity[]>;
   listUsedStatuses(projectId: string): Promise<TaskEntity["status"][]>;
-  claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"] }, options?: { phaseId?: string | null; priority?: string }): Promise<(TaskEntity & { previousStatus?: TaskEntity["status"] }) | null>;
+  claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"] }, options?: { phaseId?: string | null; priority?: string; taskId?: string }): Promise<(TaskEntity & { previousStatus?: TaskEntity["status"] }) | null>;
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   unassignForProjectMember(projectId: string, userId: string): Promise<void>;
   create(input: TaskEntity): Promise<TaskEntity>;
@@ -115,6 +115,17 @@ export interface WebhookDeliveryRepository {
   markFailed(id: string, failedAt: string, lastError: string, httpStatus: number | null): Promise<void>;
   retry(id: string, nextAttemptAt: string): Promise<boolean>;
 }
+export interface AgentRunRepository {
+  create(input: AgentRunEntity): Promise<AgentRunEntity>;
+  findById(id: string): Promise<AgentRunEntity | null>;
+  listForTask(taskId: string): Promise<AgentRunEntity[]>;
+  countForTask(taskId: string): Promise<number>;
+  expire(now: string): Promise<number>;
+  claim(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
+  heartbeat(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
+  complete(id: string, owner: string, status: "SUCCEEDED" | "FAILED" | "CANCELLED", now: string, error?: string | null): Promise<boolean>;
+  cancel(id: string, now: string, error?: string | null): Promise<boolean>;
+}
 
 export interface ReportingRepository {
   countTasksByProject(projectIds: string[]): Promise<TaskStatusCountEntity[]>;
@@ -142,6 +153,7 @@ export interface RepositorySet {
   reporting: ReportingRepository;
   tokens: ApiTokenRepository;
   search: SearchRepository;
+  runs: AgentRunRepository;
 }
 
 export interface UnitOfWork {

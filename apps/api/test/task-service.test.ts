@@ -14,7 +14,7 @@ function repositories(overrides: Partial<RepositorySet> = {}): RepositorySet {
     activity: { record: async () => undefined } as never,
     notifications: { notify: async () => undefined } as never,
     webhookDeliveries: { create: async (delivery: unknown) => delivery } as never,
-    reporting: {} as never,
+    reporting: {} as never, runs: { findById: async () => null } as never,
     users: { findById: async () => null } as never, updates: {} as never, tokens: {} as never, search: {} as never,
     ...overrides,
   };
@@ -167,6 +167,7 @@ test("status changes enqueue a signed-delivery event for another agent", async (
     event: "task.status_changed",
     task: { id: "task-62", number: 62, title: "Workflow status", description: "", definitionOfDone: "", status: "READY_FOR_REVIEW", priority: "HIGH", type: "INFRA", branch: null, projectId: "project-1", projectKey: "TAS", projectName: "Task Forge", assigneeId: "agent-1" },
     previousStatus: "IN_PROGRESS",
+    runId: null,
     changedBy: { id: "owner-1", name: "Owner" },
     timestamp: "2026-08-24T10:05:00.000Z",
   });
@@ -197,12 +198,14 @@ test("claim emits a status-changed event with the source status", async () => {
   const set = repositories({
     projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["READY_FOR_DEV", "IN_PROGRESS", "APPROVED"], defaultStatus: "READY_FOR_DEV", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
     tasks: { claimNext: async () => claimed } as never,
+    runs: { findById: async () => ({ id: "00000000-0000-4000-8000-000000000063", taskId: claimed.id, projectId: claimed.projectId, status: "PENDING", maxAttempts: 2, attemptCount: 0 }) } as never,
     users: { findById: async (id: string) => id === "agent-1" ? { id, name: "Builder", kind: "AGENT", webhookUrl: "https://agent.example/webhook" } : null } as never,
     webhookDeliveries: { create: async (delivery: Record<string, unknown>) => { deliveries.push(delivery); return delivery; } } as never,
   });
   const service = new TaskApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T10:10:00.000Z", () => "claim-event");
-  await service.claimTask({ actor: { userId: "owner-1", name: "Owner", kind: "HUMAN", role: "ADMIN", tokenScopes: ["task:claim"] }, projectId: "project-1" });
+  await service.claimTask({ actor: { userId: "owner-1", name: "Owner", kind: "HUMAN", role: "ADMIN", tokenScopes: ["task:claim"] }, projectId: "project-1" }, { runId: "00000000-0000-4000-8000-000000000063" });
   assert.equal(deliveries.length, 1);
   assert.equal(deliveries[0]?.eventType, "task.status_changed");
   assert.equal(JSON.parse(String(deliveries[0]?.payload)).previousStatus, "READY_FOR_DEV");
+  assert.equal(JSON.parse(String(deliveries[0]?.payload)).runId, "00000000-0000-4000-8000-000000000063");
 });

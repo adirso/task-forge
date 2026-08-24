@@ -90,6 +90,33 @@ test("claim repository repeats enabled source eligibility in the atomic update",
   assert.deepEqual(update?.params.slice(-4), ["project-1", "BACKLOG", "TODO", "READY_FOR_DEV"]);
 });
 
+test("agent-run repository enforces expiry, task-scoped claims, and lease-independent cancellation", async () => {
+  const queries: Array<{ operation: string; sql: string; params: unknown[] }> = [];
+  const database: DatabasePort = {
+    dialect: "mysql",
+    prepare(sql) {
+      return {
+        async get(...params) { queries.push({ operation: "get", sql, params }); return undefined; },
+        async run(...params) { queries.push({ operation: "run", sql, params }); return { changes: 1 }; },
+        async all(...params) { queries.push({ operation: "all", sql, params }); return []; },
+      };
+    },
+    transaction(callback) { return callback; },
+  };
+  const runs = createRepositories(database).runs;
+  await runs.expire("2026-08-24T10:00:00.000Z");
+  await runs.claim("run-1", "runner-1", "2026-08-24T10:00:00.000Z", "2026-08-24T10:01:00.000Z");
+  await runs.cancel("run-1", "2026-08-24T10:00:00.000Z", "operator stop");
+  const runQueries = queries.filter(({ operation }) => operation === "run");
+  const expiry = runQueries[0];
+  assert.match(expiry?.sql ?? "", /status IN \('PENDING', 'RUNNING'\)/);
+  const claim = queries.find(({ sql }) => sql.includes("attempt_count < max_attempts"));
+  assert.match(claim?.sql ?? "", /status IN \('PENDING', 'FAILED'\)/);
+  const cancel = queries.find(({ sql }) => sql.includes("status = 'CANCELLED'"));
+  assert.match(cancel?.sql ?? "", /WHERE id = \? AND status IN \('PENDING', 'RUNNING', 'FAILED'\)/);
+  assert.doesNotMatch(cancel?.sql?.split(" WHERE ")[1] ?? "", /lease_owner/);
+});
+
 test("large task pages use a bounded number of relationship queries", async () => {
   const queries: string[] = [];
   const taskRows = Array.from({ length: 75 }, (_, index) => ({

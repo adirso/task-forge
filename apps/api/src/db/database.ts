@@ -449,6 +449,18 @@ export const migrations: readonly Migration[] = [
       else await migrateMysqlWebhookEventCheck(executor);
     },
   },
+  {
+    version: "0010_agent_runs",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS agent_runs (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, project_id CHAR(36) NOT NULL, requested_by_id CHAR(36) NOT NULL, kind VARCHAR(20) NOT NULL CHECK (kind IN ('IMPLEMENTATION', 'REVIEW', 'RE_REVIEW', 'FIX')), status VARCHAR(16) NOT NULL CHECK (status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')), attempt_count INT NOT NULL DEFAULT 0, max_attempts INT NOT NULL DEFAULT 3, lease_owner VARCHAR(255), lease_expires_at VARCHAR(30), heartbeat_at VARCHAR(30), timeout_at VARCHAR(30), last_error TEXT, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, completed_at VARCHAR(30), INDEX idx_agent_runs_task (task_id, created_at), INDEX idx_agent_runs_lease (status, lease_expires_at), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (requested_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS agent_runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, requested_by_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('IMPLEMENTATION', 'REVIEW', 'RE_REVIEW', 'FIX')), status TEXT NOT NULL CHECK (status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')), attempt_count INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3, lease_owner TEXT, lease_expires_at TEXT, heartbeat_at TEXT, timeout_at TEXT, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT)", []);
+      if (dialect === "sqlite") {
+        await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_runs_task ON agent_runs(task_id, created_at)", []);
+        await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_runs_lease ON agent_runs(status, lease_expires_at)", []);
+      }
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {
