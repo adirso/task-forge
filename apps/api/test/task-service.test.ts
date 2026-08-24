@@ -201,7 +201,7 @@ test("claim emits a status-changed event with the source status", async () => {
     webhookDeliveries: { create: async (delivery: Record<string, unknown>) => { deliveries.push(delivery); return delivery; } } as never,
   });
   const service = new TaskApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T10:10:00.000Z", () => "claim-event");
-  await service.claimTask({ actor: { userId: "agent-1", name: "Builder", kind: "AGENT", role: "MEMBER", tokenScopes: ["task:claim"] }, projectId: "project-1" });
+  await service.claimTask({ actor: { userId: "owner-1", name: "Owner", kind: "HUMAN", role: "ADMIN", tokenScopes: ["task:claim"] }, projectId: "project-1" });
   assert.equal(deliveries.length, 1);
   assert.equal(deliveries[0]?.eventType, "task.status_changed");
   assert.equal(JSON.parse(String(deliveries[0]?.payload)).previousStatus, "READY_FOR_DEV");

@@ -94,7 +94,7 @@ export class TaskApplicationService implements TaskService {
       const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS }, options);
       if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
-      await this.enqueueStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context);
+      if (task.assigneeId !== context.actor.userId) await this.enqueueStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context);
       return task;
     });
   }
@@ -147,14 +147,17 @@ export class TaskApplicationService implements TaskService {
   private assertStatusTransition(availableStatuses: TaskStatus[], from: TaskStatus, to: TaskStatus) {
     if (from === to || !availableStatuses.some((status) => ["APPROVED", "RE_REVIEW", "FIX_NEEDED", "PENDING_DECISION", "FAILED"].includes(status))) return;
     const allowed: Partial<Record<TaskStatus, readonly TaskStatus[]>> = {
-      READY_FOR_DEV: ["IN_PROGRESS", "CANCELLED"],
-      IN_PROGRESS: ["READY_FOR_REVIEW", "RE_REVIEW", "FAILED", "CANCELLED"],
-      READY_FOR_REVIEW: ["IN_REVIEW", "RE_REVIEW", "CANCELLED"],
+      BACKLOG: ["REFINING", "TODO", "READY_FOR_DEV", "CANCELLED"],
+      REFINING: ["TODO", "READY_FOR_DEV", "CANCELLED"],
+      TODO: ["REFINING", "READY_FOR_DEV", "IN_PROGRESS", "CANCELLED"],
+      READY_FOR_DEV: ["TODO", "IN_PROGRESS", "CANCELLED"],
+      IN_PROGRESS: ["TODO", "READY_FOR_REVIEW", "RE_REVIEW", "FAILED", "CANCELLED"],
+      READY_FOR_REVIEW: ["IN_PROGRESS", "IN_REVIEW", "RE_REVIEW", "CANCELLED"],
       IN_REVIEW: ["APPROVED", "FIX_NEEDED", "PENDING_DECISION", "FAILED", "CANCELLED"],
       RE_REVIEW: ["APPROVED", "FIX_NEEDED", "PENDING_DECISION", "FAILED", "CANCELLED"],
       FIX_NEEDED: ["IN_PROGRESS", "CANCELLED"],
       PENDING_DECISION: ["IN_PROGRESS", "IN_REVIEW", "CANCELLED"],
-      APPROVED: ["DONE", "IN_REVIEW", "FAILED"],
+      APPROVED: ["DONE", "IN_REVIEW", "FAILED", "CANCELLED"],
       FAILED: ["IN_PROGRESS", "CANCELLED"],
     };
     if (!allowed[from]?.includes(to)) throw new ValidationError(`Status transition ${from} -> ${to} is not allowed by the project workflow`);
