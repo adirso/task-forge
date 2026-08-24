@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
-import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
-import type { AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
+import type { AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 import { decodeCursor, toPage } from "./pagination.js";
 
@@ -399,6 +399,26 @@ function createAgentRunRepository(db: DatabasePort): AgentRunRepository {
   };
 }
 
+function toTaskGate(row: Row): TaskGateEntity {
+  const parse = (value: unknown) => { try { return JSON.parse(String(value ?? "[]")); } catch { return []; } };
+  return { taskId: text(row.task_id), headSha: text(row.head_sha), requiredChecks: parse(row.required_checks) as string[], checks: parse(row.checks_json) as TaskGateEntity["checks"], approvedHeadSha: nullableText(row.approved_head_sha), approvedById: nullableText(row.approved_by_id), approvedAt: nullableText(row.approved_at), mergedHeadSha: nullableText(row.merged_head_sha), mergedById: nullableText(row.merged_by_id), mergedAt: nullableText(row.merged_at), updatedAt: text(row.updated_at) };
+}
+
+function createTaskGateRepository(db: DatabasePort): TaskGateRepository {
+  return {
+    async findByTask(taskId) { const row = await db.prepare("SELECT * FROM task_gate_evidence WHERE task_id = ?").get(taskId); return row ? toTaskGate(row) : null; },
+    async save(input) {
+      const existing = await db.prepare("SELECT task_id FROM task_gate_evidence WHERE task_id = ?").get(input.taskId);
+      const values = [input.headSha, JSON.stringify(input.requiredChecks), JSON.stringify(input.checks), input.approvedHeadSha, input.approvedById, input.approvedAt, input.mergedHeadSha, input.mergedById, input.mergedAt, input.updatedAt, input.taskId];
+      if (existing) await db.prepare("UPDATE task_gate_evidence SET head_sha = ?, required_checks = ?, checks_json = ?, approved_head_sha = ?, approved_by_id = ?, approved_at = ?, merged_head_sha = ?, merged_by_id = ?, merged_at = ?, updated_at = ? WHERE task_id = ?").run(...values);
+      else await db.prepare("INSERT INTO task_gate_evidence (head_sha, required_checks, checks_json, approved_head_sha, approved_by_id, approved_at, merged_head_sha, merged_by_id, merged_at, updated_at, task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(...values);
+      return input;
+    },
+    async approve(taskId, headSha, actorId, now) { const result = await db.prepare("UPDATE task_gate_evidence SET approved_head_sha = head_sha, approved_by_id = ?, approved_at = ?, updated_at = ? WHERE task_id = ? AND head_sha = ?").run(actorId, now, now, taskId, headSha); return result.changes ? this.findByTask(taskId) : null; },
+    async merge(taskId, headSha, actorId, now) { const result = await db.prepare("UPDATE task_gate_evidence SET merged_head_sha = head_sha, merged_by_id = ?, merged_at = ?, updated_at = ? WHERE task_id = ? AND head_sha = ? AND approved_head_sha = ?").run(actorId, now, now, taskId, headSha, headSha); return result.changes ? this.findByTask(taskId) : null; },
+  };
+}
+
 function createReportingRepository(db: DatabasePort): ReportingRepository {
   return {
     async countTasksByProject(projectIds) {
@@ -443,5 +463,5 @@ function createSearchRepository(db: DatabasePort): SearchRepository {
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db), runs: createAgentRunRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db), runs: createAgentRunRepository(db), gates: createTaskGateRepository(db) };
 }

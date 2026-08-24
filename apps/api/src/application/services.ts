@@ -1,6 +1,6 @@
 import type { AgentOpsEntry, DashboardSummary, WebhookDelivery, WebhookDeliveryStatus } from "@taskforge/contracts";
 import type { ProjectContext, RequestContext } from "./context.js";
-import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskGateEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
 export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
@@ -55,6 +55,12 @@ export interface TaskService {
   listUpdates(context: RequestContext, taskId: string, page: PageRequest): Promise<Page<TaskUpdateEntity>>;
   listTags(context: ProjectContext): Promise<Array<{ id: string; projectId: string; name: string; createdAt: string; taskCount: number }>>;
   claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string; runId?: string | null }): Promise<TaskEntity>;
+}
+export interface TaskGateService {
+  get(context: RequestContext, taskId: string): Promise<TaskGateEntity | null>;
+  record(context: RequestContext, taskId: string, input: Pick<TaskGateEntity, "headSha" | "requiredChecks" | "checks">): Promise<TaskGateEntity>;
+  approve(context: RequestContext, taskId: string, headSha: string): Promise<TaskGateEntity>;
+  merge(context: RequestContext, taskId: string, headSha: string): Promise<TaskGateEntity>;
 }
 
 export interface AttachmentService {

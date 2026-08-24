@@ -317,6 +317,19 @@ X-TaskForge-Secret-Version: 2
 X-TaskForge-Signature: t=<unix-seconds>,v1=<hex-hmac>
 ```
 
+## PR gates and merge authorization
+
+Gate evidence is bound to the exact commit SHA of the pull request head:
+
+```http
+GET /api/tasks/:taskId/gate
+PUT /api/tasks/:taskId/gate
+POST /api/tasks/:taskId/gate/approve
+POST /api/tasks/:taskId/gate/merge
+```
+
+Record `{ "headSha": "<sha>", "requiredChecks": ["Quality", "API on MySQL 8"], "checks": [{"name":"Quality","status":"PASS","headSha":"<sha>"}] }`. A new head SHA clears prior approval and merge evidence. Every required check must be `PASS` for the same SHA. Only an agent identity named Codex can approve; only the project owner or an administrator can authorize a merge. Merge authorization updates the task to `MERGED` and records an activity audit entry. TaskForge never merges a remote provider PR itself; the gate is the authorization and evidence boundary.
+
 ## Autonomous runs and leases
 
 TaskForge stores orchestration bookkeeping but never starts a provider process. A runner creates and owns a run through these endpoints:

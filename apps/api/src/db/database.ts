@@ -461,6 +461,14 @@ export const migrations: readonly Migration[] = [
       }
     },
   },
+  {
+    version: "0011_task_gate_evidence",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS task_gate_evidence (task_id CHAR(36) PRIMARY KEY, head_sha CHAR(64) NOT NULL, required_checks JSON NOT NULL, checks_json JSON NOT NULL, approved_head_sha CHAR(64), approved_by_id CHAR(36), approved_at VARCHAR(30), merged_head_sha CHAR(64), merged_by_id CHAR(36), merged_at VARCHAR(30), updated_at VARCHAR(30) NOT NULL, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (approved_by_id) REFERENCES users(id) ON DELETE SET NULL, FOREIGN KEY (merged_by_id) REFERENCES users(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS task_gate_evidence (task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, head_sha TEXT NOT NULL, required_checks TEXT NOT NULL, checks_json TEXT NOT NULL, approved_head_sha TEXT, approved_by_id TEXT REFERENCES users(id) ON DELETE SET NULL, approved_at TEXT, merged_head_sha TEXT, merged_by_id TEXT REFERENCES users(id) ON DELETE SET NULL, merged_at TEXT, updated_at TEXT NOT NULL)", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {
