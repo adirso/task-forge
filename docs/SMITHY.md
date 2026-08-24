@@ -4,7 +4,7 @@ Smithy is an optional process runner. TaskForge never installs, authenticates, o
 
 ## Configuration
 
-Run `npm run dev -w @taskforge/smithy` with:
+Copy `apps/smithy/.env.example` to a private env file and fill in the agent webhook secrets and API tokens. Then run `npm run dev -w @taskforge/smithy` with:
 
 ```bash
 export TASKFORGE_API_URL=http://127.0.0.1:4000
@@ -13,6 +13,14 @@ export SMITHY_PROVIDERS='{
   "claude": {"cmd":"claude -p {prompt}","repo":"/work/task-forge","webhookSecret":"whsec_...","apiToken":"tf_..."},
   "codex": {"cmd":"codex exec {prompt}","repo":"/work/task-forge","webhookSecret":"whsec_...","apiToken":"tf_..."}
 }'
+```
+
+For example:
+
+```bash
+cp apps/smithy/.env.example apps/smithy/.env.smithy
+set -a; source apps/smithy/.env.smithy; set +a
+npm run dev:agents
 ```
 
 Provider names are routing labels only. The command and repository are operator configuration; Smithy uses `spawn` with `shell: false`, so prompt text is passed as an argument and never interpreted as shell syntax. Keep this configuration outside the repository and use filesystem/secret-manager permissions appropriate for credentials.
