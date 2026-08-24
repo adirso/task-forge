@@ -1,6 +1,6 @@
 import type { AgentOpsEntry, DashboardSummary, WebhookDelivery, WebhookDeliveryStatus } from "@taskforge/contracts";
 import type { ProjectContext, RequestContext } from "./context.js";
-import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskGateEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ActivityEntity, ApiTokenEntity, AttachmentEntity, FindingDisposition, FindingSeverity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
 export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
@@ -61,6 +61,11 @@ export interface TaskGateService {
   record(context: RequestContext, taskId: string, input: Pick<TaskGateEntity, "headSha" | "requiredChecks" | "checks">): Promise<TaskGateEntity>;
   approve(context: RequestContext, taskId: string, headSha: string): Promise<TaskGateEntity>;
   merge(context: RequestContext, taskId: string, headSha: string): Promise<TaskGateEntity>;
+}
+export interface TaskFindingService {
+  list(context: RequestContext, taskId: string): Promise<TaskFindingEntity[]>;
+  create(context: RequestContext, taskId: string, input: { severity: FindingSeverity; title: string; body: string; filePath?: string | null; lineNumber?: number | null; runId?: string | null }): Promise<TaskFindingEntity>;
+  dispose(context: RequestContext, findingId: string, input: { disposition: FindingDisposition; reason?: string | null; decisionOwnerId?: string | null; dueAt?: string | null }): Promise<TaskFindingEntity>;
 }
 
 export interface AttachmentService {

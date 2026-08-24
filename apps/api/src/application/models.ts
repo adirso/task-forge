@@ -70,6 +70,27 @@ export interface TaskGateEntity {
   updatedAt: string;
 }
 
+export type FindingSeverity = "P0" | "P1" | "P2" | "P3";
+export type FindingDisposition = "OPEN" | "ACCEPTED" | "FIX_NEEDED" | "DEFERRED" | "REJECTED" | "ESCALATED";
+export interface TaskFindingEntity {
+  id: string;
+  taskId: string;
+  runId: string | null;
+  authorId: string;
+  severity: FindingSeverity;
+  title: string;
+  body: string;
+  filePath: string | null;
+  lineNumber: number | null;
+  disposition: FindingDisposition;
+  dispositionById: string | null;
+  dispositionReason: string | null;
+  decisionOwnerId: string | null;
+  dueAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AgentWebhookConfiguration {
   webhookUrl: string | null;
   secretCiphertext: string | null;
