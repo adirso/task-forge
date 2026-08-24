@@ -61,7 +61,7 @@ The merge operation is performed by a service account with least privilege and i
 
 ## Review finding lifecycle
 
-Each finding has severity, file/line evidence, disposition, and author. The owner may:
+Each finding has severity, file/line evidence, disposition, and author. A finding disposition is distinct from rejecting the whole delivery: the reviewer may reject the implementation/task when it is unsafe, out of scope, or cannot be corrected under policy. For individual findings, the owner may:
 
 - **Accept/no action:** record rationale and continue if policy permits;
 - **Fix and re-review:** return to `CHANGES_REQUESTED`, create a new attempt, and require review on the new SHA;
@@ -74,7 +74,7 @@ Only the finding owner or an authorized human can change a disposition. A re-rev
 
 These child tasks are intentionally ordered so storage and policy are available before provider execution:
 
-1. **TAS-62 — Workflow statuses and transition guards** — add semantic statuses, role-aware transition policy, atomic transition history, and migration tests. DoD: disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
+1. **TAS-62 — Workflow statuses and transition guards** — add semantic statuses, role-aware transition policy, atomic transition history, and migration tests. DoD: the full proposed set (`READY_FOR_AGENT`, `IMPLEMENTING`, `WAITING_FOR_REVIEW`, `REVIEWING`, `CHANGES_REQUESTED`, `PENDING_DECISION`, `APPROVED`, `MERGE_PENDING`, `FAILED`, and `CANCELLED`) is representable or explicitly mapped to project-specific keys; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
 2. **TAS-63 — Run, lease, and orchestration service** — persist runs/attempts/leases, claim and heartbeat APIs, timeout/cancellation handling, and bounded cycle limits. DoD: crash recovery and concurrent claims are deterministic in SQLite and MySQL.
 3. **TAS-64 — Agent provider adapters and context bundles** — implement Claude/Codex invocation contracts, scoped credentials, immutable context snapshots, and callback authentication. DoD: provider failures are retryable, secrets never enter payloads/logs, and callbacks are idempotent.
 4. **TAS-65 — PR/CI evidence and merge authorization** — ingest checks/reviews, invalidate stale approvals, enforce merge guards, and record merge evidence. DoD: no merge occurs without configured checks and authorization; head changes require re-review.
