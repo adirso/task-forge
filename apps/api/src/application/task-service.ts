@@ -84,6 +84,10 @@ export class TaskApplicationService implements TaskService {
     return this.unitOfWork.run(async (repositories) => {
       this.assertScope(context, "task:claim");
       const project = await this.assertProjectAccess(repositories, context);
+      if (options?.runId && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(options.runId)) throw new ValidationError("runId must be a valid UUID");
+      const run = options?.runId ? await repositories.runs.findById(options.runId) : null;
+      if (options?.runId && (!run || run.projectId !== context.projectId)) throw new ValidationError("runId must reference a run in this project");
+      if (run && !["PENDING", "FAILED"].includes(run.status)) throw new ValidationError("runId must reference a pending or retryable run");
       if (!project.availableStatuses.includes(TASK_CLAIM_TARGET_STATUS)) {
         throw new ValidationError(`Task claiming requires ${TASK_CLAIM_TARGET_STATUS} to be enabled as the claim target. Enable it in project settings before claiming tasks.`);
       }
@@ -91,7 +95,7 @@ export class TaskApplicationService implements TaskService {
       if (!sourceStatuses.length) {
         throw new ValidationError(`Task claiming requires at least one claim source status (${TASK_CLAIM_SOURCE_STATUSES.join(", ")}) to be enabled. Enable one in project settings before claiming tasks.`);
       }
-      const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS }, options);
+      const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS }, { ...options, taskId: run?.taskId });
       if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
       if (task.assigneeId !== context.actor.userId) await this.enqueueStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context, options?.runId ?? null);

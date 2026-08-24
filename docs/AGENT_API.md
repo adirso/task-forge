@@ -329,7 +329,7 @@ POST /api/runs/:id/heartbeat       { "leaseMs": 60000 }
 POST /api/runs/:id/complete        { "status": "SUCCEEDED|FAILED|CANCELLED", "error": "..." }
 ```
 
-Claims are atomic and leases are exclusive. Heartbeats and completion require the lease owner. A background expiry sweep runs every 30 seconds in the API, and every run operation also reaps expired leases/timeouts; these become retryable `FAILED` runs subject to the per-run attempt budget and a task-level delivery-cycle cap. Only a project owner or administrator can cancel a run. When changing a task status for a run, include its `runId` in the task PATCH; the resulting `task.status_changed` webhook carries that ID. A runner must persist run IDs and treat callbacks as idempotent.
+Claims are atomic and leases are exclusive. Heartbeats and successful/failed completion require the lease owner; owner/admin cancellation is lease-independent so operators can stop an abandoned run. A background expiry sweep runs every 30 seconds in the API, and every run operation also reaps expired pending or running leases/timeouts; these become retryable `FAILED` runs subject to the per-run attempt budget and a task-level delivery-cycle cap. When changing a task status for a run, include its `runId` in the task PATCH; the resulting `task.status_changed` webhook carries that ID. A runner must persist run IDs and treat callbacks as idempotent.
 
 Verify `v1` with HMAC-SHA256 over the exact raw body, prefixed by the timestamp and a period: `HMAC(secret, timestamp + "." + rawBody)`. Compare digests in constant time and reject timestamps outside a short tolerance such as five minutes:
 

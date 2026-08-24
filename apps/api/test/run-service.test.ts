@@ -61,7 +61,7 @@ test("attempt budget is enforced before claiming another attempt", async () => {
 
 test("only project owners and admins can cancel a run", async () => {
   const current = run({ status: "RUNNING", leaseOwner: "runner-1" });
-  const set = base({ runs: { expire: async () => 0, findById: async () => current, complete: async () => true } as never });
+  const set = base({ runs: { expire: async () => 0, findById: async () => current, cancel: async () => true } as never });
   const service = new AgentRunApplicationService({ run: async (work) => work(set) });
   await assert.rejects(() => service.complete(actor, current.id, "CANCELLED"), /project owner or administrator/);
   await service.complete({ actor: { ...actor.actor, role: "ADMIN" } }, current.id, "CANCELLED");

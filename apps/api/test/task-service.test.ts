@@ -14,7 +14,7 @@ function repositories(overrides: Partial<RepositorySet> = {}): RepositorySet {
     activity: { record: async () => undefined } as never,
     notifications: { notify: async () => undefined } as never,
     webhookDeliveries: { create: async (delivery: unknown) => delivery } as never,
-    reporting: {} as never,
+    reporting: {} as never, runs: { findById: async () => null } as never,
     users: { findById: async () => null } as never, updates: {} as never, tokens: {} as never, search: {} as never,
     ...overrides,
   };
@@ -198,6 +198,7 @@ test("claim emits a status-changed event with the source status", async () => {
   const set = repositories({
     projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["READY_FOR_DEV", "IN_PROGRESS", "APPROVED"], defaultStatus: "READY_FOR_DEV", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
     tasks: { claimNext: async () => claimed } as never,
+    runs: { findById: async () => ({ id: "00000000-0000-4000-8000-000000000063", taskId: claimed.id, projectId: claimed.projectId, status: "PENDING", maxAttempts: 2, attemptCount: 0 }) } as never,
     users: { findById: async (id: string) => id === "agent-1" ? { id, name: "Builder", kind: "AGENT", webhookUrl: "https://agent.example/webhook" } : null } as never,
     webhookDeliveries: { create: async (delivery: Record<string, unknown>) => { deliveries.push(delivery); return delivery; } } as never,
   });

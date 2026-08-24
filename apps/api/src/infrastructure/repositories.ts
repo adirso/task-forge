@@ -270,6 +270,7 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       const sourcePlaceholders = workflow.sourceStatuses.map(() => "?").join(", ");
       const where = ["project_id = ?", `status IN (${sourcePlaceholders})`, "assignee_id IS NULL"];
       const params: unknown[] = [projectId, ...workflow.sourceStatuses];
+      if (options.taskId) { where.push("id = ?"); params.push(options.taskId); }
       if (options.phaseId !== undefined && options.phaseId !== null) { where.push("phase_id = ?"); params.push(options.phaseId); }
       if (options.priority) { where.push("priority = ?"); params.push(options.priority); }
       const orderExpr = "CASE priority WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, position";
@@ -390,10 +391,11 @@ function createAgentRunRepository(db: DatabasePort): AgentRunRepository {
     async findById(id) { const row = await db.prepare("SELECT * FROM agent_runs WHERE id = ?").get(id); return row ? toAgentRun(row) : null; },
     async listForTask(taskId) { return (await db.prepare("SELECT * FROM agent_runs WHERE task_id = ? ORDER BY created_at DESC, id DESC").all(taskId)).map(toAgentRun); },
     async countForTask(taskId) { const row = await db.prepare("SELECT COUNT(*) AS count FROM agent_runs WHERE task_id = ?").get(taskId); return Number(row?.count ?? 0); },
-    async expire(now) { return (await db.prepare("UPDATE agent_runs SET status = 'FAILED', last_error = COALESCE(last_error, 'Run lease or timeout expired'), completed_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE status = 'RUNNING' AND ((timeout_at IS NOT NULL AND timeout_at <= ?) OR (lease_expires_at IS NOT NULL AND lease_expires_at <= ?))").run(now, now, now, now)).changes; },
+    async expire(now) { return (await db.prepare("UPDATE agent_runs SET status = 'FAILED', last_error = COALESCE(last_error, 'Run lease or timeout expired'), completed_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE status IN ('PENDING', 'RUNNING') AND ((timeout_at IS NOT NULL AND timeout_at <= ?) OR (lease_expires_at IS NOT NULL AND lease_expires_at <= ?))").run(now, now, now, now)).changes; },
     async claim(id, owner, now, leaseExpiresAt) { return Boolean((await db.prepare("UPDATE agent_runs SET status = 'RUNNING', attempt_count = attempt_count + 1, lease_owner = ?, lease_expires_at = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status IN ('PENDING', 'FAILED') AND attempt_count < max_attempts").run(owner, leaseExpiresAt, now, now, id)).changes); },
     async heartbeat(id, owner, now, leaseExpiresAt) { return Boolean((await db.prepare("UPDATE agent_runs SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'RUNNING' AND lease_owner = ?").run(now, leaseExpiresAt, now, id, owner)).changes); },
     async complete(id, owner, status, now, error = null) { return Boolean((await db.prepare("UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = 'RUNNING' AND lease_owner = ?").run(status, error, now, now, id, owner)).changes); },
+    async cancel(id, now, error = null) { return Boolean((await db.prepare("UPDATE agent_runs SET status = 'CANCELLED', last_error = ?, completed_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status IN ('PENDING', 'RUNNING', 'FAILED')").run(error, now, now, id)).changes); },
   };
 }
 
