@@ -22,10 +22,10 @@ Autonomous delivery orchestration research and the Phase 5 implementation plan a
 
 ## Quick start
 
-Requirements: Node.js 22 or newer. CI uses Node.js 22 LTS.
+Requirements: Git, Node.js 22 or newer, and npm 10 or newer. CI uses Node.js 22 LTS. SQLite is bundled for the default development setup; Docker is only needed for local MySQL or browser-test services.
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
 npm run db:seed
 npm run dev
@@ -44,35 +44,31 @@ SQLite is the default for local development and is created at `data/taskforge.db
 
 The Smithy runner is intentionally excluded from `npm run dev`; configure it separately as described in [docs/SMITHY.md](docs/SMITHY.md).
 
-## Smithy agent runner (Beta)
+## Configuration
 
-> **Beta:** Smithy is an optional early-access runner. Test it with non-critical tasks first. Provider installation, command behavior, recovery, and workflow edge cases are still being validated. TaskForge remains usable without Smithy, and Smithy never merges pull requests.
+The root `.env.example` is the source of truth for local API settings:
 
-Smithy receives TaskForge's signed assignment/status webhooks, runs an operator-configured command in an isolated task worktree, and reports the run and task progress back to the TaskForge API. TaskForge does not install or authenticate Claude, Codex, Cursor, or any other provider.
+```bash
+cp .env.example .env
+```
 
-### Configure Smithy
+Important variables:
 
-1. Create an agent identity in **Settings → Agents**, issue an API token, and set its webhook URL to the URL Smithy prints at startup, for example `http://127.0.0.1:4500/agents/claude`.
-2. In **Project Settings**, set **Local Smithy repository path** to the repository path on the machine running Smithy. This is a local filesystem path, not the GitHub URL.
-3. Generate the private provider environment file:
+| Variable | Local default | Purpose |
+| --- | --- | --- |
+| `PORT` / `HOST` | `4000` / `127.0.0.1` | API bind address |
+| `DATABASE_DRIVER` | `sqlite` | Select `sqlite` or `mysql` |
+| `DATABASE_PATH` | `./data/taskforge.db` | SQLite file path |
+| `DATABASE_URL` | — | MySQL connection URL |
+| `JWT_SECRET` | placeholder | Session signing secret; replace outside local demos |
+| `CORS_ORIGIN` | localhost and loopback web origins | Allowed browser origins |
+| `TRUST_PROXY` | unset | Trusted proxy addresses, never arbitrary client input |
 
-   ```bash
-   npm run configure -w @taskforge/smithy -- --file apps/smithy/.env.smithy
-   ```
+Never commit `.env`, database files, agent tokens, webhook secrets, or production credentials. See [docs/SECURITY.md](docs/SECURITY.md) before exposing the API beyond localhost.
 
-   Choose `claude`, `codex`, or `cursor` for built-in command templates, or choose `other` and provide an explicit command containing `{prompt}`. The configurator updates only `SMITHY_PROVIDERS` and never prints secrets.
+### MySQL development
 
-4. Start the runner:
-
-   ```bash
-   npm run dev:agents
-   ```
-
-   Smithy loads `apps/smithy/.env.smithy` automatically and prints the configured webhook URLs. Override the file with `SMITHY_ENV_FILE=/path/to/file npm run dev:agents` when needed.
-
-Open a task to follow its **Agent runs** panel and progress updates. A recent heartbeat means Smithy is waiting for the provider command; a stale heartbeat or expired lease indicates that the run needs recovery or retry. Provider stdout is currently local to the Smithy process and is not streamed into TaskForge.
-
-For the full security, recovery, worktree, and troubleshooting notes, read [docs/SMITHY.md](docs/SMITHY.md). To disable automation, stop Smithy or remove the agent webhook URL; TaskForge's normal task, review, and merge workflows continue to work.
+SQLite is recommended for day-to-day development. To exercise MySQL-specific behavior, start a disposable MySQL 8 instance and set `DATABASE_DRIVER=mysql` and `DATABASE_URL` in a shell or env file. Do not point tests or local migrations at production; the test suite creates and modifies its database.
 
 ## Workspace layout
 
@@ -80,12 +76,12 @@ For the full security, recovery, worktree, and troubleshooting notes, read [docs
 apps/
   api/        Fastify API, SQLite/MySQL schema, seed, integration tests
   web/        React/Vite client
+  smithy/     Optional signed Beta runner for configured agent commands
 packages/
   contracts/  Shared Zod validation and TypeScript domain types
-docs/
-  AGENT_API.md  Agent authentication and API examples
-  SMITHY.md     Optional signed runner for configured agent commands
-  CI.md         Required CI checks and local equivalents
+e2e/          Playwright browser regression tests
+docs/         API, security, CI, migration, backup, and runner guides
+.github/      GitHub Actions CI workflow
 ```
 
 ## Commands
@@ -97,7 +93,30 @@ npm run typecheck  # Strict TypeScript checks
 npm test           # Tests for every workspace
 npm run db:seed    # Idempotent demo seed
 npm run admin:bootstrap # Create or rotate the production administrator
+npm run test:e2e     # Browser regression suite (install Chromium once first)
+npm run test:e2e:install
 ```
+
+Workspace-specific commands use npm's workspace flag, for example `npm test -w @taskforge/api`, `npm run typecheck -w @taskforge/web`, or `npm run configure -w @taskforge/smithy -- --file apps/smithy/.env.smithy`.
+
+## Development workflow
+
+1. Create a branch from `main` and keep changes focused.
+2. Run `npm ci` after changing branches or the lockfile.
+3. Use `npm run dev` for the API and web app; use `npm run dev:agents` only when testing the optional Smithy Beta runner.
+4. Add or update focused tests with code changes. Run `npm run typecheck`, `npm run build`, and `npm test` before opening a pull request.
+5. For schema changes, use the versioned migration registry and add SQLite/MySQL upgrade coverage; read [docs/DATABASE_MIGRATIONS.md](docs/DATABASE_MIGRATIONS.md).
+6. Do not edit generated data, local env files, or unrelated migrations. Describe behavior changes, test commands, and known limitations in the pull request.
+
+## Architecture at a glance
+
+- `apps/web` is the React/Vite browser client and talks to the API through `/api`.
+- `apps/api` is a Fastify transport layer over application services, repositories, and the SQLite/MySQL database adapters.
+- `packages/contracts` contains shared Zod schemas and TypeScript contracts used by API and web.
+- `apps/smithy` is an optional loopback runner. It receives signed webhooks and executes operator-configured commands; the API never launches provider processes.
+- `apps/api/src/db/database.ts` applies ordered, ledgered migrations at startup.
+
+Keep SQL and driver-specific behavior in repositories, authorization and orchestration in application services, and request parsing/response presentation in routes. See [docs/API_ARCHITECTURE.md](docs/API_ARCHITECTURE.md).
 
 ## Continuous integration
 
@@ -134,6 +153,10 @@ All application endpoints are under `/api`. Send either a human JWT or agent tok
 | `PATCH/DELETE` | `/api/phases/:id` | Activate, edit, or delete a phase |
 | `GET/PATCH/DELETE` | `/api/tasks/:id` | Read, update, or delete a task |
 | `GET/POST` | `/api/tasks/:id/updates` | Read or post task notes and progress updates |
+| `GET/POST` | `/api/tasks/:id/runs` | List or create autonomous agent runs |
+| `POST` | `/api/runs/:id/claim` | Claim a run lease |
+| `POST` | `/api/runs/:id/heartbeat` | Renew a run lease |
+| `POST` | `/api/runs/:id/complete` | Complete, fail, or cancel a run |
 | `GET` | `/api/users` | List people and agents |
 | `POST` | `/api/users/agents` | Create an agent identity (admin) |
 | `POST/GET` | `/api/users/:id/tokens` | Issue or list token metadata |
@@ -145,6 +168,37 @@ All application endpoints are under `/api`. Send either a human JWT or agent tok
 | `GET` | `/api/context?project=TF&task=TF-4` | Resolve a shared project/task link without UUIDs |
 
 See [Agent API guide](docs/AGENT_API.md) for copy-paste examples.
+
+## Documentation map
+
+- [Agent API](docs/AGENT_API.md) — authentication, task operations, workflow-aware handoffs, and run endpoints
+- [CI guide](docs/CI.md) — required GitHub checks and local equivalents
+- [Browser E2E guide](docs/E2E_TESTING.md) — seeded browser test setup and troubleshooting
+- [Security guide](docs/SECURITY.md) — credentials, proxy trust, throttling, and deployment boundaries
+- [Database migrations](docs/DATABASE_MIGRATIONS.md) — upgrade, backup, failure, and recovery procedures
+- [Backup and restore](docs/BACKUP_RESTORE.md) — verified workspace backups and disaster recovery
+- [Smithy guide](docs/SMITHY.md) — optional signed runner configuration and Beta limitations
+- [Autonomous orchestration research](docs/AUTONOMOUS_AGENT_ORCHESTRATION.md) — state machine, ownership, and delivery-gate design
+
+## Contributing
+
+TaskForge is an open-source project and welcomes issues, documentation improvements, tests, and code contributions. Before contributing:
+
+- Search existing issues and pull requests, then describe the user-visible problem and proposed behavior.
+- Follow the repository's existing TypeScript, React, Fastify, and migration patterns; avoid broad formatting-only changes.
+- Include regression tests for bug fixes and cross-driver tests for persistence changes.
+- Never include secrets, real credentials, private repository paths, or generated database files in commits.
+- Keep Smithy changes provider-agnostic: provider names are routing labels and commands remain operator configuration.
+
+Pull requests should explain the change, list validation commands, call out skipped checks (for example a local native-module limitation), and identify any migration or rollout considerations. Automated checks are required before merge; see [docs/CI.md](docs/CI.md).
+
+## Troubleshooting
+
+- **The web app cannot reach the API:** confirm the API is listening on `http://127.0.0.1:4000` and the web app on `http://127.0.0.1:5173`; restart `npm run dev` after changing `.env`.
+- **`better-sqlite3` reports a `NODE_MODULE_VERSION` mismatch:** use Node.js 22, then run `npm ci` (or rebuild the dependency with `npm rebuild better-sqlite3`) before rerunning tests.
+- **A migration fails at startup:** stop the API, back up the database, read the row-level diagnostics, and follow [docs/DATABASE_MIGRATIONS.md](docs/DATABASE_MIGRATIONS.md). Do not edit the migration ledger manually.
+- **MySQL tests fail:** ensure `TEST_DATABASE_URL` points to a disposable MySQL 8 database that is ready to accept connections; never use a production database.
+- **Browser tests fail:** install Chromium with `npm run test:e2e:install`, then rerun `npm run test:e2e`; inspect Playwright traces and screenshots from `test-results/`.
 
 ## Production notes
 
