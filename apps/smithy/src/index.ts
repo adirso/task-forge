@@ -1,6 +1,9 @@
 import { loadConfig } from "./config.js";
 import { createSmithyServer } from "./server.js";
+import { loadEnvFile } from "./env-file.js";
 
+const envFile = process.env.SMITHY_ENV_FILE ?? ".env.smithy";
+if (!loadEnvFile(envFile)) loadEnvFile(".env");
 const config = loadConfig();
 const server = createSmithyServer(config);
 server.listen(config.port, config.host, () => {
