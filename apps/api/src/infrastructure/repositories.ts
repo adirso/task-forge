@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
-import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
-import type { AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
+import type { AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskFindingRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 import { decodeCursor, toPage } from "./pagination.js";
 
@@ -419,6 +419,19 @@ function createTaskGateRepository(db: DatabasePort): TaskGateRepository {
   };
 }
 
+function toTaskFinding(row: Row): TaskFindingEntity {
+  return { id: text(row.id), taskId: text(row.task_id), runId: nullableText(row.run_id), authorId: text(row.author_id), severity: row.severity as TaskFindingEntity["severity"], title: text(row.title), body: text(row.body), filePath: nullableText(row.file_path), lineNumber: row.line_number == null ? null : Number(row.line_number), disposition: row.disposition as TaskFindingEntity["disposition"], dispositionById: nullableText(row.disposition_by_id), dispositionReason: nullableText(row.disposition_reason), decisionOwnerId: nullableText(row.decision_owner_id), dueAt: nullableText(row.due_at), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
+}
+
+function createTaskFindingRepository(db: DatabasePort): TaskFindingRepository {
+  return {
+    async listForTask(taskId) { return (await db.prepare("SELECT * FROM task_findings WHERE task_id = ? ORDER BY created_at ASC, id ASC").all(taskId)).map(toTaskFinding); },
+    async findById(id) { const row = await db.prepare("SELECT * FROM task_findings WHERE id = ?").get(id); return row ? toTaskFinding(row) : null; },
+    async create(input) { await db.prepare("INSERT INTO task_findings (id, task_id, run_id, author_id, severity, title, body, file_path, line_number, disposition, disposition_by_id, disposition_reason, decision_owner_id, due_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.runId, input.authorId, input.severity, input.title, input.body, input.filePath, input.lineNumber, input.disposition, input.dispositionById, input.dispositionReason, input.decisionOwnerId, input.dueAt, input.createdAt, input.updatedAt); return input; },
+    async dispose(id, disposition, actorId, reason, decisionOwnerId, dueAt, updatedAt) { const result = await db.prepare("UPDATE task_findings SET disposition = ?, disposition_by_id = ?, disposition_reason = ?, decision_owner_id = ?, due_at = ?, updated_at = ? WHERE id = ? AND disposition IN ('OPEN', 'DEFERRED', 'ESCALATED')").run(disposition, actorId, reason, decisionOwnerId, dueAt, updatedAt, id); return result.changes ? this.findById(id) : null; },
+  };
+}
+
 function createReportingRepository(db: DatabasePort): ReportingRepository {
   return {
     async countTasksByProject(projectIds) {
@@ -463,5 +476,5 @@ function createSearchRepository(db: DatabasePort): SearchRepository {
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db), runs: createAgentRunRepository(db), gates: createTaskGateRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db), runs: createAgentRunRepository(db), gates: createTaskGateRepository(db), findings: createTaskFindingRepository(db) };
 }

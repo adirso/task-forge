@@ -469,6 +469,15 @@ export const migrations: readonly Migration[] = [
         : "CREATE TABLE IF NOT EXISTS task_gate_evidence (task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, head_sha TEXT NOT NULL, required_checks TEXT NOT NULL, checks_json TEXT NOT NULL, approved_head_sha TEXT, approved_by_id TEXT REFERENCES users(id) ON DELETE SET NULL, approved_at TEXT, merged_head_sha TEXT, merged_by_id TEXT REFERENCES users(id) ON DELETE SET NULL, merged_at TEXT, updated_at TEXT NOT NULL)", []);
     },
   },
+  {
+    version: "0012_task_findings",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS task_findings (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, run_id CHAR(36), author_id CHAR(36) NOT NULL, severity VARCHAR(2) NOT NULL CHECK (severity IN ('P0','P1','P2','P3')), title VARCHAR(255) NOT NULL, body TEXT NOT NULL, file_path VARCHAR(1024), line_number INT, disposition VARCHAR(16) NOT NULL CHECK (disposition IN ('OPEN','ACCEPTED','FIX_NEEDED','DEFERRED','REJECTED','ESCALATED')), disposition_by_id CHAR(36), disposition_reason TEXT, decision_owner_id CHAR(36), due_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_task_findings_task (task_id, created_at), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE SET NULL, FOREIGN KEY (author_id) REFERENCES users(id), FOREIGN KEY (disposition_by_id) REFERENCES users(id) ON DELETE SET NULL, FOREIGN KEY (decision_owner_id) REFERENCES users(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS task_findings (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL, author_id TEXT NOT NULL REFERENCES users(id), severity TEXT NOT NULL CHECK (severity IN ('P0','P1','P2','P3')), title TEXT NOT NULL, body TEXT NOT NULL, file_path TEXT, line_number INTEGER, disposition TEXT NOT NULL CHECK (disposition IN ('OPEN','ACCEPTED','FIX_NEEDED','DEFERRED','REJECTED','ESCALATED')), disposition_by_id TEXT REFERENCES users(id) ON DELETE SET NULL, disposition_reason TEXT, decision_owner_id TEXT REFERENCES users(id) ON DELETE SET NULL, due_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)", []);
+      if (dialect === "sqlite") await executor.run("CREATE INDEX IF NOT EXISTS idx_task_findings_task ON task_findings(task_id, created_at)", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

@@ -330,6 +330,18 @@ POST /api/tasks/:taskId/gate/merge
 
 Record `{ "headSha": "<sha>", "requiredChecks": ["Quality", "API on MySQL 8"], "checks": [{"name":"Quality","status":"PASS","headSha":"<sha>"}, {"name":"API on MySQL 8","status":"PASS","headSha":"<sha>"}] }`. At least one required check is mandatory, and evidence must include every required check. A new head SHA clears prior approval and merge evidence and returns the task to review when that status is enabled. Human project owners/admins or agents with the `task:gate:evidence` capability may record evidence. Agents with the explicit `task:gate:approve` capability may approve; provider names are not used for authorization. Only the project owner or an administrator can authorize a merge. Merge authorization updates the task to `MERGED` and records an activity audit entry. TaskForge never merges a remote provider PR itself; the gate is the authorization and evidence boundary.
 
+## Review findings and operator decisions
+
+Structured findings are attached to a task and remain auditable through every disposition:
+
+```http
+GET  /api/tasks/:taskId/findings
+POST /api/tasks/:taskId/findings
+POST /api/findings/:findingId/disposition
+```
+
+Create a finding with `severity` (`P0`–`P3`), title/body, optional file/line evidence, and an optional task run ID. A disposition is one of `ACCEPTED`, `FIX_NEEDED`, `DEFERRED`, `REJECTED`, or `ESCALATED`, and requires a reason. Only the finding author, project owner, or administrator may decide it. `DEFERRED` and `ESCALATED` additionally require a decision owner and due date. `FIX_NEEDED` moves the task to the enabled fix/implementation status and creates a new `FIX` run, so a prior review approval cannot be reused. `ESCALATED` moves the task to enabled `PENDING_DECISION`; terminal dispositions cannot be changed again. Every create and disposition is recorded in activity history. Operators can cancel or retry durable runs through the run endpoints above; cancellation is owner/admin-only and retry remains bounded by the run and task cycle limits.
+
 ## Autonomous runs and leases
 
 TaskForge stores orchestration bookkeeping but never starts a provider process. A runner creates and owns a run through these endpoints:

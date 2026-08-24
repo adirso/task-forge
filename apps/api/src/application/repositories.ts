@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -132,6 +132,12 @@ export interface TaskGateRepository {
   approve(taskId: string, headSha: string, actorId: string, now: string): Promise<TaskGateEntity | null>;
   merge(taskId: string, headSha: string, actorId: string, now: string): Promise<TaskGateEntity | null>;
 }
+export interface TaskFindingRepository {
+  listForTask(taskId: string): Promise<TaskFindingEntity[]>;
+  findById(id: string): Promise<TaskFindingEntity | null>;
+  create(input: TaskFindingEntity): Promise<TaskFindingEntity>;
+  dispose(id: string, disposition: TaskFindingEntity["disposition"], actorId: string, reason: string | null, decisionOwnerId: string | null, dueAt: string | null, updatedAt: string): Promise<TaskFindingEntity | null>;
+}
 
 export interface ReportingRepository {
   countTasksByProject(projectIds: string[]): Promise<TaskStatusCountEntity[]>;
@@ -161,6 +167,7 @@ export interface RepositorySet {
   search: SearchRepository;
   runs: AgentRunRepository;
   gates: TaskGateRepository;
+  findings: TaskFindingRepository;
 }
 
 export interface UnitOfWork {
