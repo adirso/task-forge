@@ -4,6 +4,11 @@ import path from "node:path";
 import { defaultEnvFile, readProviders, writeProviders, type SmithyProviderValues } from "./env-file.js";
 
 const labels = ["claude", "codex", "cursor", "other"] as const;
+const defaultCommands: Record<string, string> = {
+  claude: "claude -p {prompt}",
+  codex: "codex exec {prompt}",
+  cursor: "cursor {prompt}",
+};
 
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -44,7 +49,11 @@ async function configure(file: string): Promise<void> {
       const name = selected === "other" ? await promptRequired(rl, "Custom provider label") : selected;
       if (!/^[a-z][a-z0-9_-]{0,63}$/i.test(name)) throw new Error("Provider label must start with a letter and contain only letters, numbers, '_' or '-'.");
       const current = providers[name];
-      const cmd = await promptRequired(rl, "Command template (use {prompt})", current?.cmd);
+      const cmd = current?.cmd ?? defaultCommands[name];
+      if (!cmd) {
+        // Custom providers deliberately require an explicit operator-owned command.
+        throw new Error("Command template (use {prompt}) is required for custom providers");
+      }
       const repoAnswer = (await rl.question(`Fallback repository path${current?.repo ? ` [${current.repo}]` : " (optional)"}: `)).trim();
       const secret = await promptRequired(rl, "Webhook secret (blank keeps existing)", current?.webhookSecret);
       const token = await promptRequired(rl, "TaskForge API token (blank keeps existing)", current?.apiToken);
