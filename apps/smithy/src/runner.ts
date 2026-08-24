@@ -7,7 +7,7 @@ import { MemoryJobStore } from "./store.js";
 
 export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string }; runId?: string | null; }
 export type RunnerResult = { status: number; body: string };
-type ContextResponse = { project: { key: string; availableStatuses: string[] }; task: AgentEvent["task"] & { updates?: Array<{ body: string }> } };
+type ContextResponse = { project: { key: string; availableStatuses: string[]; localRepoPath?: string | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }> } };
 type WorktreeFactory = (repo: string, branch: string | null, taskId: string) => Promise<string>;
 
 const noopWorktree: WorktreeFactory = async (repo) => repo;
@@ -81,7 +81,9 @@ export class SmithyRunner {
       const startStatus = kind === "IMPLEMENTATION" || kind === "FIX" ? "IN_PROGRESS" : kind === "RE_REVIEW" ? "RE_REVIEW" : "IN_REVIEW";
       if (statuses.includes(startStatus) && task.status !== startStatus) await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: startStatus, runId }) });
       const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${task.title ?? ""}`, task.description ?? "", `Definition of done: ${task.definitionOfDone ?? ""}`, ...(task.updates ?? []).map((update) => `Update: ${update.body}`), "Report progress through the TaskForge API. Do not merge changes yourself."].join("\n\n");
-      const cwd = await this.worktree(config.repo, task.branch ?? event.task?.branch ?? null, task.id);
+      const repo = context.project.localRepoPath || config.repo;
+      if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
+      const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
       const result = await this.execute(config.cmd, prompt, cwd);
       if (result.code !== 0) throw new Error(redact(result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`)));
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });

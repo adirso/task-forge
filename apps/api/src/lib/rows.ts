@@ -29,6 +29,7 @@ export function toProject(row: Row): Project {
     name: String(row.name),
     description: String(row.description),
     repoUrl: (row.repo_url as string | null) ?? null,
+    localRepoPath: (row.local_repo_path as string | null) ?? null,
     color: String(row.color),
     sortOrder: Number(row.sort_order ?? 0),
     availableStatuses,

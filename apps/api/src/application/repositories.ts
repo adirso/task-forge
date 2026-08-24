@@ -21,7 +21,7 @@ export interface ProjectRepository {
   allocateSortOrder(): Promise<number>;
   reorder(ids: string[]): Promise<void>;
   create(input: ProjectEntity): Promise<ProjectEntity>;
-  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "color" | "availableStatuses" | "defaultStatus">>): Promise<ProjectEntity>;
+  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus">>): Promise<ProjectEntity>;
   delete(id: string): Promise<void>;
 }
 

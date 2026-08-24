@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 .env.local
+apps/smithy/data/
 data/*.db
 data/*.db-*
 .e2e-data/

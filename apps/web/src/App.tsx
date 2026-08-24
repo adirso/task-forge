@@ -193,10 +193,10 @@ export default function App() {
     if (currentProject) setPhases((await api.phases(currentProject.id)).phases);
     setSelectedTask(null); flash("Task deleted");
   }
-  async function createProject(input: { key: string; name: string; description: string; repoUrl: string | null; color: string }) {
+  async function createProject(input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) {
     const { project } = await api.createProject(input); setProjects((items) => [project, ...items]); setShowSettings(false); await loadProject(project.id); flash("Project created");
   }
-  async function updateProject(input: { name: string; description: string; repoUrl: string | null; color: string; availableStatuses: TaskStatus[]; defaultStatus: TaskStatus }) {
+  async function updateProject(input: { name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses: TaskStatus[]; defaultStatus: TaskStatus }) {
     if (!currentProject) return;
     const { project } = await api.updateProject(currentProject.id, input);
     setCurrentProject((current) => current?.id === project.id ? { ...current, ...project } : current);
@@ -325,7 +325,7 @@ export default function App() {
       </main>
       {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? currentProject.defaultStatus} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} availableTags={tags} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
       {showProjectModal && <ProjectModal projects={projects} onClose={() => setShowProjectModal(false)} onSave={createProject} />}
-      {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onSave={async ({ name, description, repoUrl, color, availableStatuses, defaultStatus }) => updateProject({ name, description, repoUrl, color, availableStatuses: availableStatuses!, defaultStatus: defaultStatus! })} />}
+      {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onSave={async ({ name, description, repoUrl, localRepoPath, color, availableStatuses, defaultStatus }) => updateProject({ name, description, repoUrl, localRepoPath, color, availableStatuses: availableStatuses!, defaultStatus: defaultStatus! })} />}
       {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
       {showMembersModal && currentProject && <ProjectMembersModal project={currentProject} users={allUsers} currentUser={user} onClose={() => setShowMembersModal(false)} onChanged={applyProjectMembers} />}
       {showLogoutConfirm && <LogoutConfirmModal user={user} onClose={() => setShowLogoutConfirm(false)} onConfirm={logout} />}

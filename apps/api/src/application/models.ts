@@ -151,6 +151,7 @@ export interface ProjectEntity {
   name: string;
   description: string;
   repoUrl: string | null;
+  localRepoPath: string | null;
   color: string;
   sortOrder: number;
   availableStatuses: TaskStatus[];
