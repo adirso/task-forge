@@ -44,6 +44,36 @@ SQLite is the default for local development and is created at `data/taskforge.db
 
 The Smithy runner is intentionally excluded from `npm run dev`; configure it separately as described in [docs/SMITHY.md](docs/SMITHY.md).
 
+## Smithy agent runner (Beta)
+
+> **Beta:** Smithy is an optional early-access runner. Test it with non-critical tasks first. Provider installation, command behavior, recovery, and workflow edge cases are still being validated. TaskForge remains usable without Smithy, and Smithy never merges pull requests.
+
+Smithy receives TaskForge's signed assignment/status webhooks, runs an operator-configured command in an isolated task worktree, and reports the run and task progress back to the TaskForge API. TaskForge does not install or authenticate Claude, Codex, Cursor, or any other provider.
+
+### Configure Smithy
+
+1. Create an agent identity in **Settings → Agents**, issue an API token, and set its webhook URL to the URL Smithy prints at startup, for example `http://127.0.0.1:4500/agents/claude`.
+2. In **Project Settings**, set **Local Smithy repository path** to the repository path on the machine running Smithy. This is a local filesystem path, not the GitHub URL.
+3. Generate the private provider environment file:
+
+   ```bash
+   npm run configure -w @taskforge/smithy -- --file apps/smithy/.env.smithy
+   ```
+
+   Choose `claude`, `codex`, or `cursor` for built-in command templates, or choose `other` and provide an explicit command containing `{prompt}`. The configurator updates only `SMITHY_PROVIDERS` and never prints secrets.
+
+4. Start the runner:
+
+   ```bash
+   npm run dev:agents
+   ```
+
+   Smithy loads `apps/smithy/.env.smithy` automatically and prints the configured webhook URLs. Override the file with `SMITHY_ENV_FILE=/path/to/file npm run dev:agents` when needed.
+
+Open a task to follow its **Agent runs** panel and progress updates. A recent heartbeat means Smithy is waiting for the provider command; a stale heartbeat or expired lease indicates that the run needs recovery or retry. Provider stdout is currently local to the Smithy process and is not streamed into TaskForge.
+
+For the full security, recovery, worktree, and troubleshooting notes, read [docs/SMITHY.md](docs/SMITHY.md). To disable automation, stop Smithy or remove the agent webhook URL; TaskForge's normal task, review, and merge workflows continue to work.
+
 ## Workspace layout
 
 ```text
