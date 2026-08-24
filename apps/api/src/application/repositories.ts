@@ -48,7 +48,7 @@ export interface TaskRepository {
   listByProject(projectId: string, filters: TaskFilters | undefined, page: PageRequest): Promise<Page<TaskEntity>>;
   listForAssignee(assigneeId: string, status?: string): Promise<TaskEntity[]>;
   listUsedStatuses(projectId: string): Promise<TaskEntity["status"][]>;
-  claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"] }, options?: { phaseId?: string | null; priority?: string }): Promise<TaskEntity | null>;
+  claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"] }, options?: { phaseId?: string | null; priority?: string }): Promise<(TaskEntity & { previousStatus?: TaskEntity["status"] }) | null>;
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   unassignForProjectMember(projectId: string, userId: string): Promise<void>;
   create(input: TaskEntity): Promise<TaskEntity>;

@@ -1,4 +1,4 @@
-import { TASK_STATUSES, type Project, type Tag, type Task, type TaskDependency, type User } from "@taskforge/contracts";
+import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, type Project, type Tag, type Task, type TaskDependency, type User } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 
 type Row = Record<string, unknown>;
@@ -16,12 +16,12 @@ export function toUser(row: Row, prefix = ""): User {
 }
 
 export function toProject(row: Row): Project {
-  let availableStatuses: Project["availableStatuses"] = [...TASK_STATUSES];
+  let availableStatuses: Project["availableStatuses"] = [...DEFAULT_PROJECT_STATUSES];
   try {
     const parsed = JSON.parse(String(row.available_statuses ?? "[]"));
     const selected = TASK_STATUSES.filter((status) => Array.isArray(parsed) && parsed.includes(status));
     if (selected.length) availableStatuses = selected;
-  } catch { /* Legacy projects use all statuses. */ }
+  } catch { /* Legacy projects use the shipped default subset. */ }
   const configuredDefault = String(row.default_status ?? "TODO") as Project["defaultStatus"];
   return {
     id: String(row.id),
