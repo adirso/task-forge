@@ -15,6 +15,7 @@
     "test": "npm run test --workspaces --if-present",
     "db:seed": "npm run db:seed -w @taskforge/api",
     "admin:bootstrap": "npm run admin:bootstrap -w @taskforge/api",
+    "dev:agents": "npm run dev -w @taskforge/smithy",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium"
   },
