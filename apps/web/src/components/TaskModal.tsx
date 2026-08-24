@@ -2,7 +2,7 @@ import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import type { ActivityEvent, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
 import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
 import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
-import { api } from "../lib/api";
+import { api, type AgentRun } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { SendToAI } from "./SendToAI";
 import { TaskTagEditor } from "./TaskTags";
@@ -17,6 +17,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [error, setError] = useState("");
   const [updates, setUpdates] = useState<TaskNote[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [runs, setRuns] = useState<AgentRun[]>([]);
   const [updateBody, setUpdateBody] = useState("");
   const [postingUpdate, setPostingUpdate] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -31,7 +32,11 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
       api.taskUpdates(task.id).then(({ updates: taskUpdates }) => setUpdates(taskUpdates)).catch(() => setUpdates([]));
       api.taskAttachments(task.id).then(({ attachments: taskAttachments }) => setAttachments(taskAttachments)).catch(() => setAttachments(task.attachments ?? []));
       api.taskActivity(task.id).then(({ activity: events }) => setActivity(events)).catch(() => setActivity([]));
-    } else { setUpdates([]); setAttachments([]); setActivity([]); }
+      const refreshRuns = () => api.taskRuns(task.id).then(({ runs: taskRuns }) => setRuns(taskRuns)).catch(() => setRuns([]));
+      void refreshRuns();
+      const timer = window.setInterval(refreshRuns, 5000);
+      return () => window.clearInterval(timer);
+    } else { setUpdates([]); setAttachments([]); setActivity([]); setRuns([]); }
   }, [task]);
 
   const set = <K extends keyof TaskCreate>(key: K, value: TaskCreate[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -107,6 +112,10 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
           <div className="update-composer"><Avatar user={currentUser} size="md" /><textarea value={updateBody} onChange={(e) => setUpdateBody(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void postUpdate(); } }} rows={2} placeholder="Share progress, a decision, or a blocker…" /><button type="button" className="button button-primary" disabled={!updateBody.trim() || postingUpdate} onClick={postUpdate}><Send /> {postingUpdate ? "Posting…" : "Post update"}</button></div>
           <div className="update-list">{updates.length ? updates.map((update) => <article className="task-update" key={update.id}><Avatar user={update.author} size="md" /><div><header><strong>{update.author.name}{update.author.kind === "AGENT" && <em>Agent</em>}</strong><time>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(update.createdAt))}</time></header><p>{update.body}</p></div></article>) : <p className="updates-empty">No updates yet. Add the first progress note above.</p>}</div>
         </section>}
+        {task && <section className="task-runs">
+          <div className="section-heading"><span>Agent runs <b>{runs.length}</b></span><small>{runs.some((run) => run.status === "RUNNING" || run.status === "PENDING") ? "Refreshing" : ""}</small></div>
+          {runs.length ? <div className="run-list">{runs.map((run) => <article className="run-item" key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{run.timeoutAt && <span>Timeout {formatDate(run.timeoutAt)}</span>}</div>{run.lastError && <p className="run-error">{run.lastError}</p>}</article>)}</div> : <p className="runs-empty">No agent runs yet.</p>}
+        </section>}
         {task && activity.length > 0 && <section className="task-activity">
           <div className="section-heading"><span>Activity log <b>{activity.length}</b></span></div>
           <div className="activity-list">{activity.map((event) => <div className="activity-event" key={event.id}><span className="activity-dot" /><span className="activity-body"><strong>{event.actorName}</strong>{event.actorKind === "AGENT" && <em>Agent</em>}<span>{activityLabel(event.action, event.metadata)}</span><time>{new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(event.createdAt))}</time></span></div>)}</div>
@@ -146,3 +155,5 @@ function formatDuration(seconds: number) {
   const hours = Math.floor(minutes / 60);
   return ` ${hours}h ${minutes % 60}m`;
 }
+
+function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(value)); }
