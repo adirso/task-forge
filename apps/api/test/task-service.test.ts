@@ -15,7 +15,7 @@ function repositories(overrides: Partial<RepositorySet> = {}): RepositorySet {
     notifications: { notify: async () => undefined } as never,
     webhookDeliveries: { create: async (delivery: unknown) => delivery } as never,
     reporting: {} as never,
-    users: {} as never, updates: {} as never, tokens: {} as never, search: {} as never,
+    users: { findById: async () => null } as never, updates: {} as never, tokens: {} as never, search: {} as never,
     ...overrides,
   };
 }
@@ -173,4 +173,36 @@ test("status changes enqueue a signed-delivery event for another agent", async (
 
   await service.update({ actor: { userId: "agent-1", name: "Builder", kind: "AGENT", role: "MEMBER", tokenScopes: null } }, existing.id, { status: "IN_REVIEW" });
   assert.equal(deliveries.length, 1, "an agent's own status change must not enqueue its webhook");
+});
+
+test("autonomous workflows enforce guarded status transitions", async () => {
+  const task = {
+    id: "task-guard", projectId: "project-1", number: 63, title: "Guarded workflow", description: "", definitionOfDone: "",
+    status: "IN_PROGRESS", priority: "MEDIUM", type: "FEATURE", assigneeId: null, creatorId: "owner-1", parentId: null, branch: null,
+    dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null,
+    position: 0, createdAt: "", updatedAt: "",
+  } as const;
+  const set = repositories({
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "APPROVED", "FIX_NEEDED", "DONE"], defaultStatus: "IN_PROGRESS", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    tasks: { findById: async () => task, update: async (_id: string, input: Record<string, unknown>) => ({ ...task, ...input }) } as never,
+  });
+  const service = new TaskApplicationService({ run: async (work) => work(set) });
+  await assert.rejects(() => service.update({ actor: { userId: "owner-1", kind: "HUMAN", role: "ADMIN", tokenScopes: null } }, task.id, { status: "DONE" }), /Status transition IN_PROGRESS -> DONE is not allowed/);
+  await service.update({ actor: { userId: "owner-1", kind: "HUMAN", role: "ADMIN", tokenScopes: null } }, task.id, { status: "READY_FOR_REVIEW" });
+});
+
+test("claim emits a status-changed event with the source status", async () => {
+  const deliveries: Array<Record<string, unknown>> = [];
+  const claimed = { id: "task-claim", projectId: "project-1", number: 64, title: "Claimed", description: "", definitionOfDone: "", status: "IN_PROGRESS", priority: "HIGH", type: "FEATURE", assigneeId: "agent-1", creatorId: "owner-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "", previousStatus: "READY_FOR_DEV" };
+  const set = repositories({
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["READY_FOR_DEV", "IN_PROGRESS", "APPROVED"], defaultStatus: "READY_FOR_DEV", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    tasks: { claimNext: async () => claimed } as never,
+    users: { findById: async (id: string) => id === "agent-1" ? { id, name: "Builder", kind: "AGENT", webhookUrl: "https://agent.example/webhook" } : null } as never,
+    webhookDeliveries: { create: async (delivery: Record<string, unknown>) => { deliveries.push(delivery); return delivery; } } as never,
+  });
+  const service = new TaskApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T10:10:00.000Z", () => "claim-event");
+  await service.claimTask({ actor: { userId: "agent-1", name: "Builder", kind: "AGENT", role: "MEMBER", tokenScopes: ["task:claim"] }, projectId: "project-1" });
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0]?.eventType, "task.status_changed");
+  assert.equal(JSON.parse(String(deliveries[0]?.payload)).previousStatus, "READY_FOR_DEV");
 });

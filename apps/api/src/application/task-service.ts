@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { TASK_CLAIM_SOURCE_STATUSES, TASK_CLAIM_TARGET_STATUS, type TaskStatus } from "@taskforge/contracts";
+import { TASK_CLAIM_SOURCE_STATUSES, TASK_CLAIM_TARGET_STATUS, TASK_REVIEW_STATUSES, type TaskStatus } from "@taskforge/contracts";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext, TokenScope } from "./context.js";
 import type { PageRequest, TaskDependencyEntity, TaskEntity, TaskUpdateEntity } from "./models.js";
@@ -60,6 +60,7 @@ export class TaskApplicationService implements TaskService {
         const project = await repositories.projects.findById(existing.projectId);
         if (!project) throw new NotFoundError("Project");
         this.assertStatusAvailable(project.availableStatuses, input.status);
+        this.assertStatusTransition(project.availableStatuses, existing.status, input.status);
       }
       await this.validateRelations(repositories, existing.projectId, taskId, input);
       const { tags, dependencyIds, ...fields } = input;
@@ -70,7 +71,7 @@ export class TaskApplicationService implements TaskService {
       await repositories.activity.record({ projectId: existing.projectId, taskId, actorId: context.actor.userId, action: "task.updated", metadata: input });
       const assigneeChanged = input.assigneeId !== undefined && input.assigneeId !== existing.assigneeId;
       if (assigneeChanged && input.assigneeId && input.assigneeId !== context.actor.userId) await this.notify(repositories, input.assigneeId, { ...existing, ...task, title: input.title ?? existing.title }, context, "TASK_ASSIGNED", "Task assigned to you");
-      const reviewStatuses = new Set<TaskStatus>(["READY_FOR_REVIEW", "IN_REVIEW"]);
+      const reviewStatuses = new Set<TaskStatus>(TASK_REVIEW_STATUSES);
       if (input.status && reviewStatuses.has(input.status) && !reviewStatuses.has(existing.status) && existing.creatorId !== context.actor.userId) await this.notify(repositories, existing.creatorId, { ...existing, ...task, title: input.title ?? existing.title }, context, "REVIEW_REQUESTED", "Review requested");
       const automated = await this.automationEngine.apply(repositories, context, existing, { ...task, updatedAt: now }, "TASK_UPDATED");
       if (assigneeChanged && input.assigneeId && input.assigneeId !== context.actor.userId) await this.enqueueAssignmentWebhook(repositories, { ...task, assigneeId: input.assigneeId }, context);
@@ -93,6 +94,7 @@ export class TaskApplicationService implements TaskService {
       const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS }, options);
       if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
+      await this.enqueueStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context);
       return task;
     });
   }
@@ -140,6 +142,22 @@ export class TaskApplicationService implements TaskService {
 
   private assertStatusAvailable(availableStatuses: TaskStatus[], status: TaskStatus) {
     if (!availableStatuses.includes(status)) throw new ValidationError(`Status ${status} is not available in this project`);
+  }
+
+  private assertStatusTransition(availableStatuses: TaskStatus[], from: TaskStatus, to: TaskStatus) {
+    if (from === to || !availableStatuses.some((status) => ["APPROVED", "RE_REVIEW", "FIX_NEEDED", "PENDING_DECISION", "FAILED"].includes(status))) return;
+    const allowed: Partial<Record<TaskStatus, readonly TaskStatus[]>> = {
+      READY_FOR_DEV: ["IN_PROGRESS", "CANCELLED"],
+      IN_PROGRESS: ["READY_FOR_REVIEW", "RE_REVIEW", "FAILED", "CANCELLED"],
+      READY_FOR_REVIEW: ["IN_REVIEW", "RE_REVIEW", "CANCELLED"],
+      IN_REVIEW: ["APPROVED", "FIX_NEEDED", "PENDING_DECISION", "FAILED", "CANCELLED"],
+      RE_REVIEW: ["APPROVED", "FIX_NEEDED", "PENDING_DECISION", "FAILED", "CANCELLED"],
+      FIX_NEEDED: ["IN_PROGRESS", "CANCELLED"],
+      PENDING_DECISION: ["IN_PROGRESS", "IN_REVIEW", "CANCELLED"],
+      APPROVED: ["DONE", "IN_REVIEW", "FAILED"],
+      FAILED: ["IN_PROGRESS", "CANCELLED"],
+    };
+    if (!allowed[from]?.includes(to)) throw new ValidationError(`Status transition ${from} -> ${to} is not allowed by the project workflow`);
   }
 
   private async requireTask(repositories: RepositorySet, taskId: string) { const task = await repositories.tasks.findById(taskId); if (!task) throw new NotFoundError("Task"); return task; }

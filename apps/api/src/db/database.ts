@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Sqlite from "better-sqlite3";
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader } from "mysql2/promise";
-import { TASK_STATUSES } from "@taskforge/contracts";
+import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES } from "@taskforge/contracts";
 import { config } from "../config.js";
 
 export type DatabaseDriver = "sqlite" | "mysql";
@@ -169,8 +169,8 @@ async function runStatements(executor: Executor, statements: string[]) {
 }
 
 const taskStatusSql = TASK_STATUSES.map((status) => `'${status}'`).join(", ");
-const defaultAvailableStatuses = JSON.stringify(TASK_STATUSES);
-const legacyDefaultAvailableStatuses = JSON.stringify(["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
+const defaultAvailableStatuses = JSON.stringify(DEFAULT_PROJECT_STATUSES);
+const legacyDefaultAvailableStatuses = defaultAvailableStatuses;
 const legacyAvailableStatuses = JSON.stringify(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"]);
 
 const sqliteSchema = [
@@ -242,6 +242,10 @@ async function migrateSqliteTaskStatusCheck(executor: Executor) {
   await executor.run("INSERT INTO tasks_status_migration (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) SELECT id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at FROM tasks", []);
   await executor.run("DROP TABLE tasks", []);
   await executor.run("ALTER TABLE tasks_status_migration RENAME TO tasks", []);
+  await executor.run("CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status, position)", []);
+  await executor.run("CREATE INDEX IF NOT EXISTS idx_tasks_project_page ON tasks(project_id, status, position, created_at, id)", []);
+  await executor.run("CREATE INDEX IF NOT EXISTS idx_tasks_updated_page ON tasks(updated_at, id)", []);
+  await executor.run("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)", []);
   const violation = await executor.get<{ table: string; rowid: number; parent: string }>("PRAGMA foreign_key_check", []);
   if (violation) throw new Error(`Task status migration left a foreign key violation: table=${violation.table}, rowid=${violation.rowid}, parent=${violation.parent}`);
 }

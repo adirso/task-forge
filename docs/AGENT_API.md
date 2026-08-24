@@ -126,7 +126,7 @@ Task creation and update fields include:
 | --- | --- |
 | `title` | Required string |
 | `description`, `definitionOfDone` | Optional text |
-| `status` | `BACKLOG`, `REFINING`, `TODO`, `READY_FOR_DEV`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`; must be enabled for the project. If omitted during creation, the project's `defaultStatus` is used. |
+| `status` | `BACKLOG`, `REFINING`, `TODO`, `READY_FOR_DEV`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`, `APPROVED`, `RE_REVIEW`, `FIX_NEEDED`, `PENDING_DECISION`, `FAILED`; must be enabled for the project. If omitted during creation, the project's `defaultStatus` is used. New orchestration statuses are opt-in and are not enabled on existing or new projects by default. |
 | `priority` | `LOW`, `MEDIUM`, `HIGH`, `URGENT` |
 | `type` | `FEATURE`, `BUG`, `INFRA`, `UPDATE`, `SECURITY`, `DOCS`, `CHORE` |
 | `assigneeId` | Project-member UUID or `null` |
@@ -280,7 +280,7 @@ POST  /api/users/webhook-deliveries/:deliveryId/retry
 
 The first non-null webhook URL creates a per-agent signing secret. The response includes `webhookSecret` once; later URL changes do not reveal it. Rotation returns a new secret once and increments `X-TaskForge-Secret-Version`. Update the receiver immediately after rotation because pending and future attempts use the agent's current secret. Webhook URLs must use HTTP or HTTPS and cannot contain username/password credentials.
 
-TaskForge durably stores `task.assigned` and `task.update_added` events in the same transaction as the task change, then dispatches only after commit. An agent's own assignment or update does not enqueue an event back to that agent. A request body has a stable event envelope such as:
+TaskForge durably stores `task.assigned`, `task.update_added`, and `task.status_changed` events in the same transaction as the task change, then dispatches only after commit. Status changes from task claiming include `previousStatus`; a direct status update made by the assigned agent does not enqueue an event back to that agent. A request body has a stable event envelope such as:
 
 ```json
 {
@@ -289,6 +289,19 @@ TaskForge durably stores `task.assigned` and `task.update_added` events in the s
   "task": { "id": "...", "projectKey": "TAS", "number": 51 },
   "update": { "id": "...", "body": "Please retry this delivery." },
   "postedBy": { "id": "...", "name": "Project owner" },
+  "timestamp": "2026-08-23T10:00:00.000Z"
+}
+```
+
+A status-change envelope includes `previousStatus`, `changedBy`, and the resolved task status:
+
+```json
+{
+  "id": "...",
+  "event": "task.status_changed",
+  "task": { "id": "...", "projectKey": "TAS", "number": 51, "status": "IN_PROGRESS", "assigneeId": "..." },
+  "previousStatus": "READY_FOR_DEV",
+  "changedBy": { "id": "...", "name": "Project owner" },
   "timestamp": "2026-08-23T10:00:00.000Z"
 }
 ```

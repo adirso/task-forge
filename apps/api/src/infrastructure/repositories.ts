@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
+import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
 import type { ActivityEntity, AgentLastActiveEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
 import type { ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
@@ -44,7 +44,7 @@ function configuredStatuses(value: unknown): TaskStatus[] {
       if (selected.length) return selected;
     }
   } catch { /* Legacy rows use the complete status set. */ }
-  return [...TASK_STATUSES];
+  return [...DEFAULT_PROJECT_STATUSES];
 }
 
 function toProject(row: Row): ProjectEntity {
@@ -273,13 +273,14 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       if (options.phaseId !== undefined && options.phaseId !== null) { where.push("phase_id = ?"); params.push(options.phaseId); }
       if (options.priority) { where.push("priority = ?"); params.push(options.priority); }
       const orderExpr = "CASE priority WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, position";
-      const candidate = await db.prepare(`SELECT id FROM tasks WHERE ${where.join(" AND ")} ORDER BY ${orderExpr} LIMIT 1`).get(...params);
+      const candidate = await db.prepare(`SELECT id, status FROM tasks WHERE ${where.join(" AND ")} ORDER BY ${orderExpr} LIMIT 1`).get(...params);
       if (!candidate) return null;
       const now = new Date().toISOString();
       const result = await db.prepare(`UPDATE tasks SET assignee_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND status IN (${sourcePlaceholders}) AND assignee_id IS NULL`).run(claimantId, workflow.targetStatus, now, candidate.id, projectId, ...workflow.sourceStatuses);
       if (!result.changes) return null;
       const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(candidate.id);
-      return row ? (await hydrateTasks(db, [toTask(row)]))[0]! : null;
+      const hydrated = row ? (await hydrateTasks(db, [toTask(row)]))[0]! : null;
+      return hydrated ? { ...hydrated, previousStatus: candidate.status as TaskStatus } : null;
     },
   };
 }
