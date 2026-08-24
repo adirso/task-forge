@@ -57,5 +57,10 @@ async function configure(file: string): Promise<void> {
   } finally { rl.close(); }
 }
 
-const file = option(process.argv.slice(2), "--env-file") ?? defaultEnvFile();
+const requestedFile = option(process.argv.slice(2), "--env-file");
+// npm workspace scripts run from apps/smithy; INIT_CWD preserves the directory
+// from which the operator invoked npm, so repository-root paths still work.
+const file = requestedFile && !path.isAbsolute(requestedFile) && process.env.INIT_CWD
+  ? path.resolve(process.env.INIT_CWD, requestedFile)
+  : requestedFile ?? defaultEnvFile();
 configure(file).catch((error) => { console.error(error instanceof Error ? error.message : "Unable to configure Smithy"); process.exitCode = 1; });
