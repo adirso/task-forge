@@ -10,7 +10,7 @@ const member = { actor: { userId: "member-1", kind: "HUMAN" as const, role: "MEM
 
 function setup() {
   let finding: any = null; const runs: any[] = []; const activities: any[] = [];
-  const set = { projects: { findById: async () => project }, memberships: { isMember: async () => true }, tasks: { findById: async () => task, update: async (_id: string, input: unknown) => ({ ...task, ...input }) },
+  const set = { users: { findById: async (id: string) => ({ id }) }, projects: { findById: async () => project }, memberships: { isMember: async () => true }, tasks: { findById: async () => task, update: async (_id: string, input: unknown) => ({ ...task, ...input }) },
     findings: { listForTask: async () => finding ? [finding] : [], findById: async () => finding, create: async (input: any) => { finding = input; return input; }, dispose: async (_id: string, disposition: string, actorId: string, reason: string | null, decisionOwnerId: string | null, dueAt: string | null, updatedAt: string) => { if (!finding) return null; finding = { ...finding, disposition, dispositionById: actorId, dispositionReason: reason, decisionOwnerId, dueAt, updatedAt }; return finding; } },
     runs: { findById: async () => null, countForTask: async () => runs.length, create: async (run: any) => { runs.push(run); return run; } }, activity: { record: async (input: any) => { activities.push(input); } },
   } as unknown as RepositorySet;

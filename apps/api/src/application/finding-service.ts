@@ -32,6 +32,7 @@ export class TaskFindingApplicationService implements TaskFindingService {
       if (["DEFERRED", "ESCALATED"].includes(input.disposition) && (!input.decisionOwnerId || !input.dueAt || Number.isNaN(Date.parse(input.dueAt)))) throw new ValidationError("Deferred decisions require a decision owner and due date");
       const now = this.now();
       if (input.dueAt && Date.parse(input.dueAt) <= Date.parse(now)) throw new ValidationError("Decision due date must be in the future");
+      if (input.decisionOwnerId && !(await r.users.findById(input.decisionOwnerId))) throw new NotFoundError("Decision owner");
       if (input.disposition === "FIX_NEEDED" && !project.availableStatuses.includes("FIX_NEEDED") && !project.availableStatuses.includes("IN_PROGRESS")) throw new ValidationError("Project workflow must enable FIX_NEEDED or IN_PROGRESS before requesting fixes");
       if (input.disposition === "ESCALATED" && !project.availableStatuses.includes("PENDING_DECISION")) throw new ValidationError("Project workflow must enable PENDING_DECISION before escalating a finding");
       const targetStatus = input.disposition === "FIX_NEEDED" ? (project.availableStatuses.includes("FIX_NEEDED") ? "FIX_NEEDED" : "IN_PROGRESS") : input.disposition === "ESCALATED" ? "PENDING_DECISION" : null;
