@@ -31,7 +31,7 @@ export interface ProjectService {
   list(context: RequestContext): Promise<ProjectEntity[]>;
   get(context: ProjectContext): Promise<ProjectEntity>;
   create(context: RequestContext, input: ProjectCreateInput): Promise<ProjectEntity>;
-  update(context: ProjectContext, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "color" | "availableStatuses" | "defaultStatus">>): Promise<ProjectEntity>;
+  update(context: ProjectContext, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus">>): Promise<ProjectEntity>;
   delete(context: ProjectContext): Promise<void>;
   reorder(context: RequestContext, projectIds: string[]): Promise<void>;
   addMember(context: ProjectContext, userId: string, role: "OWNER" | "MEMBER"): Promise<void>;

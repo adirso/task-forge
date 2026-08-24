@@ -39,6 +39,7 @@ export const projectCreateSchema = z.object({
   name: z.string().trim().min(2).max(120),
   description: z.string().trim().max(2000).default(""),
   repoUrl: z.string().url().nullable().optional(),
+  localRepoPath: z.string().trim().min(1).max(2048).nullable().optional(),
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default("#6554C0"),
 });
 
@@ -218,6 +219,7 @@ export interface Project {
   name: string;
   description: string;
   repoUrl: string | null;
+  localRepoPath: string | null;
   color: string;
   sortOrder: number;
   availableStatuses: TaskStatus[];

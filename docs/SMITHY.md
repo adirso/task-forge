@@ -10,8 +10,8 @@ Copy `apps/smithy/.env.example` to a private env file and fill in the agent webh
 export TASKFORGE_API_URL=http://127.0.0.1:4000
 export SMITHY_PORT=4500
 export SMITHY_PROVIDERS='{
-  "claude": {"cmd":"claude -p {prompt}","repo":"/work/task-forge","webhookSecret":"whsec_...","apiToken":"tf_..."},
-  "codex": {"cmd":"codex exec {prompt}","repo":"/work/task-forge","webhookSecret":"whsec_...","apiToken":"tf_..."}
+  "claude": {"cmd":"claude -p {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."},
+  "codex": {"cmd":"codex exec {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."}
 }'
 ```
 
@@ -23,7 +23,7 @@ set -a; source apps/smithy/.env.smithy; set +a
 npm run dev:agents
 ```
 
-Provider names are routing labels only. The command and repository are operator configuration; Smithy uses `spawn` with `shell: false`, so prompt text is passed as an argument and never interpreted as shell syntax. Keep this configuration outside the repository and use filesystem/secret-manager permissions appropriate for credentials.
+Provider names are routing labels only. Configure each project's **Local Smithy repository path** in TaskForge project settings; Smithy uses that path for the task's worktree. An optional provider `repo` remains a fallback for projects without a path. The GitHub repository URL remains the remote/canonical link. Smithy uses `spawn` with `shell: false`, so prompt text is passed as an argument and never interpreted as shell syntax. Keep credentials outside the repository and use filesystem/secret-manager permissions appropriate for them.
 
 TaskForge agent webhook URLs should point to `/agents/claude`, `/agents/codex`, or `/agents/cursor`. The API's `X-TaskForge-Signature` timestamp/HMAC is verified with a five-minute clock-skew tolerance. Duplicate event IDs are persisted in the SQLite job store, and pending/running jobs are resumed after restart (including the original run ID, so a restart never creates a second run). API calls use the configured bearer token, retry transient failures with bounded exponential backoff, and report progress, status handoffs, and `SUCCEEDED` or redacted `FAILED` results through the public API. A claimed run uses a two-minute lease and sends a heartbeat every 30 seconds while the command executes.
 

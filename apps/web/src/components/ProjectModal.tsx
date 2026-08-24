@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { TASK_STATUSES, type Project, type TaskStatus } from "@taskforge/contracts";
 import { statusMeta } from "../lib/ui";
 
-type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus };
+type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus };
 
 export function ProjectModal({ project, projects = [], onClose, onSave }: { project?: Project | null; projects?: Project[]; onClose: () => void; onSave: (project: ProjectFormInput) => Promise<void> }) {
   const [name, setName] = useState(project?.name ?? "");
@@ -11,6 +11,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave }: { proj
   const [keyEdited, setKeyEdited] = useState(false);
   const [description, setDescription] = useState(project?.description ?? "");
   const [repoUrl, setRepoUrl] = useState(project?.repoUrl ?? "");
+  const [localRepoPath, setLocalRepoPath] = useState(project?.localRepoPath ?? "");
   const [color, setColor] = useState(project?.color ?? "#6554C0");
   const [availableStatuses, setAvailableStatuses] = useState<TaskStatus[]>(project?.availableStatuses ?? [...TASK_STATUSES]);
   const [defaultStatus, setDefaultStatus] = useState<TaskStatus>(project?.defaultStatus ?? "TODO");
@@ -29,7 +30,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave }: { proj
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    try { await onSave({ name, key, description, repoUrl: repoUrl || null, color, ...(project ? { availableStatuses, defaultStatus } : {}) }); onClose(); }
+    try { await onSave({ name, key, description, repoUrl: repoUrl || null, localRepoPath: localRepoPath.trim() || null, color, ...(project ? { availableStatuses, defaultStatus } : {}) }); onClose(); }
     catch (err) { setError(err instanceof Error ? err.message : `Could not ${project ? "update" : "create"} project`); }
     finally { setSaving(false); }
   }
@@ -42,6 +43,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave }: { proj
         <div className="project-form-row"><label>Project name<input autoFocus value={name} onChange={(e) => { const nextName = e.target.value; setName(nextName); if (!keyEdited && !project) setKey(suggestedKey(nextName)); }} placeholder="Website launch" required /></label><label>Key<input value={key} onChange={(e) => { setKeyEdited(true); setKey(e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase()); }} placeholder="WEB" minLength={2} maxLength={8} required disabled={Boolean(project)} /></label></div>
         <label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="What is this project trying to achieve?" /></label>
         <label>Repository URL <span className="optional">Optional</span><input type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/your-org/repo" /></label>
+        <label>Local Smithy repository path <span className="optional">Optional</span><input value={localRepoPath} onChange={(e) => setLocalRepoPath(e.target.value)} placeholder="/Users/me/Development/task-forge" /><small>Used by the optional Smithy runner on the machine where it runs. This does not replace the repository URL.</small></label>
         <label>Project color<input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
         {project && <section className="project-status-settings">
           <div><strong>Task statuses</strong><span>Choose the statuses available on this project.</span></div>

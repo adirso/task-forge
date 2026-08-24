@@ -478,6 +478,12 @@ export const migrations: readonly Migration[] = [
       if (dialect === "sqlite") await executor.run("CREATE INDEX IF NOT EXISTS idx_task_findings_task ON task_findings(task_id, created_at)", []);
     },
   },
+  {
+    version: "0013_project_local_repo_path",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql" ? "ALTER TABLE projects ADD COLUMN local_repo_path VARCHAR(2048) NULL" : "ALTER TABLE projects ADD COLUMN local_repo_path TEXT", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

@@ -2,7 +2,7 @@ export type ProviderLabel = "claude" | "codex" | "cursor";
 
 export interface ProviderConfig {
   cmd: string;
-  repo: string;
+  repo?: string;
   webhookSecret: string;
   apiToken: string;
 }
@@ -35,8 +35,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SmithyConfig {
     if (!raw) continue;
     if (typeof raw !== "object" || Array.isArray(raw)) throw new Error(`SMITHY_PROVIDERS.${label} must be an object`);
     const value = raw as Record<string, unknown>;
-    for (const field of ["cmd", "repo", "webhookSecret", "apiToken"] as const) if (typeof value[field] !== "string" || !value[field]) throw new Error(`SMITHY_PROVIDERS.${label}.${field} is required`);
-    providers[label] = { cmd: value.cmd as string, repo: value.repo as string, webhookSecret: value.webhookSecret as string, apiToken: value.apiToken as string };
+    for (const field of ["cmd", "webhookSecret", "apiToken"] as const) if (typeof value[field] !== "string" || !value[field]) throw new Error(`SMITHY_PROVIDERS.${label}.${field} is required`);
+    if (value.repo !== undefined && (typeof value.repo !== "string" || !value.repo)) throw new Error(`SMITHY_PROVIDERS.${label}.repo must be a non-empty path when provided`);
+    providers[label] = { cmd: value.cmd as string, repo: value.repo as string | undefined, webhookSecret: value.webhookSecret as string, apiToken: value.apiToken as string };
   }
   const host = env.SMITHY_HOST ?? "127.0.0.1";
   if (!(["127.0.0.1", "::1", "localhost"] as string[]).includes(host)) throw new Error("Smithy must bind to loopback; non-loopback SMITHY_HOST is not allowed");

@@ -46,6 +46,7 @@ let mockProjects: Project[] = [{
   name: "Mobile Refresh",
   description: "Fictional project for product screenshots.",
   repoUrl: "https://github.com/example/mobile-refresh",
+  localRepoPath: null,
   color: "#6554c0",
   sortOrder: 0,
   availableStatuses: [...TASK_STATUSES],
@@ -341,7 +342,7 @@ async function request<T>(path: string, options: Options = {}): Promise<T> {
 export const api = {
   login: (email: string, password: string) => request<AuthResponse>("/auth/login", { method: "POST", body: { email, password } }),
   me: () => request<{ user: User }>("/auth/me"),
-  projects: () => request<{ projects: Project[] }>("/projects"),
+  projects: () => request<{ projects: Project[] }>("/projects").then((response) => ({ projects: response.projects.map((project) => ({ ...project, localRepoPath: project.localRepoPath ?? null })) })),
   reorderProjects: (projectIds: string[]) => request<void>("/projects/order", { method: "PATCH", body: { projectIds } }),
   project: (id: string) => request<{ project: Project }>(`/projects/${id}`),
   addProjectMember: (projectId: string, userId: string) => request<void>(`/projects/${projectId}/members`, { method: "POST", body: { userId, role: "MEMBER" } }),
@@ -354,9 +355,9 @@ export const api = {
   createPhase: (projectId: string, input: { number: number; goal: string; isActive: boolean }) => request<{ phase: Phase }>(`/projects/${projectId}/phases`, { method: "POST", body: input }),
   updatePhase: (id: string, input: Partial<{ number: number; goal: string; isActive: boolean }>) => request<{ phase: Phase }>(`/phases/${id}`, { method: "PATCH", body: input }),
   deletePhase: (id: string) => request<void>(`/phases/${id}`, { method: "DELETE" }),
-  createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; color: string }) =>
+  createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
-  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"] }) =>
+  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   tasks: async (projectId: string) => {
