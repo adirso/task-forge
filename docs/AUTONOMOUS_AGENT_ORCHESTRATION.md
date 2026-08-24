@@ -34,17 +34,18 @@ Under the shipped model, adding a key is a global contract change: `TASK_STATUSE
 
 | Transition | Guard | Owner/evidence |
 | --- | --- | --- |
-| Ready → Implementing | task assigned, lease acquired, implementation agent configured | Coordinator; run record |
-| Implementing → Waiting for review | branch/PR exists, required tests recorded, agent handoff complete | Claude; PR URL + commit SHA |
-| Waiting for review → Reviewing | PR is reachable and reviewer lease acquired | Coordinator/Codex |
-| Reviewing → Approved | required CI checks green, no blocking findings, reviewer attestation | Codex; review evidence |
-| Reviewing → Changes requested | one or more P0–P2 findings or explicitly selected P3 finding | Codex; finding records |
-| Reviewing → Pending decision | finding needs product/security/owner decision | Human/coordinator; decision note |
-| Approved → Merge pending | human/project merge policy authorizes merge | Coordinator; authorization record |
-| Merge pending → Done | merge SHA exists and post-merge CI/deploy check passes | Coordinator; merge evidence |
-| Any non-terminal → Cancelled | human or authorized coordinator cancellation | Actor + reason |
-| Reviewing → Failed | timeout or exhausted retries | Runner; diagnostics + escalation |
-| Reviewing → Cancelled (reject delivery) | human/reviewer rejects the whole implementation as unsafe or out of scope | Rejection reason + evidence |
+| `READY_FOR_DEV` → `IN_PROGRESS` | task assigned, lease acquired, implementation agent configured | Coordinator; run record |
+| `IN_PROGRESS` → `READY_FOR_REVIEW` | branch/PR exists, required tests recorded, agent handoff complete | Claude; PR URL + commit SHA |
+| `READY_FOR_REVIEW` → `IN_REVIEW` | PR is reachable and reviewer lease acquired | Coordinator/Codex; review run |
+| `IN_REVIEW` → `APPROVED` | required CI checks green, no blocking findings, reviewer attestation | Codex; review evidence |
+| `IN_REVIEW` → `CHANGES_REQUESTED` | one or more P0–P2 findings or explicitly selected P3 finding | Codex; finding records |
+| `IN_REVIEW` → `PENDING_DECISION` | finding needs product/security/owner decision | Human/coordinator; decision note |
+| `APPROVED` → `MERGE_PENDING` | human/project merge policy authorizes merge | Coordinator; authorization record |
+| `MERGE_PENDING` → `DONE` | merge SHA exists and post-merge CI/deploy check passes | Coordinator; merge evidence |
+| Any non-terminal → `CANCELLED` | human or authorized coordinator cancellation | Actor + reason |
+| `IN_PROGRESS` → `FAILED` | implementation timeout or exhausted retries | Runner; diagnostics + escalation |
+| `IN_REVIEW` → `FAILED` | review timeout or exhausted retries | Runner; diagnostics + escalation |
+| `IN_REVIEW` → `CANCELLED` (reject delivery) | human/reviewer rejects the whole implementation as unsafe or out of scope | Human/reviewer; rejection reason + evidence |
 
 Transitions are atomic, validate that the previous status matches, and are idempotent on `(runId, transitionId)`. Disabled semantic transitions return an actionable workflow-discovery error rather than silently changing to a legacy key.
 
@@ -86,7 +87,7 @@ Only the finding owner or an authorized human can change a disposition. A re-rev
 
 These child tasks are intentionally ordered so storage and policy are available before provider execution:
 
-1. **TAS-62 — Workflow statuses and transition guards** — add only missing global orchestration keys (`CHANGES_REQUESTED`, `PENDING_DECISION`, `APPROVED`, `MERGE_PENDING`, `FAILED`) or document an explicit decision to build per-status metadata; preserve the shipped nine-key subset model; add `task.status_changed` in both dialects; keep claim/review/completion constants synchronized; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
+1. **TAS-62 — Workflow statuses and transition guards** — add only missing global orchestration keys (`CHANGES_REQUESTED`, `PENDING_DECISION`, `APPROVED`, `MERGE_PENDING`, `FAILED`) or document an explicit decision to build per-status metadata; preserve the shipped nine-key subset model; do not auto-enable new keys on existing projects—each project must opt in by updating its stored subset; add `task.status_changed` in both dialects; keep claim/review/completion constants synchronized; disabled transitions fail clearly; duplicate transitions are harmless; legacy workflows continue to work.
 2. **TAS-63 — Run, lease, and orchestration service** — persist runs/attempts/leases, claim and heartbeat APIs, timeout/cancellation handling, and bounded cycle limits. DoD: crash recovery and concurrent claims are deterministic in SQLite and MySQL.
 3. **TAS-64 — Agent provider adapters and context bundles** — implement Claude/Codex invocation contracts, scoped credentials, immutable context snapshots, and callback authentication. DoD: provider failures are retryable, secrets never enter payloads/logs, and callbacks are idempotent.
 4. **TAS-65 — PR/CI evidence and merge authorization** — ingest checks/reviews, invalidate stale approvals, enforce merge guards, and record merge evidence. DoD: no merge occurs without configured checks and authorization; head changes require re-review.
