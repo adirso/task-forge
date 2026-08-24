@@ -5,7 +5,7 @@ import { redact, verifySignature } from "./security.js";
 import type { JobStore } from "./store.js";
 import { MemoryJobStore } from "./store.js";
 
-export interface AgentEvent { id: string; event: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string }; runId?: string | null; }
+export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string }; runId?: string | null; }
 export type RunnerResult = { status: number; body: string };
 type ContextResponse = { project: { key: string; availableStatuses: string[] }; task: AgentEvent["task"] & { updates?: Array<{ body: string }> } };
 type WorktreeFactory = (repo: string, branch: string | null, taskId: string) => Promise<string>;
@@ -63,7 +63,7 @@ export class SmithyRunner {
       // Webhooks are at-least-once and can arrive out of order. A status event
       // that no longer describes the current task must not start another run
       // or emit a handoff that could loop the workflow backwards.
-      if (event.event === "task.status_changed" && event.task?.status && task.status && event.task.status !== task.status) {
+      if (event.event === "task.status_changed" && event.task?.status && task.status && event.task.status !== task.status && event.previousStatus !== task.status) {
         this.store.markComplete(event.id, "SUCCEEDED");
         return;
       }

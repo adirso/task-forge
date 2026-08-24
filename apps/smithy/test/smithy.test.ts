@@ -107,3 +107,25 @@ test("runner ignores an out-of-order status event after the task has moved on", 
   assert.ok(calls.some((path) => path.includes("/api/context")));
   assert.equal(calls.some((path) => path.includes("/runs")), false);
 });
+
+test("runner processes a status event when context is still at the previous status", async () => {
+  const calls: string[] = [];
+  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["IN_PROGRESS", "IN_REVIEW"] }, task: { ...event.task, status: "IN_PROGRESS" } }; return path.endsWith("/runs") ? { run: { id: "run-lagged" } } : {}; } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "ok", stderr: "" }), () => 1_700_000_000_000);
+  const valid = { ...event, event: "task.status_changed", previousStatus: "IN_PROGRESS", task: { ...event.task, status: "IN_REVIEW" } };
+  const body = JSON.stringify(valid); const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  assert.equal((await runner.handle("claude", headers, body)).status, 202);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(calls.some((path) => path.endsWith("/runs")));
+});
+
+test("runner resumes a persisted pending job with the same event and run correlation", async () => {
+  const store = new MemoryJobStore(); const accepted = store.accept("event-resume", "claude", event.task.id, JSON.stringify(event)); store.setRunId("event-resume", "run-existing");
+  const calls: string[] = [];
+  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return {}; } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "ok", stderr: "" }), () => 1_700_000_000_000, store);
+  await runner.resume(); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(accepted.job.runId, "run-existing");
+  assert.ok(calls.includes("/api/runs/run-existing/claim"));
+  assert.ok(calls.includes("/api/runs/run-existing/complete"));
+});

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { agentCreateSchema, agentWebhookSchema, avatarUploadSchema, profileUpdateSchema, tokenCreateSchema, webhookDeliveryQuerySchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
@@ -62,6 +63,8 @@ export async function userRoutes(app: FastifyInstance) {
   app.post<{ Params: UserParams }>("/:id/webhook-secret/rotate", { schema: { tags: ["Agents"], summary: "Rotate an agent webhook signing secret" } }, async (request) => service.rotateAgentWebhookSecret(context(request), request.params.id));
 
   app.get("/webhook-deliveries", { schema: { tags: ["Agents"], summary: "List agent webhook deliveries" } }, async (request) => ({ deliveries: await webhookDeliveryService.list(context(request), webhookDeliveryQuerySchema.parse(request.query)) }));
+  app.get("/webhook-deliveries/metrics", { schema: { tags: ["Agents"], summary: "Webhook delivery metrics" } }, async (request) => ({ metrics: await webhookDeliveryService.metrics(context(request)) }));
+  app.delete("/webhook-deliveries/retention", { schema: { tags: ["Agents"], summary: "Purge delivered webhook history" } }, async (request) => { const query = z.object({ before: z.string(), limit: z.coerce.number().int().min(1).max(10_000).default(1000) }).parse(request.query); return { deleted: await webhookDeliveryService.purge(context(request), query.before, query.limit) }; });
   app.post<{ Params: DeliveryParams }>("/webhook-deliveries/:deliveryId/retry", { schema: { tags: ["Agents"], summary: "Retry a failed agent webhook delivery" } }, async (request) => ({ delivery: await webhookDeliveryService.retry(context(request), request.params.deliveryId) }));
 
   app.get("/agents/ops", { schema: { tags: ["Agents"], summary: "Agent ops dashboard — fleet status with workload and health" } }, async (request) => ({ agents: await service.agentOperations(context(request)) }));
