@@ -1,5 +1,12 @@
 import { TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
+export interface AgentRun {
+  id: string; taskId: string; projectId: string; requestedById: string; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
+  status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED"; attemptCount: number; maxAttempts: number;
+  leaseOwner: string | null; leaseExpiresAt: string | null; heartbeatAt: string | null; timeoutAt: string | null; lastError: string | null;
+  createdAt: string; updatedAt: string; completedAt: string | null;
+}
+
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
 // VITE_API_URL when the API lives on a separate origin.
@@ -282,6 +289,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
   }
 
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "GET") return { updates: [] } as T;
+  if (/^\/tasks\/[^/]+\/runs$/.test(pathname) && method === "GET") return { runs: [] } as T;
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "POST") {
     return {
       update: {
@@ -385,6 +393,7 @@ export const api = {
     } while (cursor);
     return { updates };
   },
+  taskRuns: (id: string) => request<{ runs: AgentRun[] }>(`/tasks/${id}/runs`),
   addTaskUpdate: (id: string, body: string) => request<{ update: TaskNote }>(`/tasks/${id}/updates`, { method: "POST", body: { body } }),
   taskAttachments: (id: string) => request<{ attachments: Attachment[] }>(`/tasks/${id}/attachments`),
   uploadTaskAttachment: (id: string, input: { fileName: string; mimeType: string; data: string }) => request<{ attachment: Attachment }>(`/tasks/${id}/attachments`, { method: "POST", body: input }),
