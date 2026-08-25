@@ -10,7 +10,7 @@ export async function enqueueTaskStatusWebhook(
   previousStatus: TaskStatus,
   context: RequestContext,
   runId: string | null = null,
-  newId = randomUUID,
+  newId: () => string = randomUUID,
   now = () => new Date().toISOString(),
 ) {
   if (!task.assigneeId) return;

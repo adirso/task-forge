@@ -6,8 +6,13 @@ export type { DatabasePort };
 
 export function createUnitOfWork(database: DatabasePort, repositories = createRepositories(database)): UnitOfWork {
   return {
-    run<T>(work: (set: RepositorySet) => Promise<T>) {
-      return database.transaction(() => work(repositories))();
+    async run<T>(work: (set: RepositorySet) => Promise<T>, onError?: (error: unknown) => Promise<void> | void) {
+      try {
+        return await database.transaction(() => work(repositories))();
+      } catch (error) {
+        if (onError) await onError(error);
+        throw error;
+      }
     },
   };
 }

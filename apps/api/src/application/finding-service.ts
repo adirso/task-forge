@@ -4,7 +4,7 @@ import type { RequestContext } from "./context.js";
 import type { FindingDisposition, TaskFindingEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
 import type { TaskFindingService } from "./services.js";
-import { AutomationEngine } from "./automation-service.js";
+import { AutomationEngine, AutomationFailureError } from "./automation-service.js";
 import { enqueueTaskStatusWebhook } from "./transition-effects.js";
 
 export class TaskFindingApplicationService implements TaskFindingService {
@@ -56,7 +56,14 @@ export class TaskFindingApplicationService implements TaskFindingService {
         await enqueueTaskStatusWebhook(r, automated, task.status, context, null, this.newId, this.now);
       }
       await r.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.finding_disposed", metadata: { findingId, disposition: input.disposition, reason, decisionOwnerId: input.decisionOwnerId ?? null, dueAt: input.dueAt ?? null } }); return updated;
-    });
+    }, (error) => this.persistAutomationFailure(error));
+  }
+
+  private async persistAutomationFailure(error: unknown) {
+    if (!(error instanceof AutomationFailureError)) return;
+    await this.unitOfWork.run(async (repositories) => {
+      await repositories.activity.record(error.auditEvent);
+    }).catch(() => undefined);
   }
 
   private async authorize(r: RepositorySet, context: RequestContext, projectId: string) { const project = await r.projects.findById(projectId); if (!project) throw new NotFoundError("Project"); if (context.actor.role !== "ADMIN" && !(await r.memberships.isMember(projectId, context.actor.userId))) throw new ForbiddenError("You are not a member of this project"); return project; }

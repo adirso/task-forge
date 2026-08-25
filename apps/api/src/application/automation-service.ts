@@ -18,6 +18,14 @@ export class AutomationApplicationService {
 type Trigger = "TASK_CREATED" | "TASK_UPDATED";
 const value = (task: TaskEntity, field: string): unknown => task[field as keyof TaskEntity];
 const empty = (v: unknown) => v === null || v === undefined || v === "";
+
+export class AutomationFailureError extends Error {
+  constructor(public readonly auditEvent: { projectId: string; taskId: string; actorId: string; action: string; metadata: Record<string, unknown> }, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "AutomationFailureError";
+  }
+}
+
 export class AutomationEngine {
   async apply(r: RepositorySet, context: RequestContext, before: TaskEntity | null, after: TaskEntity, trigger: Trigger) {
     if (!r.automations) return after;
@@ -27,7 +35,30 @@ export class AutomationEngine {
       if (!rule.enabled || rule.trigger !== trigger || !this.actorMatches(rule, context) || !rule.conditions.every((c) => this.condition(c, before ? value(before, c.field) : undefined, value(current, c.field)))) continue;
       const patch: Record<string, unknown> = {};
       for (const action of rule.actions) patch[action.field] = action.valueType === "actor" ? context.actor.userId : action.valueType === "null" ? null : action.valueType === "static" ? action.value : action.value;
-      if (Object.keys(patch).length) current = await r.tasks.update(current.id, patch);
+      if (Object.keys(patch).length) {
+        try {
+          current = await r.tasks.update(current.id, patch);
+          await r.activity.record({
+            projectId: current.projectId,
+            taskId: current.id,
+            actorId: context.actor.userId,
+            action: "automation.applied",
+            metadata: { automationId: rule.id, trigger, patch },
+          });
+        } catch (error) {
+          throw new AutomationFailureError({
+            projectId: after.projectId,
+            taskId: after.id,
+            actorId: context.actor.userId,
+            action: "automation.failed",
+            metadata: {
+              automationId: rule.id,
+              trigger,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          }, error);
+        }
+      }
     }
     return current;
   }

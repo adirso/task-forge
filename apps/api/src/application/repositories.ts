@@ -185,5 +185,5 @@ export interface RepositorySet {
 }
 
 export interface UnitOfWork {
-  run<T>(work: (repositories: RepositorySet) => Promise<T>): Promise<T>;
+  run<T>(work: (repositories: RepositorySet) => Promise<T>, onError?: (error: unknown) => Promise<void> | void): Promise<T>;
 }
