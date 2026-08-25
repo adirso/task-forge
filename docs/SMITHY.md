@@ -10,8 +10,9 @@ Copy `apps/smithy/.env.example` to a private env file and fill in the agent webh
 export TASKFORGE_API_URL=http://127.0.0.1:4000
 export SMITHY_PORT=4500
 export SMITHY_PROVIDERS='{
-  "claude": {"cmd":"claude -p {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."},
-  "codex": {"cmd":"codex exec {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."}
+  "claude": {"cmd":"claude -p --permission-mode auto {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."},
+  "codex": {"cmd":"codex exec --approve-for-me {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."},
+  "cursor": {"cmd":"cursor-agent -p --force --trust {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."}
 }'
 ```
 

@@ -5,9 +5,10 @@ import { defaultEnvFile, readProviders, writeProviders, type SmithyProviderValue
 
 const labels = ["claude", "codex", "cursor", "other"] as const;
 const defaultCommands: Record<string, string> = {
-  claude: "claude -p {prompt}",
-  codex: "codex exec {prompt}",
-  cursor: "cursor {prompt}",
+  // These are headless-safe defaults for Smithy's isolated worktrees.
+  claude: "claude -p --permission-mode auto {prompt}",
+  codex: "codex exec --approve-for-me {prompt}",
+  cursor: "cursor-agent -p --force --trust {prompt}",
 };
 
 function option(args: string[], name: string): string | undefined {
