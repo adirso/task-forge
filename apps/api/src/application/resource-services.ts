@@ -52,7 +52,32 @@ export class PhaseApplicationService implements PhaseService {
   async list(context: ProjectContext) { await this.unitOfWork.run((repositories) => projectAccess(repositories, context, context.projectId)); return this.unitOfWork.run((repositories) => repositories.phases.list(context.projectId)); }
   async create(context: ProjectContext, input: { number: number; goal: string; isActive: boolean }) { return this.unitOfWork.run(async (repositories) => { await projectAccess(repositories, context, context.projectId); const phases = await repositories.phases.list(context.projectId); if (phases.some((phase) => phase.number === input.number)) throw new ConflictError(`Phase number ${input.number} is already in use`); if (input.isActive) await repositories.phases.deactivateOthers(context.projectId); const now = this.now(); const phase: PhaseEntity = { ...input, id: this.newId(), projectId: context.projectId, createdAt: now, updatedAt: now }; return repositories.phases.create(phase); }); }
   async update(context: RequestContext, phaseId: string, input: Partial<Pick<PhaseEntity, "number" | "goal" | "isActive">>) { return this.unitOfWork.run(async (repositories) => { const existing = await repositories.phases.findById(phaseId); if (!existing) throw new NotFoundError("Phase"); await projectAccess(repositories, context, existing.projectId); const phases = await repositories.phases.list(existing.projectId); if (input.number !== undefined && phases.some((phase) => phase.id !== phaseId && phase.number === input.number)) throw new ConflictError(`Phase number ${input.number} is already in use`); if (existing.isActive && input.isActive === false) throw new ValidationError("A project must have an active phase"); if (input.isActive) await repositories.phases.deactivateOthers(existing.projectId, phaseId); return repositories.phases.update(phaseId, input); }); }
-  async delete(context: RequestContext, phaseId: string) { return this.unitOfWork.run(async (repositories) => { const existing = await repositories.phases.findById(phaseId); if (!existing) throw new NotFoundError("Phase"); await projectAccess(repositories, context, existing.projectId); const phases = await repositories.phases.list(existing.projectId); const replacement = existing.isActive ? phases.filter((phase) => phase.id !== phaseId).sort((a, b) => b.number - a.number)[0] : undefined; if (replacement) { await repositories.phases.deactivateOthers(existing.projectId); await repositories.phases.update(replacement.id, { isActive: true }); } await repositories.phases.delete(phaseId); }); }
+  async delete(context: RequestContext, phaseId: string, options: { taskAction?: "move" | "delete"; targetPhaseId?: string } = {}) {
+    return this.unitOfWork.run(async (repositories) => {
+      const existing = await repositories.phases.findById(phaseId);
+      if (!existing) throw new NotFoundError("Phase");
+      await projectAccess(repositories, context, existing.projectId);
+      const taskCount = await repositories.tasks.countByPhase(phaseId);
+      if (taskCount > 0) {
+        if (!options.taskAction) throw new ValidationError("Choose whether to move or delete this phase's tasks");
+        if (options.taskAction === "move") {
+          if (!options.targetPhaseId) throw new ValidationError("Choose a phase to move tasks into");
+          const target = await repositories.phases.findById(options.targetPhaseId);
+          if (!target || target.projectId !== existing.projectId || target.id === phaseId) throw new ValidationError("Tasks can only be moved to another phase in this project");
+          await repositories.tasks.reassignPhase(phaseId, target.id);
+        } else {
+          await repositories.tasks.deleteByPhase(phaseId);
+        }
+      }
+      const phases = await repositories.phases.list(existing.projectId);
+      const replacement = existing.isActive ? phases.filter((phase) => phase.id !== phaseId).sort((a, b) => b.number - a.number)[0] : undefined;
+      if (replacement) {
+        await repositories.phases.deactivateOthers(existing.projectId);
+        await repositories.phases.update(replacement.id, { isActive: true });
+      }
+      await repositories.phases.delete(phaseId);
+    });
+  }
 }
 
 export class UserApplicationService implements UserService {

@@ -3,9 +3,9 @@ import { z } from "zod";
 export const userKindSchema = z.enum(["HUMAN", "AGENT"]);
 export const userRoleSchema = z.enum(["ADMIN", "MEMBER"]);
 export const projectMemberRoleSchema = z.enum(["OWNER", "MEMBER"]);
-export const TASK_STATUSES = ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED", "APPROVED", "RE_REVIEW", "FIX_NEEDED", "PENDING_DECISION", "FAILED"] as const;
-export const DEFAULT_PROJECT_STATUSES = ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"] as const;
-export const TASK_CLAIM_SOURCE_STATUSES = ["BACKLOG", "TODO", "READY_FOR_DEV"] as const;
+export const TASK_STATUSES = ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED", "APPROVED", "RE_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "PENDING_DECISION", "FAILED"] as const;
+export const DEFAULT_PROJECT_STATUSES = ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"] as const;
+export const TASK_CLAIM_SOURCE_STATUSES = ["BACKLOG", "TODO"] as const;
 export const TASK_CLAIM_TARGET_STATUS = "IN_PROGRESS" as const;
 export const TASK_REVIEW_STATUSES = ["READY_FOR_REVIEW", "IN_REVIEW", "RE_REVIEW"] as const;
 export const TASK_COMPLETION_STATUS = "DONE" as const;
@@ -56,6 +56,18 @@ export const phaseCreateSchema = z.object({
 });
 
 export const phaseUpdateSchema = phaseCreateSchema.partial();
+
+export const phaseDeleteSchema = z.object({
+  taskAction: z.enum(["move", "delete"]).optional(),
+  targetPhaseId: z.string().uuid().optional(),
+}).superRefine((value, context) => {
+  if (value.taskAction === "move" && !value.targetPhaseId) {
+    context.addIssue({ code: "custom", path: ["targetPhaseId"], message: "Choose a phase to move tasks into" });
+  }
+  if (value.targetPhaseId && value.taskAction !== "move") {
+    context.addIssue({ code: "custom", path: ["taskAction"], message: "taskAction must be move when targetPhaseId is set" });
+  }
+});
 
 export const taskCreateSchema = z.object({
   title: z.string().trim().min(1).max(240),

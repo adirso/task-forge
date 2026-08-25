@@ -225,7 +225,7 @@ test("runner leaves task transitions to the assigned agent and explains the work
   const statusUpdates: string[] = [];
   let prompt = "";
   const api = { request: async (path: string, init?: RequestInit) => {
-    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["BACKLOG", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW"] }, task: { ...event.task, status: "BACKLOG" } };
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["BACKLOG", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW"] }, task: { ...event.task, status: "BACKLOG" } };
     if (path.includes("/api/tasks/") && init?.method === "PATCH") statusUpdates.push(String(init.body));
     if (path.endsWith("/runs")) return { run: { id: "run-backlog" } };
     return {};
@@ -237,7 +237,7 @@ test("runner leaves task transitions to the assigned agent and explains the work
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(statusUpdates, []);
   assert.match(prompt, /Smithy never changes the task status/);
-  assert.match(prompt, /Enabled workflow statuses: BACKLOG, READY_FOR_DEV, IN_PROGRESS, READY_FOR_REVIEW/);
+  assert.match(prompt, /Enabled workflow statuses: BACKLOG, TODO, IN_PROGRESS, READY_FOR_REVIEW/);
   assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"IN_PROGRESS","runId":"run-backlog"\}/);
   assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"READY_FOR_REVIEW","runId":"run-backlog"\}/);
 });

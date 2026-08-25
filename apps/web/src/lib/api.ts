@@ -144,7 +144,6 @@ function mockDashboardSummary(): DashboardSummary {
         BACKLOG: byStatus("BACKLOG").length,
         REFINING: byStatus("REFINING").length,
         TODO: byStatus("TODO").length,
-        READY_FOR_DEV: byStatus("READY_FOR_DEV").length,
         IN_PROGRESS: byStatus("IN_PROGRESS").length,
         READY_FOR_REVIEW: byStatus("READY_FOR_REVIEW").length,
         IN_REVIEW: byStatus("IN_REVIEW").length,
@@ -153,6 +152,7 @@ function mockDashboardSummary(): DashboardSummary {
         APPROVED: byStatus("APPROVED").length,
         RE_REVIEW: byStatus("RE_REVIEW").length,
         FIX_NEEDED: byStatus("FIX_NEEDED").length,
+        FIX_IN_PROGRESS: byStatus("FIX_IN_PROGRESS").length,
         PENDING_DECISION: byStatus("PENDING_DECISION").length,
         FAILED: byStatus("FAILED").length,
         total: mockTasks.length,
@@ -364,7 +364,7 @@ export const api = {
   deleteAutomation: (id: string) => request<void>(`/automations/${id}`, { method: "DELETE" }),
   createPhase: (projectId: string, input: { number: number; goal: string; isActive: boolean }) => request<{ phase: Phase }>(`/projects/${projectId}/phases`, { method: "POST", body: input }),
   updatePhase: (id: string, input: Partial<{ number: number; goal: string; isActive: boolean }>) => request<{ phase: Phase }>(`/phases/${id}`, { method: "PATCH", body: input }),
-  deletePhase: (id: string) => request<void>(`/phases/${id}`, { method: "DELETE" }),
+  deletePhase: (id: string, input?: { taskAction?: "move" | "delete"; targetPhaseId?: string }) => request<void>(`/phases/${id}`, { method: "DELETE", body: input ?? {} }),
   createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
   updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"] }) =>

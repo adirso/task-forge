@@ -19,8 +19,9 @@ import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
 import { AutomationManager } from "./components/AutomationManager";
 import { ProjectDashboard } from "./components/ProjectDashboard";
 import { DashboardPage } from "./components/DashboardPage";
+import { MultiFilterDropdown } from "./components/MultiFilterDropdown";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
-import { statusMeta } from "./lib/ui";
+import { priorityMeta, statusMeta } from "./lib/ui";
 
 type DefaultView = "board" | "list";
 type View = DefaultView | "dashboard" | "phases" | "automations";
@@ -36,12 +37,13 @@ export default function App() {
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [view, setView] = useState<View>(() => localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board");
   const [query, setQuery] = useState("");
-  const [assigneeFilter, setAssigneeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("");
-  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "">("");
-  const [tagFilter, setTagFilter] = useState("");
+  const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<TaskStatus[]>([]);
+  const [priorityFilter, setPriorityFilter] = useState<TaskPriority[]>([]);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [estimateMin, setEstimateMin] = useState("");
   const [estimateMax, setEstimateMax] = useState("");
+  const [includeUnestimated, setIncludeUnestimated] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus | null>(null);
   const [showProjectModal, setShowProjectModal] = useState(false);
@@ -68,7 +70,7 @@ export default function App() {
 
   const loadProject = useCallback(async (id: string, phaseRef?: string | null) => {
     const [{ project }, taskData, phaseData, tagData] = await Promise.all([api.project(id), api.tasks(id), api.phases(id), api.tags(id)]);
-    setCurrentProject(project); setTasks(taskData.tasks); setPhases(phaseData.phases); setTags(tagData.tags); setTagFilter("");
+    setCurrentProject(project); setTasks(taskData.tasks); setPhases(phaseData.phases); setTags(tagData.tags); setTagFilter([]);
     setBoardPhaseId(resolveBoardPhase(phaseData.phases, phaseRef)?.id ?? null);
     return { project, tasks: taskData.tasks, phases: phaseData.phases };
   }, []);
@@ -152,24 +154,33 @@ export default function App() {
   const visibleTasks = useMemo(() => tasks.filter((task) => {
     const matchesQuery = !query || `${task.title} ${task.description} ${task.tags.map((tag) => tag.name).join(" ")} ${currentProject?.key}-${task.number}`.toLowerCase().includes(query.toLowerCase());
     const estimate = task.estimatePoints;
-    return matchesQuery && (!assigneeFilter || task.assigneeId === assigneeFilter)
-      && (!statusFilter || task.status === statusFilter) && (!priorityFilter || task.priority === priorityFilter)
-      && (!tagFilter || task.tags.some((tag) => tag.id === tagFilter))
-      && (!estimateMin || (estimate !== null && estimate >= Number(estimateMin)))
-      && (!estimateMax || (estimate !== null && estimate <= Number(estimateMax)));
-  }), [tasks, query, assigneeFilter, statusFilter, priorityFilter, tagFilter, estimateMin, estimateMax, currentProject]);
+    const hasEstimateRange = Boolean(estimateMin || estimateMax);
+    const inEstimateRange = estimate !== null
+      && (!estimateMin || estimate >= Number(estimateMin))
+      && (!estimateMax || estimate <= Number(estimateMax));
+    const matchesEstimate = !hasEstimateRange && !includeUnestimated
+      ? true
+      : ((includeUnestimated && estimate === null) || (hasEstimateRange && inEstimateRange));
+    return matchesQuery
+      && (!assigneeFilter.length || (task.assigneeId !== null && assigneeFilter.includes(task.assigneeId)))
+      && (!statusFilter.length || statusFilter.includes(task.status))
+      && (!priorityFilter.length || priorityFilter.includes(task.priority))
+      && (!tagFilter.length || task.tags.some((tag) => tagFilter.includes(tag.id)))
+      && matchesEstimate;
+  }), [tasks, query, assigneeFilter, statusFilter, priorityFilter, tagFilter, estimateMin, estimateMax, includeUnestimated, currentProject]);
 
   const activePhase = phases.find((phase) => phase.isActive) ?? null;
   const selectedBoardPhase = phases.find((phase) => phase.id === boardPhaseId) ?? activePhase;
   const boardTasks = selectedBoardPhase ? visibleTasks.filter((task) => task.phaseId === selectedBoardPhase.id) : [];
   const selectedPhaseHasTasks = selectedBoardPhase ? tasks.some((task) => task.phaseId === selectedBoardPhase.id) : false;
   const activeFilterCount = [
-    statusFilter,
-    assigneeFilter,
-    priorityFilter,
-    tagFilter,
+    statusFilter.length,
+    assigneeFilter.length,
+    priorityFilter.length,
+    tagFilter.length,
     estimateMin,
     estimateMax,
+    includeUnestimated,
   ].filter(Boolean).length;
 
   async function saveTask(input: TaskCreate) {
@@ -307,19 +318,60 @@ export default function App() {
             </button>
             <div className="toolbar-spacer" />
             <div className={`toolbar-filters${showMobileFilters ? " open" : ""}`}>
-              <div className="select-wrap"><select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as TaskStatus | "")}><option value="">All statuses</option>{currentProject.availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select><ChevronDown /></div>
-              <div className="select-wrap"><Filter /><select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)}><option value="">All assignees</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select><ChevronDown /></div>
-              <div className="select-wrap"><select aria-label="Filter by priority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as TaskPriority | "")}><option value="">All priorities</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select><ChevronDown /></div>
-              <div className="select-wrap"><TagIcon /><select aria-label="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}><option value="">All tags</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select><ChevronDown /></div>
-              <div className="estimate-filter" title="Estimated points range"><span>Points</span><input type="number" min="0" max="100" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)} placeholder="Min" aria-label="Minimum estimated points" /><i>–</i><input type="number" min="0" max="100" value={estimateMax} onChange={(e) => setEstimateMax(e.target.value)} placeholder="Max" aria-label="Maximum estimated points" /></div>
-              {(statusFilter || assigneeFilter || priorityFilter || tagFilter || estimateMin || estimateMax) && <button className="clear-filters" onClick={() => { setStatusFilter(""); setAssigneeFilter(""); setPriorityFilter(""); setTagFilter(""); setEstimateMin(""); setEstimateMax(""); }}>Clear</button>}
+              <MultiFilterDropdown
+                label="Status"
+                allLabel="All statuses"
+                options={currentProject.availableStatuses.map((status) => ({ value: status, label: statusMeta[status].label }))}
+                value={statusFilter}
+                onChange={(next) => setStatusFilter(next as TaskStatus[])}
+              />
+              <MultiFilterDropdown
+                label="Assignee"
+                allLabel="All assignees"
+                icon={<Filter />}
+                options={members.map((member) => ({ value: member.id, label: member.name }))}
+                value={assigneeFilter}
+                onChange={setAssigneeFilter}
+              />
+              <MultiFilterDropdown
+                label="Priority"
+                allLabel="All priorities"
+                options={(Object.keys(priorityMeta) as TaskPriority[]).map((priority) => ({ value: priority, label: priorityMeta[priority].label }))}
+                value={priorityFilter}
+                onChange={(next) => setPriorityFilter(next as TaskPriority[])}
+              />
+              <MultiFilterDropdown
+                label="Tags"
+                allLabel="All tags"
+                icon={<TagIcon />}
+                options={tags.map((tag) => ({ value: tag.id, label: tag.name }))}
+                value={tagFilter}
+                onChange={setTagFilter}
+              />
+              <div className="estimate-filter" title="Estimated points range">
+                <span>Points</span>
+                <input type="number" min="0" max="100" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)} placeholder="Min" aria-label="Minimum estimated points" />
+                <i>–</i>
+                <input type="number" min="0" max="100" value={estimateMax} onChange={(e) => setEstimateMax(e.target.value)} placeholder="Max" aria-label="Maximum estimated points" />
+                <label className="estimate-unestimated" title="Include tasks with no estimate">
+                  <input type="checkbox" checked={includeUnestimated} onChange={(e) => setIncludeUnestimated(e.target.checked)} />
+                  None
+                </label>
+              </div>
+              {(statusFilter.length || assigneeFilter.length || priorityFilter.length || tagFilter.length || estimateMin || estimateMax || includeUnestimated) && <button className="clear-filters" onClick={() => { setStatusFilter([]); setAssigneeFilter([]); setPriorityFilter([]); setTagFilter([]); setEstimateMin(""); setEstimateMax(""); setIncludeUnestimated(false); }}>Clear</button>}
             </div>
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
           {view === "automations" && <AutomationManager project={currentProject} users={allUsers} phases={phases} />}
           {view === "dashboard" && <ProjectDashboard project={currentProject} tasks={tasks} phases={phases} />}
           <section className={`content-area${view === "automations" ? " automations-hidden" : ""}${view === "dashboard" ? " dashboard-hidden" : ""}`}>
-            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={(updated) => { setPhases(updated); setBoardPhaseId((selectedId) => updated.some((phase) => phase.id === selectedId) ? selectedId : resolveBoardPhase(updated)?.id ?? null); setTasks((items) => items.map((task) => task.phaseId && !updated.some((phase) => phase.id === task.phaseId) ? { ...task, phaseId: null } : task)); }} /> : view === "board" ? <>{selectedBoardPhase ? <><div className={`active-phase-banner${selectedBoardPhase.isActive ? "" : " viewing-phase"}`}><span className="phase-number-badge">{selectedBoardPhase.number}</span><div className="phase-banner-copy"><span>{selectedBoardPhase.isActive ? "Active phase" : "Viewing phase"}</span><strong>Phase {selectedBoardPhase.number}</strong><p>{selectedBoardPhase.goal}</p></div><label className="board-phase-selector"><span>Board phase</span><div><select aria-label="Board phase" value={selectedBoardPhase.id} onChange={(event) => setBoardPhaseId(event.target.value)}>{[...phases].sort((a, b) => a.number - b.number).map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select><ChevronDown /></div></label><small>{boardTasks.length} {boardTasks.length === 1 ? "task" : "tasks"}</small><button className="button button-secondary" onClick={() => setView("phases")}>Manage phases</button></div>{selectedPhaseHasTasks ? <BoardView tasks={boardTasks} project={currentProject} onOpen={setSelectedTask} onCreate={setNewTaskStatus} onMove={moveTask} /> : <div className="empty-board-phase"><Flag /><strong>No tasks in Phase {selectedBoardPhase.number}</strong><span>This phase is ready for its first task.</span><button className="button button-primary" onClick={() => setNewTaskStatus(currentProject.defaultStatus)}><Plus /> Create task</button></div>}</> : <div className="no-active-phase"><Flag /><div><strong>No active phase</strong><span>Choose an active phase to populate the board.</span></div><button className="button button-primary" onClick={() => setView("phases")}>Manage phases</button></div>}</> : <ListView tasks={visibleTasks} phases={phases} project={currentProject} onOpen={setSelectedTask} />}
+            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {
+              setPhases(updated);
+              setBoardPhaseId((selectedId) => updated.some((phase) => phase.id === selectedId) ? selectedId : resolveBoardPhase(updated)?.id ?? null);
+              if (!deletedPhaseId) return;
+              if (taskAction === "delete") setTasks((items) => items.filter((task) => task.phaseId !== deletedPhaseId));
+              else if (taskAction === "move" && targetPhaseId) setTasks((items) => items.map((task) => task.phaseId === deletedPhaseId ? { ...task, phaseId: targetPhaseId, phase: updated.find((phase) => phase.id === targetPhaseId) ?? task.phase } : task));
+            }} /> : view === "board" ? <>{selectedBoardPhase ? <><div className={`active-phase-banner${selectedBoardPhase.isActive ? "" : " viewing-phase"}`}><span className="phase-number-badge">{selectedBoardPhase.number}</span><div className="phase-banner-copy"><span>{selectedBoardPhase.isActive ? "Active phase" : "Viewing phase"}</span><strong>Phase {selectedBoardPhase.number}</strong><p>{selectedBoardPhase.goal}</p></div><label className="board-phase-selector"><span>Board phase</span><div><select aria-label="Board phase" value={selectedBoardPhase.id} onChange={(event) => setBoardPhaseId(event.target.value)}>{[...phases].sort((a, b) => a.number - b.number).map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select><ChevronDown /></div></label><small>{boardTasks.length} {boardTasks.length === 1 ? "task" : "tasks"}</small><button className="button button-secondary" onClick={() => setView("phases")}>Manage phases</button></div>{selectedPhaseHasTasks ? <BoardView tasks={boardTasks} project={currentProject} onOpen={setSelectedTask} onCreate={setNewTaskStatus} onMove={moveTask} /> : <div className="empty-board-phase"><Flag /><strong>No tasks in Phase {selectedBoardPhase.number}</strong><span>This phase is ready for its first task.</span><button className="button button-primary" onClick={() => setNewTaskStatus(currentProject.defaultStatus)}><Plus /> Create task</button></div>}</> : <div className="no-active-phase"><Flag /><div><strong>No active phase</strong><span>Choose an active phase to populate the board.</span></div><button className="button button-primary" onClick={() => setView("phases")}>Manage phases</button></div>}</> : <ListView tasks={visibleTasks} phases={phases} project={currentProject} onOpen={setSelectedTask} />}
           </section>
         </> : <DashboardPage currentUser={user} />}
       </main>

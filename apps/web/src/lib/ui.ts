@@ -5,7 +5,6 @@ export const statusMeta: Record<TaskStatus, { label: string; tone: string }> = {
   BACKLOG: { label: "Backlog", tone: "slate" },
   REFINING: { label: "Refining", tone: "teal" },
   TODO: { label: "To do", tone: "blue" },
-  READY_FOR_DEV: { label: "Ready for dev", tone: "indigo" },
   IN_PROGRESS: { label: "In progress", tone: "purple" },
   READY_FOR_REVIEW: { label: "Ready for review", tone: "orange" },
   IN_REVIEW: { label: "In review", tone: "amber" },
@@ -14,6 +13,7 @@ export const statusMeta: Record<TaskStatus, { label: string; tone: string }> = {
   APPROVED: { label: "Approved", tone: "green" },
   RE_REVIEW: { label: "Re-review", tone: "amber" },
   FIX_NEEDED: { label: "Fix needed", tone: "red" },
+  FIX_IN_PROGRESS: { label: "Fix in progress", tone: "purple" },
   PENDING_DECISION: { label: "Pending decision", tone: "orange" },
   FAILED: { label: "Failed", tone: "red" },
 };

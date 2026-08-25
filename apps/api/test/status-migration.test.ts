@@ -36,7 +36,7 @@ after(async () => {
 
 test("legacy SQLite status checks migrate without losing tasks", async () => {
   const project = await db.prepare("SELECT available_statuses, default_status FROM projects WHERE id = ?").get("project-1");
-  assert.deepEqual(JSON.parse(String(project?.available_statuses)), ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
+  assert.deepEqual(JSON.parse(String(project?.available_statuses)), ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
   assert.equal(project?.default_status, "TODO");
   assert.equal((await db.prepare("SELECT title FROM tasks WHERE id = ?").get("task-1"))?.title, "Legacy task");
   assert.equal((await db.prepare("SELECT body FROM task_updates WHERE task_id = ?").get("task-1"))?.body, "Keep this note");
@@ -44,6 +44,9 @@ test("legacy SQLite status checks migrate without losing tasks", async () => {
   await db.prepare("INSERT INTO tasks (id, project_id, number, title, status, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
     .run("task-2", "project-1", 2, "New status task", "READY_FOR_REVIEW", "user-1", "2026-01-02T00:00:00.000Z", "2026-01-02T00:00:00.000Z");
   assert.equal((await db.prepare("SELECT status FROM tasks WHERE id = ?").get("task-2"))?.status, "READY_FOR_REVIEW");
+  await db.prepare("INSERT INTO tasks (id, project_id, number, title, status, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run("task-3", "project-1", 3, "Fix status task", "FIX_IN_PROGRESS", "user-1", "2026-01-03T00:00:00.000Z", "2026-01-03T00:00:00.000Z");
+  assert.equal((await db.prepare("SELECT status FROM tasks WHERE id = ?").get("task-3"))?.status, "FIX_IN_PROGRESS");
   const taskIndexes = new Set((await db.prepare("PRAGMA index_list(tasks)").all()).map((index) => String(index.name)));
   const updateIndexes = new Set((await db.prepare("PRAGMA index_list(task_updates)").all()).map((index) => String(index.name)));
   assert.ok(taskIndexes.has("idx_tasks_project_page"));
