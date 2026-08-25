@@ -748,3 +748,20 @@ test("agent logs are paginated, ordered, redacted, and idempotent", async () => 
   const next = await app.inject({ method: "GET", url: `/api/tasks/${taskId}/agent-logs?limit=2&cursor=${encodeURIComponent(page.json().page.nextCursor)}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.deepEqual(next.json().agentLogs.map((log: { sequence: number }) => log.sequence), [1]);
 });
+
+test("agent observability API exposes run health fields alongside logs", async () => {
+  const timeoutAt = new Date(Date.now() + 120_000).toISOString();
+  const created = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION", timeoutAt } });
+  assert.equal(created.statusCode, 201, created.body);
+  const run = created.json().run as { id: string; status: string; heartbeatAt: string | null; leaseExpiresAt: string | null; timeoutAt: string | null };
+  assert.equal(run.status, "PENDING");
+  assert.equal(run.heartbeatAt, null);
+  assert.equal(run.leaseExpiresAt, null);
+  assert.equal(run.timeoutAt, timeoutAt);
+  const listed = await app.inject({ method: "GET", url: `/api/tasks/${taskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(listed.statusCode, 200);
+  assert.ok(listed.json().runs.some((candidate: { id: string }) => candidate.id === run.id));
+  const logs = await app.inject({ method: "GET", url: `/api/tasks/${taskId}/agent-logs?limit=1`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(logs.statusCode, 200);
+  assert.equal(typeof logs.json().page.hasMore, "boolean");
+});

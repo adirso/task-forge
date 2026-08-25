@@ -8,6 +8,7 @@ import { SendToAI } from "./SendToAI";
 import type { AIPromptMode } from "../lib/aiPrompt";
 import { TaskTagEditor } from "./TaskTags";
 import { TaskDependencyEditor } from "./TaskDependencies";
+import { formatAge, formatCountdown, getRunHealth, latestRunLog, runIsWaitingForInput, runLogs } from "../lib/runObservability";
 
 export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete }: {
   task: Task | null; initialStatus: TaskStatus; defaultPhaseId: string | null; project: Project; currentUser: User; members: User[]; phases: Phase[]; availableTags: Tag[]; tasks: Task[];
@@ -27,18 +28,24 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [attachments, setAttachments] = useState<Attachment[]>(task?.attachments ?? []);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [observedAt, setObservedAt] = useState(() => Date.now());
 
   useEffect(() => {
     if (task) {
       setForm({ title: task.title, description: task.description, definitionOfDone: task.definitionOfDone, status: task.status, priority: task.priority, type: task.type, assigneeId: task.assigneeId, parentId: task.parentId, branch: task.branch, dueDate: task.dueDate, estimatePoints: task.estimatePoints, phaseId: task.phaseId, pullRequestUrl: task.pullRequestUrl, pullRequestTitle: task.pullRequestTitle, pullRequestState: task.pullRequestState, tags: task.tags.map((tag) => tag.name), dependencyIds: task.dependencies.map((dependency) => dependency.dependsOnTaskId) });
-      api.taskUpdates(task.id).then(({ updates: taskUpdates }) => setUpdates(taskUpdates)).catch(() => setUpdates([]));
+      const refreshObservability = async () => {
+        const [updatesResult, runsResult, logsResult] = await Promise.allSettled([api.taskUpdates(task.id), api.taskRuns(task.id), api.taskAgentLogs(task.id)]);
+        if (updatesResult.status === "fulfilled") setUpdates(updatesResult.value.updates);
+        if (runsResult.status === "fulfilled") setRuns(runsResult.value.runs);
+        if (logsResult.status === "fulfilled") setAgentLogs(logsResult.value.agentLogs);
+        setObservedAt(Date.now());
+      };
       api.taskAttachments(task.id).then(({ attachments: taskAttachments }) => setAttachments(taskAttachments)).catch(() => setAttachments(task.attachments ?? []));
       api.taskActivity(task.id).then(({ activity: events }) => setActivity(events)).catch(() => setActivity([]));
-      const refreshRuns = () => api.taskRuns(task.id).then(({ runs: taskRuns }) => setRuns(taskRuns)).catch(() => setRuns([]));
-      api.taskAgentLogs(task.id).then(({ agentLogs: logs }) => setAgentLogs(logs)).catch(() => setAgentLogs([]));
-      void refreshRuns();
-      const timer = window.setInterval(refreshRuns, 5000);
-      return () => window.clearInterval(timer);
+      void refreshObservability();
+      const timer = window.setInterval(() => { void refreshObservability(); }, 5000);
+      const clock = window.setInterval(() => setObservedAt(Date.now()), 1000);
+      return () => { window.clearInterval(timer); window.clearInterval(clock); };
     } else { setUpdates([]); setAttachments([]); setActivity([]); setRuns([]); setAgentLogs([]); }
   }, [task]);
 
@@ -111,13 +118,14 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
           </aside>
         </div>
         {task && <section className="task-updates">
-          <div className="section-heading"><span>Updates <b>{updates.length}</b></span></div>
+          <div className="section-heading"><span>Updates <b>{updates.length}</b></span><small>{latestTaskActivity(updates, runs, agentLogs, observedAt)}</small></div>
           <div className="update-composer"><Avatar user={currentUser} size="md" /><textarea value={updateBody} onChange={(e) => setUpdateBody(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void postUpdate(); } }} rows={2} placeholder="Share progress, a decision, or a blocker…" /><button type="button" className="button button-primary" disabled={!updateBody.trim() || postingUpdate} onClick={postUpdate}><Send /> {postingUpdate ? "Posting…" : "Post update"}</button></div>
+          {latestProviderLog(agentLogs) && <div className="task-provider-progress"><Terminal /><span><strong>Live provider progress</strong><small>{latestProviderLog(agentLogs)!.provider} · {latestProviderLog(agentLogs)!.stream} · #{latestProviderLog(agentLogs)!.sequence}</small><pre>{latestProviderLog(agentLogs)!.content}</pre></span></div>}
           <div className="update-list">{updates.length ? updates.map((update) => <article className="task-update" key={update.id}><Avatar user={update.author} size="md" /><div><header><strong>{update.author.name}{update.author.kind === "AGENT" && <em>Agent</em>}</strong><time>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(update.createdAt))}</time></header><p>{update.body}</p></div></article>) : <p className="updates-empty">No updates yet. Add the first progress note above.</p>}</div>
         </section>}
         {task && <section className="task-runs">
-          <div className="section-heading"><span>Agent runs <b>{runs.length}</b></span><small>{runs.some((run) => run.status === "RUNNING" || run.status === "PENDING") ? "Refreshing" : ""}</small></div>
-          {runs.length ? <div className="run-list">{runs.map((run) => <article className="run-item" key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{run.timeoutAt && <span>Timeout {formatDate(run.timeoutAt)}</span>}</div>{run.lastError && <p className="run-error">{run.lastError}</p>}</article>)}</div> : <p className="runs-empty">No agent runs yet.</p>}
+          <div className="section-heading"><span>Agent runs <b>{runs.length}</b></span><small>{runs.some((run) => run.status === "RUNNING" || run.status === "PENDING") ? "Live · refreshes every 5s" : ""}</small></div>
+          {runs.length ? <div className="run-list">{runs.map((run) => { const health = getRunHealth(run, observedAt); const lastLog = latestRunLog(agentLogs, run.id); const timeline = runLogs(agentLogs, run.id); const timeout = formatCountdown(run.timeoutAt, observedAt); return <article className={`run-item${health.stale ? " is-stale" : ""}`} key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><span className={`run-health run-health-${health.kind.toLowerCase()}`}>{health.label}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-health-detail">{health.detail}{runIsWaitingForInput(lastLog) && <b className="run-waiting">Waiting for provider input</b>}</div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{timeout && <span>Timeout {timeout}</span>}</div>{timeline.length > 0 && <div className="run-output-timeline" aria-label={`${run.kind} provider response timeline`}><small>Provider response timeline · {timeline.length} event{timeline.length === 1 ? "" : "s"}</small>{timeline.slice().reverse().map((log) => <div className="run-timeline-entry" key={log.id}><span>#{log.sequence} · {log.stream}</span><pre>{log.content}</pre></div>)}</div>}{run.lastError && <p className="run-error">{run.lastError}</p>}</article>; })}</div> : <p className="runs-empty">No agent runs yet.</p>}
         </section>}
         {task && <section className="task-agent-logs">
           <div className="section-heading"><span><Terminal /> Agent logs <b>{agentLogs.length}</b></span><small>Provider output and callbacks</small></div>
@@ -164,3 +172,13 @@ function formatDuration(seconds: number) {
 }
 
 function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(value)); }
+
+function latestTaskActivity(updates: TaskNote[], runs: AgentRun[], logs: AgentLog[], now: number): string {
+  const timestamps = [...updates.map((item) => Date.parse(item.createdAt)), ...runs.map((item) => Date.parse(item.updatedAt)), ...logs.map((item) => Date.parse(item.createdAt))].filter(Number.isFinite);
+  if (!timestamps.length) return "No provider activity yet";
+  return `Last activity ${formatAge(Math.max(0, now - Math.max(...timestamps)))} ago`;
+}
+
+function latestProviderLog(logs: AgentLog[]): AgentLog | null {
+  return logs.slice().sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.sequence - a.sequence)[0] ?? null;
+}
