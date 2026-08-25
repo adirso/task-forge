@@ -161,8 +161,9 @@ test("projects configure available statuses and the default API status", async (
   const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "STS", name: "Status project", description: "Custom status coverage", color: "#00A3BF" } });
   assert.equal(created.statusCode, 201, created.body);
   const statusProject = created.json().project;
-  assert.deepEqual(statusProject.availableStatuses, ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
+  assert.deepEqual(statusProject.availableStatuses, ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED", "APPROVED", "RE_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "PENDING_DECISION", "FAILED"]);
   assert.equal(statusProject.defaultStatus, "TODO");
+  assert.equal(statusProject.agentWorkflow.implementationQueue, "TODO");
 
   const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
   assert.equal(memberLogin.statusCode, 200, memberLogin.body);
@@ -183,6 +184,12 @@ test("projects configure available statuses and the default API status", async (
   assert.deepEqual(configured.json().project.availableStatuses, ["REFINING", "READY_FOR_REVIEW", "CANCELLED"]);
   assert.equal(configured.json().project.defaultStatus, "REFINING");
 
+  const unavailableWorkflow = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: {
+    agentWorkflow: { implementationQueue: "TODO", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "FIX_IN_PROGRESS", reReview: "RE_REVIEW" },
+  } });
+  assert.equal(unavailableWorkflow.statusCode, 400, unavailableWorkflow.body);
+  assert.match(unavailableWorkflow.json().error, /Enable these statuses before assigning workflow roles/);
+
   const defaulted = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Uses project default" } });
   assert.equal(defaulted.statusCode, 201, defaulted.body);
   assert.equal(defaulted.json().task.status, "REFINING");
@@ -197,6 +204,17 @@ test("projects configure available statuses and the default API status", async (
   const statusInUse = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["READY_FOR_REVIEW", "CANCELLED"], defaultStatus: "READY_FOR_REVIEW" } });
   assert.equal(statusInUse.statusCode, 400, statusInUse.body);
   assert.match(statusInUse.json().error, /Move tasks out of REFINING/);
+
+  const clearedWorkflow = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { agentWorkflow: null } });
+  assert.equal(clearedWorkflow.statusCode, 200, clearedWorkflow.body);
+  assert.equal(clearedWorkflow.json().project.agentWorkflow, null);
+  const enabledWorkflow = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/agent-workflow/enable`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(enabledWorkflow.statusCode, 200, enabledWorkflow.body);
+  assert.equal(enabledWorkflow.json().project.agentWorkflow.approved, "APPROVED");
+  assert.ok(enabledWorkflow.json().project.availableStatuses.includes("FIX_IN_PROGRESS"));
+  const memberEnable = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/agent-workflow/enable`, headers: { authorization: `Bearer ${memberLogin.json().token}` } });
+  assert.equal(memberEnable.statusCode, 403, memberEnable.body);
+  assert.match(memberEnable.json().error, /project owner or an administrator/);
   const removed = await app.inject({ method: "DELETE", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(removed.statusCode, 204, removed.body);
 });

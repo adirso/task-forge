@@ -15,6 +15,27 @@ export const projectAvailableStatusesSchema = z.array(taskStatusSchema)
   .max(TASK_STATUSES.length)
   .refine((statuses) => new Set(statuses).size === statuses.length, "Statuses must be unique")
   .transform((statuses) => TASK_STATUSES.filter((status) => statuses.includes(status)));
+export const agentWorkflowSchema = z.object({
+  implementationQueue: taskStatusSchema,
+  implementationStart: taskStatusSchema,
+  reviewHandoff: taskStatusSchema,
+  reviewStart: taskStatusSchema,
+  approved: taskStatusSchema,
+  fixNeeded: taskStatusSchema,
+  fixStart: taskStatusSchema,
+  reReview: taskStatusSchema,
+});
+export type AgentWorkflow = z.infer<typeof agentWorkflowSchema>;
+export const DEFAULT_AGENT_WORKFLOW: AgentWorkflow = {
+  implementationQueue: "TODO",
+  implementationStart: "IN_PROGRESS",
+  reviewHandoff: "READY_FOR_REVIEW",
+  reviewStart: "IN_REVIEW",
+  approved: "APPROVED",
+  fixNeeded: "FIX_NEEDED",
+  fixStart: "FIX_IN_PROGRESS",
+  reReview: "RE_REVIEW",
+};
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const taskTypeSchema = z.enum(["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
@@ -46,6 +67,7 @@ export const projectCreateSchema = z.object({
 export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).partial().extend({
   availableStatuses: projectAvailableStatusesSchema.optional(),
   defaultStatus: taskStatusSchema.optional(),
+  agentWorkflow: agentWorkflowSchema.nullable().optional(),
 });
 export const projectOrderSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(500) });
 
@@ -236,6 +258,7 @@ export interface Project {
   sortOrder: number;
   availableStatuses: TaskStatus[];
   defaultStatus: TaskStatus;
+  agentWorkflow: AgentWorkflow | null;
   ownerId: string;
   createdAt: string;
   updatedAt: string;

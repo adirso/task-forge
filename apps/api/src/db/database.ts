@@ -561,6 +561,14 @@ export const migrations: readonly Migration[] = [
       if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = ON", []);
     },
   },
+  {
+    version: "0017_project_agent_workflow",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE projects ADD COLUMN agent_workflow JSON NULL"
+        : "ALTER TABLE projects ADD COLUMN agent_workflow TEXT NULL", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

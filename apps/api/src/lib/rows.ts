@@ -1,4 +1,4 @@
-import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, type Project, type Tag, type Task, type TaskDependency, type User } from "@taskforge/contracts";
+import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentWorkflowSchema, type Project, type Tag, type Task, type TaskDependency, type User } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 
 type Row = Record<string, unknown>;
@@ -23,6 +23,10 @@ export function toProject(row: Row): Project {
     if (selected.length) availableStatuses = selected;
   } catch { /* Legacy projects use the shipped default subset. */ }
   const configuredDefault = String(row.default_status ?? "TODO") as Project["defaultStatus"];
+  let agentWorkflow: Project["agentWorkflow"] = null;
+  if (row.agent_workflow) {
+    try { const parsed = agentWorkflowSchema.safeParse(JSON.parse(String(row.agent_workflow))); if (parsed.success) agentWorkflow = parsed.data; } catch { /* Invalid legacy configuration remains disabled. */ }
+  }
   return {
     id: String(row.id),
     key: String(row.key),
@@ -34,6 +38,7 @@ export function toProject(row: Row): Project {
     sortOrder: Number(row.sort_order ?? 0),
     availableStatuses,
     defaultStatus: availableStatuses.includes(configuredDefault) ? configuredDefault : availableStatuses[0]!,
+    agentWorkflow,
     ownerId: String(row.owner_id),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),

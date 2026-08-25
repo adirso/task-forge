@@ -65,27 +65,34 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
   const attachmentsEndpoint = `${taskEndpoint}/attachments`;
   const repository = project.repoUrl?.trim() || "Not configured in TaskForge. Use the repository/workspace supplied by the operator; do not guess a repository.";
   const enabledStatuses = new Set(project.availableStatuses);
-  const reviewStatus = TASK_REVIEW_STATUSES.find((status) => enabledStatuses.has(status));
+  const workflow = project.agentWorkflow;
+  const implementationStart = workflow?.implementationStart ?? TASK_CLAIM_TARGET_STATUS;
+  const reviewHandoff = workflow?.reviewHandoff ?? TASK_REVIEW_STATUSES.find((status) => enabledStatuses.has(status));
+  const reviewStart = workflow?.reviewStart ?? reviewHandoff;
+  const fixNeeded = workflow?.fixNeeded ?? "FIX_NEEDED";
+  const fixStart = workflow?.fixStart ?? TASK_CLAIM_TARGET_STATUS;
+  const reReview = workflow?.reReview ?? "RE_REVIEW";
+  const approved = workflow?.approved ?? "APPROVED";
   const readOnlyMode = mode === "REVIEW" || mode === "RE_REVIEW";
   const startInstruction = readOnlyMode
-    ? mode === "RE_REVIEW" && enabledStatuses.has("RE_REVIEW")
-      ? `- Re-review mode is read-only: do not start implementation or PATCH ${taskEndpoint} to ${TASK_CLAIM_TARGET_STATUS}. If the workflow requires entering re-review, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status RE_REVIEW; otherwise leave the current status unchanged.`
-      : reviewStatus
-        ? `- Review mode is read-only: do not start implementation or PATCH ${taskEndpoint} to ${TASK_CLAIM_TARGET_STATUS}. If the workflow requires entering review, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reviewStatus}; otherwise leave the current status unchanged.`
+      ? mode === "RE_REVIEW" && enabledStatuses.has(reReview)
+      ? `- Re-review mode is read-only: do not start implementation or PATCH ${taskEndpoint} to ${implementationStart}. If the workflow requires entering re-review, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reReview}; otherwise leave the current status unchanged.`
+      : reviewStart && enabledStatuses.has(reviewStart)
+        ? `- Review mode is read-only: do not start implementation or PATCH ${taskEndpoint} to ${implementationStart}. If the workflow requires entering review, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reviewStart}; otherwise leave the current status unchanged.`
         : `- Review mode is read-only: do not change the task status. Refresh ${contextEndpoint}; if no review status is enabled, leave the current status unchanged and report that the operator must choose the review state.`
     : mode === "FIX"
       ? existingBranch
-        ? `- Fix mode must stay on the existing branch ${existingBranch}; do not create or switch branches. Refresh ${contextEndpoint}, read the latest findings from ${updatesEndpoint} and ${agentLogsEndpoint}, then move to ${TASK_CLAIM_TARGET_STATUS} only when that enabled workflow status is the correct start state.`
+        ? `- Fix mode must stay on the existing branch ${existingBranch}; do not create or switch branches. Refresh ${contextEndpoint}, read the latest findings from ${updatesEndpoint} and ${agentLogsEndpoint}, then move to ${fixStart} only when that enabled workflow status is the correct start state.`
         : `- Fix mode requires a real task branch. No branch is configured, so stop before editing, do not invent ${branch}, and ask the operator to set the review branch in TaskForge.`
-      : enabledStatuses.has(TASK_CLAIM_TARGET_STATUS)
-      ? `- When starting, PATCH ${taskEndpoint} with status ${TASK_CLAIM_TARGET_STATUS} and branch ${branch}.`
+      : enabledStatuses.has(implementationStart)
+      ? `- When starting, PATCH ${taskEndpoint} with status ${implementationStart} and branch ${branch}.`
       : `- When starting, PATCH ${taskEndpoint} with branch ${branch} only. No dedicated work status is enabled; keep the current status until you refresh workflow context and the project owner identifies the intended enabled transition.`;
   const reviewInstruction = readOnlyMode
-    ? `- ${mode === "RE_REVIEW" ? "Re-review" : "Review"} mode does not hand off implementation or mark the task complete. Record findings and evidence, then leave approval, fixes, re-review, and merge decisions to the configured workflow and operator.`
+    ? `- ${mode === "RE_REVIEW" ? "Re-review" : "Review"} mode does not implement or merge changes. Record findings and evidence; if clean, move the task to ${approved}, otherwise use ${fixNeeded} for the requested fixes.`
     : mode === "FIX"
-      ? `- Resolve every finding from the latest human updates and agent logs, add tests for each fix, and move the task to ${reviewStatus ?? "the enabled review status discovered from workflow context"} when ready for another review. Do not mark the task approved or done.`
-    : reviewStatus
-      ? `- Move the task to ${reviewStatus} when review is required.`
+      ? `- Resolve every finding from the latest human updates and agent logs, add tests for each fix, and move the task to ${reReview} when ready for another review. Do not mark the task approved or done.`
+    : reviewHandoff
+      ? `- Move the task to ${reviewHandoff} when review is required.`
       : `- Before requesting review, refresh ${contextEndpoint} to discover the current workflow. If no review status is enabled, keep the status unchanged and ask the project owner which enabled status to use.`;
   const completionInstruction = readOnlyMode || mode === "FIX"
     ? `- ${mode === "FIX" ? "Fix work" : "Review completion"} means findings and validation evidence are reported; do not move the task to a completion status from this prompt.`

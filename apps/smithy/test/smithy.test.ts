@@ -221,6 +221,22 @@ test("runner processes a status event when context is still at the previous stat
   assert.ok(calls.some((path) => path.endsWith("/runs")));
 });
 
+test("legacy projects do not interpret IN_PROGRESS as a fix run", async () => {
+  const calls: string[] = [];
+  const api = { request: async (path: string) => {
+    calls.push(path);
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: { ...event.task, status: "IN_PROGRESS" } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { throw new Error("must not execute"); }, () => 1_700_000_000_000);
+  const statusEvent = { ...event, id: "event-legacy-in-progress", event: "task.status_changed", previousStatus: "TODO", task: { ...event.task, status: "IN_PROGRESS" } };
+  const body = JSON.stringify(statusEvent);
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  assert.equal((await runner.handle("claude", headers, body)).status, 202);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.some((path) => path.endsWith("/runs")), false);
+});
+
 test("runner leaves task transitions to the assigned agent and explains the workflow", async () => {
   const statusUpdates: string[] = [];
   let prompt = "";
@@ -260,6 +276,32 @@ test("runner gives fix and re-review jobs focused, status-aware prompts", async 
     assert.match(prompt, /\/api\/tasks\/00000000-0000-4000-8000-000000000064\/agent-logs/);
     assert.match(prompt, /Enabled workflow statuses/);
   }
+});
+
+test("runner uses the project workflow mapping and ignores ordinary updates", async () => {
+  let prompt = "";
+  const calls: string[] = [];
+  const workflow = { implementationQueue: "QUEUE", implementationStart: "BUILDING", reviewHandoff: "HANDOFF", reviewStart: "REVIEWING", approved: "APPROVED", fixNeeded: "CHANGES", fixStart: "FIXING", reReview: "RECHECK" };
+  const api = { request: async (path: string) => {
+    calls.push(path);
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: Object.values(workflow), agentWorkflow: workflow }, task: { ...event.task, status: "QUEUE", branch: "agent/custom" } };
+    if (path.endsWith("/runs")) return { run: { id: "run-custom" } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, commandPrompt) => { prompt = commandPrompt; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const assigned = { ...event, id: "event-custom", task: { ...event.task, status: "QUEUE", branch: "agent/custom" } };
+  const body = JSON.stringify(assigned);
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(prompt, /status":"BUILDING/);
+  assert.match(prompt, /status":"HANDOFF/);
+
+  const update = { ...event, id: "event-comment", event: "task.update_added", task: { ...event.task, status: "QUEUE" } };
+  const updateBody = JSON.stringify(update);
+  await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, updateBody)}` }, updateBody);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 1);
 });
 
 test("runner fails closed when a fix run has no existing branch", async () => {
