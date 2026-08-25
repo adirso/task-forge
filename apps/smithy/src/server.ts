@@ -4,9 +4,14 @@ import { SmithyRunner } from "./runner.js";
 import { ApiClient } from "./api.js";
 import { SqliteJobStore } from "./store.js";
 import { prepareWorktree } from "./worktree.js";
+import { runProviderPreflight } from "./preflight.js";
 
 export function createSmithyServer(config = loadConfig(), runner = new SmithyRunner(config.providers, (provider) => new ApiClient(config.apiUrl, provider.apiToken), undefined, undefined, new SqliteJobStore(config.dbPath), prepareWorktree)) {
   const server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/health/providers") {
+      void runProviderPreflight(config.providers).then((providers) => { response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ enabled: true, providers })); }).catch(() => { response.writeHead(500, { "Content-Type": "application/json" }); response.end(JSON.stringify({ enabled: true, providers: [], error: "Provider health checks failed" })); });
+      return;
+    }
     if (request.method !== "POST" || !request.url?.startsWith("/agents/")) { response.writeHead(404); response.end(JSON.stringify({ error: "Not found" })); return; }
     const provider = request.url.slice("/agents/".length).split("/")[0] ?? "";
     const chunks: Buffer[] = [];
