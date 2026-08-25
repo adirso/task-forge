@@ -100,7 +100,8 @@ export class SmithyRunner {
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
       const result = await this.execute(config.cmd, prompt, cwd);
       if (result.code !== 0) throw new Error(redact(result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`)));
-      await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });
+      const summary = summarizeOutput(result.stdout, result.stderr);
+      await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `${kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.`}${summary ? `\n\nProvider response:\n${summary}` : ""}` }) });
       const handoffStatus = kind === "REVIEW" || kind === "RE_REVIEW" ? null : "READY_FOR_REVIEW";
       if (handoffStatus && statuses.includes(handoffStatus)) await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: handoffStatus, runId }) });
       await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }) });
@@ -112,4 +113,11 @@ export class SmithyRunner {
     } finally { if (heartbeat) clearInterval(heartbeat); }
     void job;
   }
+}
+
+function summarizeOutput(stdout: string, stderr: string): string {
+  const output = redact([stdout.trim(), stderr.trim()].filter(Boolean).join("\n")).trim();
+  if (!output) return "";
+  const limit = 4_000;
+  return output.length > limit ? `${output.slice(0, limit)}\n[Provider output truncated]` : output;
 }

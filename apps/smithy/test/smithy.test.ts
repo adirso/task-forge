@@ -93,6 +93,7 @@ test("runner routes signed events, executes once, and deduplicates delivery", as
   assert.ok(calls.includes("/api/runs/run-1/claim"));
   assert.ok(calls.includes("/api/runs/run-1/complete"));
   assert.equal(bodies["/api/runs/run-1/claim"], JSON.stringify({ leaseMs: 120000 }));
+  assert.match(String((JSON.parse(bodies[`/api/tasks/${event.task.id}/updates`] ?? "{}") as { body?: string }).body), /Provider response:\nok/);
 });
 
 test("runner rejects unknown providers, bad signatures, and missing local commands", async () => {
