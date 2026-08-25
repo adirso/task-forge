@@ -1,10 +1,11 @@
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import type { ActivityEvent, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
-import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Terminal, Trash2, UploadCloud, X } from "lucide-react";
+import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, ShieldCheck, Sparkles, Terminal, Trash2, UploadCloud, X } from "lucide-react";
 import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
 import { api, type AgentLog, type AgentRun } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { SendToAI } from "./SendToAI";
+import type { AIPromptMode } from "../lib/aiPrompt";
 import { TaskTagEditor } from "./TaskTags";
 import { TaskDependencyEditor } from "./TaskDependencies";
 
@@ -22,7 +23,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [updateBody, setUpdateBody] = useState("");
   const [postingUpdate, setPostingUpdate] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [showSendToAI, setShowSendToAI] = useState(false);
+  const [aiMode, setAIMode] = useState<AIPromptMode | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>(task?.attachments ?? []);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
@@ -82,7 +83,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form className="task-modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title" onSubmit={submit}>
-        <header><div><span className="modal-kicker">{task ? `${project.key}-${task.number}` : `New task in ${project.name}`}</span><h2 id="task-modal-title">{task ? "Edit task" : "Create a task"}</h2></div><div className="modal-header-actions">{task && <button type="button" className="send-to-ai-button" onClick={() => setShowSendToAI(true)}><Sparkles /> Send to AI</button>}{task && <button type="button" className="copy-task-link" onClick={() => copyTaskLink().catch(() => setError("Could not copy task link"))}>{linkCopied ? <Check /> : <Link2 />}{linkCopied ? "Copied" : "Copy link"}</button>}<button type="button" className="icon-button" onClick={onClose}><X /></button></div></header>
+        <header><div><span className="modal-kicker">{task ? `${project.key}-${task.number}` : `New task in ${project.name}`}</span><h2 id="task-modal-title">{task ? "Edit task" : "Create a task"}</h2></div><div className="modal-header-actions">{task && <div className="ai-action-buttons"><button type="button" className="send-to-ai-button" onClick={() => setAIMode("IMPLEMENT")}><Sparkles /> Implement</button><button type="button" className="send-to-ai-button review" onClick={() => setAIMode("REVIEW")}><ShieldCheck /> Review</button></div>}{task && <button type="button" className="copy-task-link" onClick={() => copyTaskLink().catch(() => setError("Could not copy task link"))}>{linkCopied ? <Check /> : <Link2 />}{linkCopied ? "Copied" : "Copy link"}</button>}<button type="button" className="icon-button" onClick={onClose}><X /></button></div></header>
         <div className="modal-grid">
           <div className="modal-main">
             <label>Task name<input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="What needs to be done?" required /></label>
@@ -129,7 +130,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
         {error && <div className="form-error">{error}</div>}
         {task && task.statusDurations && Object.keys(task.statusDurations).length > 0 && <section className="task-status-duration"><div className="section-heading"><span>Time in status</span></div><div>{Object.entries(task.statusDurations).map(([status, seconds]) => <span key={status}><strong>{statusMeta[status as TaskStatus]?.label ?? status}</strong>{formatDuration(seconds ?? 0)}</span>)}</div></section>}
         <footer>{onDelete ? <button type="button" className="button button-danger-quiet" onClick={onDelete}><Trash2 /> Delete</button> : <span />}<div><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving}>{saving ? "Saving…" : task ? "Save changes" : "Create task"}</button></div></footer>
-        {showSendToAI && task && <SendToAI project={project} task={task} phaseNumber={phases.find((phase) => phase.id === task.phaseId)?.number ?? null} onClose={() => setShowSendToAI(false)} />}
+        {aiMode && task && <SendToAI project={project} task={task} phaseNumber={phases.find((phase) => phase.id === task.phaseId)?.number ?? null} initialMode={aiMode} onClose={() => setAIMode(null)} />}
       </form>
     </div>
   );

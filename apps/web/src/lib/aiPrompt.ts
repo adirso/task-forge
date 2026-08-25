@@ -1,6 +1,7 @@
 import { TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES, type Project, type Task } from "@taskforge/contracts";
 
 export type AIProvider = "claude-code" | "codex" | "cursor";
+export type AIPromptMode = "IMPLEMENT" | "REVIEW";
 
 export const aiProviders: Array<{ id: AIProvider; name: string; badge: string; description: string; handoff: string }> = [
   { id: "claude-code", name: "Claude Code", badge: "C", description: "Terminal-first autonomous coding workflow", handoff: "Paste this prompt into Claude Code from the repository directory." },
@@ -43,8 +44,9 @@ export function buildTaskContextUrl(currentUrl: string, project: Project, task: 
   return url.toString();
 }
 
-export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl, apiBaseUrl }: {
+export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, phaseNumber, contextUrl, apiBaseUrl }: {
   provider: AIProvider;
+  mode?: AIPromptMode;
   project: Project;
   task: Task;
   phaseNumber: number | null;
@@ -61,16 +63,40 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
   const attachmentsEndpoint = `${taskEndpoint}/attachments`;
   const repository = project.repoUrl?.trim() || "Not configured in TaskForge. Use the repository/workspace supplied by the operator; do not guess a repository.";
   const enabledStatuses = new Set(project.availableStatuses);
-  const startInstruction = enabledStatuses.has(TASK_CLAIM_TARGET_STATUS)
-    ? `- When starting, PATCH ${taskEndpoint} with status ${TASK_CLAIM_TARGET_STATUS} and branch ${branch}.`
-    : `- When starting, PATCH ${taskEndpoint} with branch ${branch} only. No dedicated work status is enabled; keep the current status until you refresh workflow context and the project owner identifies the intended enabled transition.`;
   const reviewStatus = TASK_REVIEW_STATUSES.find((status) => enabledStatuses.has(status));
-  const reviewInstruction = reviewStatus
-    ? `- Move the task to ${reviewStatus} when review is required.`
-    : `- Before requesting review, refresh ${contextEndpoint} to discover the current workflow. If no review status is enabled, keep the status unchanged and ask the project owner which enabled status to use.`;
-  const completionInstruction = enabledStatuses.has(TASK_COMPLETION_STATUS)
-    ? `- Move the task to ${TASK_COMPLETION_STATUS} only when the definition of done is fully satisfied and no review or follow-up remains.`
-    : `- Before reporting completion, refresh ${contextEndpoint} to discover the current workflow. If no completion status is enabled, keep the status unchanged and ask the project owner which enabled status to use.`;
+  const startInstruction = mode === "REVIEW"
+    ? reviewStatus
+      ? `- Review mode is read-only: do not start implementation or PATCH ${taskEndpoint} to ${TASK_CLAIM_TARGET_STATUS}. If the workflow requires entering review, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reviewStatus}; otherwise leave the current status unchanged.`
+      : `- Review mode is read-only: do not change the task status. Refresh ${contextEndpoint}; if no review status is enabled, leave the current status unchanged and report that the operator must choose the review state.`
+    : enabledStatuses.has(TASK_CLAIM_TARGET_STATUS)
+      ? `- When starting, PATCH ${taskEndpoint} with status ${TASK_CLAIM_TARGET_STATUS} and branch ${branch}.`
+      : `- When starting, PATCH ${taskEndpoint} with branch ${branch} only. No dedicated work status is enabled; keep the current status until you refresh workflow context and the project owner identifies the intended enabled transition.`;
+  const reviewInstruction = mode === "REVIEW"
+    ? "- Review mode does not hand off implementation or mark the task complete. Record findings and evidence, then leave approval, fixes, re-review, and merge decisions to the configured workflow and operator."
+    : reviewStatus
+      ? `- Move the task to ${reviewStatus} when review is required.`
+      : `- Before requesting review, refresh ${contextEndpoint} to discover the current workflow. If no review status is enabled, keep the status unchanged and ask the project owner which enabled status to use.`;
+  const completionInstruction = mode === "REVIEW"
+    ? "- Review completion means findings and validation evidence are reported; do not move the task to a completion status from this prompt."
+    : enabledStatuses.has(TASK_COMPLETION_STATUS)
+      ? `- Move the task to ${TASK_COMPLETION_STATUS} only when the definition of done is fully satisfied and no review or follow-up remains.`
+      : `- Before reporting completion, refresh ${contextEndpoint} to discover the current workflow. If no completion status is enabled, keep the status unchanged and ask the project owner which enabled status to use.`;
+  const pullRequestInstruction = mode === "REVIEW"
+    ? "- Do not create, commit, push, merge, or modify a pull request in review mode; report evidence against the existing implementation."
+    : "- When a pull request is opened, PATCH the task with pullRequestUrl, pullRequestTitle, pullRequestState, and the final branch.";
+  const modeInstructions = mode === "REVIEW"
+    ? [
+      "Review mode:",
+      "- Inspect the current implementation and compare it against every Definition of done item; do not assume the task is complete because a pull request exists.",
+      "- Review code quality, correctness, security, performance, maintainability, tests, migrations, responsive behavior, and optimization opportunities where relevant.",
+      "- Run the relevant tests, typechecks, lint, and production build, and verify the actual pull request diff and head SHA.",
+      "- Report structured findings with severity, evidence, and a clear disposition recommendation. Do not merge or silently fix findings in review mode.",
+    ]
+    : [
+      "Implementation mode:",
+      "- Implement the task description and every Definition of done item with the smallest complete change.",
+      "- Preserve unrelated work, run the relevant validation commands, and report progress, blockers, and final evidence through TaskForge.",
+    ];
 
   return [
     `You are ${providerMeta.name}, responsible for completing TaskForge task ${taskKey}.`,
@@ -93,6 +119,8 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
     `- TaskForge URL: ${contextUrl}`,
     `- Attachments: ${task.attachments.length} (list with GET ${attachmentsEndpoint}; download each attachment using its downloadUrl)`,
     "",
+    ...modeInstructions,
+    "",
     "Description:",
     task.description || "No description provided.",
     "",
@@ -103,20 +131,29 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
     "- Use the TaskForge credential already configured in your environment. Never print it, paste it into chat, commit it, or write it to repository files.",
     `- Resolve canonical context with GET ${contextEndpoint}. If access returns 403, stop and ask the project owner to add your agent as a project member.`,
     "- Before every status change, use project.availableStatuses from the latest context response and never PATCH a disabled status.",
+    "- If this prompt came from a signed assignment with a runId, preserve that runId on status changes and run callbacks; redact tokens, secrets, and credentials from updates, logs, and findings.",
     startInstruction,
     `- Post meaningful progress and blocker notes to POST ${updatesEndpoint} with a JSON body containing the body field.`,
-    "- When a pull request is opened, PATCH the task with pullRequestUrl, pullRequestTitle, pullRequestState, and the final branch.",
+    pullRequestInstruction,
     reviewInstruction,
     completionInstruction,
     "",
     "Delivery workflow:",
-    "1. Inspect the repository status and relevant code before editing; preserve unrelated changes.",
-    "2. Create or switch to the suggested branch unless the task already specifies another branch.",
-    "3. Implement every observable requirement in the definition of done, including tests and responsive behavior where applicable.",
-    "4. Run the relevant typecheck, test, lint, and production build commands available in the repository.",
-    "5. Review the diff for regressions, security issues, secrets, and accidental unrelated edits.",
-    "6. Commit the focused change, push it, and open a pull request when repository access allows.",
-    "7. Update TaskForge with the result, validation evidence, branch, and pull request. Clearly report any blocker instead of claiming completion.",
+    ...(mode === "REVIEW" ? [
+      "1. Inspect the current repository status, branch, pull request diff, and exact head SHA; do not edit files.",
+      "2. Compare the implementation against every Definition of done item and identify missing, risky, or unnecessary work.",
+      "3. Run the relevant typecheck, test, lint, and production build commands available in the repository.",
+      "4. Review security, secrets, migrations, performance, maintainability, and responsive behavior where applicable.",
+      "5. Post structured findings with severity, evidence, and a disposition recommendation to TaskForge; do not commit, push, open, or merge a pull request.",
+    ] : [
+      "1. Inspect the repository status and relevant code before editing; preserve unrelated changes.",
+      "2. Create or switch to the suggested branch unless the task already specifies another branch.",
+      "3. Implement every observable requirement in the definition of done, including tests and responsive behavior where applicable.",
+      "4. Run the relevant typecheck, test, lint, and production build commands available in the repository.",
+      "5. Review the diff for regressions, security issues, secrets, and accidental unrelated edits.",
+      "6. Commit the focused change, push it, and open a pull request when repository access allows.",
+      "7. Update TaskForge with the result, validation evidence, branch, and pull request. Clearly report any blocker instead of claiming completion.",
+    ]),
     "",
     `Begin by opening ${contextUrl} and the configured repository, then take ownership of ${taskKey} through completion.`,
   ].join("\n");

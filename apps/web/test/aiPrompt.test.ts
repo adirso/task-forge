@@ -74,6 +74,24 @@ test("builds a complete and tailored prompt for every provider", () => {
   }
 });
 
+test("builds distinct implementation and review prompts", () => {
+  const input = { provider: "codex" as const, project, task, phaseNumber: 1, contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3", apiBaseUrl: "https://api.taskforge.example/api" };
+  const implementation = buildAIPrompt({ ...input, mode: "IMPLEMENT" });
+  const review = buildAIPrompt({ ...input, mode: "REVIEW" });
+  assert.match(implementation, /Implementation mode:/);
+  assert.match(implementation, /Implement the task description and every Definition of done item/);
+  assert.match(review, /Review mode:/);
+  assert.match(review, /compare it against every Definition of done item/);
+  assert.match(review, /code quality, correctness, security, performance/);
+  assert.match(review, /optimization opportunities|performance/);
+  assert.match(review, /pull request diff and head SHA/);
+  assert.doesNotMatch(review, /Implement the task description and every Definition of done item/);
+  assert.doesNotMatch(review, /Create or switch to the suggested branch/);
+  assert.doesNotMatch(review, /Commit the focused change/);
+  assert.doesNotMatch(review, /Move the task to IN_PROGRESS/);
+  assert.match(review, /do not commit, push, open, or merge a pull request/);
+});
+
 test("preserves an existing task branch and creates a shareable task URL", () => {
   assert.equal(suggestedTaskBranch(project, { ...task, branch: "feature/existing" }), "feature/existing");
   assert.equal(
