@@ -8,7 +8,8 @@ import { MemoryJobStore } from "./store.js";
 export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string }; runId?: string | null; }
 export type RunnerResult = { status: number; body: string };
 type AgentWorkflow = { implementationQueue: string; implementationStart: string; reviewHandoff: string; reviewStart: string; approved: string; fixNeeded: string; fixStart: string; reReview: string };
-type ContextResponse = { project: { key: string; availableStatuses: string[]; localRepoPath?: string | null; agentWorkflow?: AgentWorkflow | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }> } };
+type TaskFinding = { severity?: string; title?: string; body?: string; disposition?: string; filePath?: string | null; lineNumber?: number | null };
+type ContextResponse = { project: { key: string; availableStatuses: string[]; localRepoPath?: string | null; agentWorkflow?: AgentWorkflow | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }>; findings?: TaskFinding[] } };
 type WorktreeFactory = (repo: string, branch: string | null, taskId: string) => Promise<string>;
 
 // Legacy projects have no persisted mapping. Keep their historical routing
@@ -109,6 +110,18 @@ export class SmithyRunner {
     return null;
   }
 
+  private resolveWorkflow(workflow: AgentWorkflow | null | undefined, statuses: string[]) {
+    if (!workflow) return LEGACY_AGENT_WORKFLOW;
+    const keys = Object.keys(LEGACY_AGENT_WORKFLOW) as Array<keyof AgentWorkflow>;
+    const missing = keys.filter((key) => typeof workflow[key] !== "string" || !workflow[key].trim());
+    const disabled = keys.filter((key) => typeof workflow[key] === "string" && !statuses.includes(workflow[key]));
+    if (missing.length || disabled.length) {
+      const details = [missing.length ? `missing ${missing.join(", ")}` : "", disabled.length ? `disabled ${disabled.map((key) => `${key}=${workflow[key]}`).join(", ")}` : ""].filter(Boolean).join("; ");
+      throw new Error(`Invalid project agent workflow mapping: ${details}. Enable every mapped status before assigning an agent.`);
+    }
+    return workflow;
+  }
+
   private statusPrompt(task: NonNullable<AgentEvent["task"]>, statuses: string[], workflow: AgentWorkflow | null | undefined, kind: Exclude<ReturnType<SmithyRunner["kind"]>, null>, contextEndpoint: string, runId: string) {
     const taskEndpoint = `/api/tasks/${task.id}`;
     const findings = `GET ${taskEndpoint}/updates and GET ${taskEndpoint}/agent-logs`;
@@ -171,6 +184,9 @@ export class SmithyRunner {
       const eventTask = event.previousStatus && event.task?.status && event.previousStatus === task.status
         ? { ...task, status: event.task.status }
         : { ...event.task, ...task };
+      const workflow = this.resolveWorkflow(context.project.agentWorkflow, context.project.availableStatuses);
+      // Keep legacy assignment semantics for projects without an opt-in mapping;
+      // the validated fallback is used only to render status-aware instructions.
       const kind = this.kind({ ...event, task: eventTask }, context.project.agentWorkflow);
       if (!kind) {
         this.store.markComplete(event.id, "SUCCEEDED");
@@ -193,8 +209,11 @@ export class SmithyRunner {
       };
       appendLog("system", "lifecycle", `Smithy started ${kind.toLowerCase()} run ${runId}.`);
       const statuses = context.project.availableStatuses;
+      const findingResponse = await api.request(`/api/tasks/${task.id}/findings`) as unknown as { findings?: TaskFinding[] };
+      const findings = Array.isArray(findingResponse.findings) ? findingResponse.findings : [];
       const contextEndpoint = `/api/context?project=${encodeURIComponent(projectKey)}&task=${encodeURIComponent(`${projectKey}-${taskNumber}`)}`;
-      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${task.title ?? ""}`, task.description ?? "", `Definition of done: ${task.definitionOfDone ?? ""}`, ...(task.updates ?? []).map((update) => `Human update: ${update.body}`), this.statusPrompt(task, statuses, context.project.agentWorkflow, kind, contextEndpoint, runId), "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
+      const findingLines = findings.map((finding) => `Finding [${finding.severity ?? "UNKNOWN"}] ${finding.disposition ? `(${finding.disposition}) ` : ""}${redact(finding.title ?? "")}: ${redact(finding.body ?? "")}${finding.filePath ? ` (${finding.filePath}${finding.lineNumber ? `:${finding.lineNumber}` : ""})` : ""}`);
+      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...(task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
