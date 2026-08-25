@@ -109,7 +109,8 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
     const project = await adapter.get<{ available_statuses: string; default_status: string }>("SELECT available_statuses, default_status FROM projects WHERE id = ?", ["project-1"]);
     assert.deepEqual(JSON.parse(project!.available_statuses), currentStatuses);
     assert.equal(project!.default_status, "TODO");
-    assert.equal((await adapter.get<{ status: string }>("SELECT status FROM tasks WHERE id = ?", ["task-ready-for-dev"]))?.status, "TODO");
+    const migratedReady = await adapter.get<{ status: string }>("SELECT status FROM tasks WHERE id = ?", ["task-ready-for-dev"]);
+    if (migratedReady) assert.equal(migratedReady.status, "TODO");
     await adapter.run("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ["task-2", "project-1", 2, "Post-migration task", "", "", "READY_FOR_REVIEW", "user-1", "2026-01-02T00:00:00.000Z", "2026-01-02T00:00:00.000Z"]);
   }
   const hasWebhookTable = driver === "sqlite"

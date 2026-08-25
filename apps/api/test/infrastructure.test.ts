@@ -83,9 +83,9 @@ test("claim repository repeats enabled source eligibility in the atomic update",
   assert.equal(claimed?.status, "IN_PROGRESS");
   const candidate = queries.find(({ operation, sql }) => operation === "get" && sql.startsWith("SELECT id, status FROM tasks"));
   const update = queries.find(({ operation, sql }) => operation === "run" && sql.startsWith("UPDATE tasks SET assignee_id"));
-  assert.match(candidate?.sql ?? "", /status IN \(\?, \?, \?\)/);
+  assert.match(candidate?.sql ?? "", /status IN \(\?, \?\)/);
   assert.deepEqual(candidate?.params.slice(0, 3), ["project-1", "BACKLOG", "TODO"]);
-  assert.match(update?.sql ?? "", /project_id = \? AND status IN \(\?, \?, \?\) AND assignee_id IS NULL/);
+  assert.match(update?.sql ?? "", /project_id = \? AND status IN \(\?, \?\) AND assignee_id IS NULL/);
   assert.deepEqual(update?.params.slice(0, 2), ["agent-1", "IN_PROGRESS"]);
   assert.deepEqual(update?.params.slice(-3), ["project-1", "BACKLOG", "TODO"]);
 });
