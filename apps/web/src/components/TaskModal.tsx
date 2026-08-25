@@ -1,8 +1,8 @@
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import type { ActivityEvent, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
-import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
+import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Terminal, Trash2, UploadCloud, X } from "lucide-react";
 import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
-import { api, type AgentRun } from "../lib/api";
+import { api, type AgentLog, type AgentRun } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { SendToAI } from "./SendToAI";
 import { TaskTagEditor } from "./TaskTags";
@@ -18,6 +18,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [updates, setUpdates] = useState<TaskNote[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [agentLogs, setAgentLogs] = useState<AgentLog[]>([]);
   const [updateBody, setUpdateBody] = useState("");
   const [postingUpdate, setPostingUpdate] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -33,10 +34,11 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
       api.taskAttachments(task.id).then(({ attachments: taskAttachments }) => setAttachments(taskAttachments)).catch(() => setAttachments(task.attachments ?? []));
       api.taskActivity(task.id).then(({ activity: events }) => setActivity(events)).catch(() => setActivity([]));
       const refreshRuns = () => api.taskRuns(task.id).then(({ runs: taskRuns }) => setRuns(taskRuns)).catch(() => setRuns([]));
+      api.taskAgentLogs(task.id).then(({ agentLogs: logs }) => setAgentLogs(logs)).catch(() => setAgentLogs([]));
       void refreshRuns();
       const timer = window.setInterval(refreshRuns, 5000);
       return () => window.clearInterval(timer);
-    } else { setUpdates([]); setAttachments([]); setActivity([]); setRuns([]); }
+    } else { setUpdates([]); setAttachments([]); setActivity([]); setRuns([]); setAgentLogs([]); }
   }, [task]);
 
   const set = <K extends keyof TaskCreate>(key: K, value: TaskCreate[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -115,6 +117,10 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
         {task && <section className="task-runs">
           <div className="section-heading"><span>Agent runs <b>{runs.length}</b></span><small>{runs.some((run) => run.status === "RUNNING" || run.status === "PENDING") ? "Refreshing" : ""}</small></div>
           {runs.length ? <div className="run-list">{runs.map((run) => <article className="run-item" key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{run.timeoutAt && <span>Timeout {formatDate(run.timeoutAt)}</span>}</div>{run.lastError && <p className="run-error">{run.lastError}</p>}</article>)}</div> : <p className="runs-empty">No agent runs yet.</p>}
+        </section>}
+        {task && <section className="task-agent-logs">
+          <div className="section-heading"><span><Terminal /> Agent logs <b>{agentLogs.length}</b></span><small>Provider output and callbacks</small></div>
+          {agentLogs.length ? <div className="agent-log-list">{agentLogs.map((log) => <article className="agent-log-entry" key={log.id}><header><strong>{log.provider}</strong><span>#{log.sequence} · {log.stream} · {log.category}</span><time>{formatDate(log.createdAt)}</time></header><pre>{log.content}</pre></article>)}</div> : <p className="logs-empty">No provider logs yet.</p>}
         </section>}
         {task && activity.length > 0 && <section className="task-activity">
           <div className="section-heading"><span>Activity log <b>{activity.length}</b></span></div>

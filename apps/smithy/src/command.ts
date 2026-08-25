@@ -14,14 +14,11 @@ export function renderCommand(template: string, prompt: string) {
 }
 
 export interface CommandResult { code: number | null; stdout: string; stderr: string; error?: Error; timedOut?: boolean; }
-
 export type CommandOutput = (stream: "stdout" | "stderr", chunk: string) => void;
 
 export function executeCommand(template: string, prompt: string, cwd: string, timeoutMs = 30 * 60_000, onOutput?: CommandOutput): Promise<CommandResult> {
   const { executable, args } = renderCommand(template, prompt);
   return new Promise((resolve) => {
-    // Providers must run unattended. A piped stdin can leave a CLI waiting
-    // forever for a permission/login answer that Smithy cannot provide.
     const child = spawn(executable, args, { cwd, shell: false, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";

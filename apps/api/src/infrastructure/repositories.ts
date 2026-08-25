@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
-import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
-import type { AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskFindingRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
+import type { AgentLogRepository, AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskFindingRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 import { decodeCursor, toPage } from "./pagination.js";
 
@@ -101,6 +101,10 @@ function toUpdate(row: Row): TaskUpdateEntity {
 
 function toHydratedUpdate(row: Row): TaskUpdateEntity {
   return { ...toUpdate(row), author: { id: text(row.author_user_id), email: nullableText(row.author_email), name: text(row.author_name), kind: row.author_kind as UserEntity["kind"], role: row.author_role as UserEntity["role"], avatarUrl: nullableText(row.author_avatar_url), createdAt: date(row.author_created_at) } };
+}
+
+function toAgentLog(row: Row): AgentLogEntity {
+  return { id: text(row.id), taskId: text(row.task_id), runId: nullableText(row.run_id), provider: text(row.provider), stream: row.stream as AgentLogEntity["stream"], category: row.category as AgentLogEntity["category"], sequence: Number(row.sequence), eventId: nullableText(row.event_id), content: text(row.content), createdAt: date(row.created_at) };
 }
 
 function toAttachment(row: Row): AttachmentEntity {
@@ -308,6 +312,36 @@ function createUpdateRepository(db: DatabasePort): TaskUpdateRepository {
   };
 }
 
+function createAgentLogRepository(db: DatabasePort): AgentLogRepository {
+  return {
+    async listForTask(taskId, page) {
+      const where = ["task_id = ?"]; const params: unknown[] = [taskId];
+      const cursor = decodeCursor(page.cursor, 2);
+      if (cursor) { where.push("(created_at < ? OR (created_at = ? AND id > ?))"); params.push(cursor[0], cursor[0], cursor[1]); }
+      const rows = await db.prepare(`SELECT * FROM agent_logs WHERE ${where.join(" AND ")} ORDER BY created_at DESC, id ASC LIMIT ${page.limit + 1}`).all(...params);
+      return toPage(rows.map(toAgentLog), page, (log) => [log.createdAt, log.id]);
+    },
+    async append(input) {
+      try {
+        await db.prepare("INSERT INTO agent_logs (id, task_id, run_id, provider, stream, category, `sequence`, event_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.runId, input.provider, input.stream, input.category, input.sequence, input.eventId, input.content, input.createdAt);
+      } catch (error) {
+        if (input.eventId && /unique|duplicate/i.test(error instanceof Error ? error.message : String(error))) return null;
+        throw error;
+      }
+      return input;
+    },
+    async purgeForTask(taskId, keep) {
+      const countRow = await db.prepare("SELECT COUNT(*) AS count FROM agent_logs WHERE task_id = ?").get(taskId) as { count?: number } | undefined;
+      const count = Number(countRow?.count ?? 0);
+      const offset = Math.max(0, keep);
+      if (count <= offset) return 0;
+      const rows = await db.prepare(`SELECT id FROM agent_logs WHERE task_id = ? ORDER BY created_at DESC, id ASC LIMIT ${count - offset} OFFSET ${offset}`).all(taskId);
+      if (!rows.length) return 0;
+      return (await db.prepare(`DELETE FROM agent_logs WHERE id IN (${rows.map(() => "?").join(",")})`).run(...rows.map((row) => row.id))).changes;
+    },
+  };
+}
+
 function createAttachmentRepository(db: DatabasePort): AttachmentRepository {
   return {
     async listForTask(taskId) { const rows = await db.prepare("SELECT a.*, u.id AS uploaded_user_id, u.email AS uploaded_email, u.name AS uploaded_name, u.kind AS uploaded_kind, u.role AS uploaded_role, u.avatar_url AS uploaded_avatar_url, u.created_at AS uploaded_created_at FROM task_attachments a JOIN users u ON u.id = a.uploaded_by_id WHERE a.task_id = ? ORDER BY a.created_at DESC").all(taskId); return rows.map((row) => ({ ...toAttachment(row), uploadedBy: { id: text(row.uploaded_user_id), email: nullableText(row.uploaded_email), name: text(row.uploaded_name), kind: row.uploaded_kind as UserEntity["kind"], role: row.uploaded_role as UserEntity["role"], avatarUrl: nullableText(row.uploaded_avatar_url), createdAt: date(row.uploaded_created_at) } })); },
@@ -478,5 +512,5 @@ function createSearchRepository(db: DatabasePort): SearchRepository {
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db), runs: createAgentRunRepository(db), gates: createTaskGateRepository(db), findings: createTaskFindingRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), agentLogs: createAgentLogRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db), runs: createAgentRunRepository(db), gates: createTaskGateRepository(db), findings: createTaskFindingRepository(db) };
 }

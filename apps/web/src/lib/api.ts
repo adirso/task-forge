@@ -6,6 +6,7 @@ export interface AgentRun {
   leaseOwner: string | null; leaseExpiresAt: string | null; heartbeatAt: string | null; timeoutAt: string | null; lastError: string | null;
   createdAt: string; updatedAt: string; completedAt: string | null;
 }
+export interface AgentLog { id: string; taskId: string; runId: string | null; provider: string; stream: "stdout" | "stderr" | "system" | "callback"; category: "output" | "progress" | "tool" | "callback" | "lifecycle"; sequence: number; eventId: string | null; content: string; createdAt: string; }
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
 // origin avoids localhost/127.0.0.1 CORS differences. Deployments can still set
@@ -290,6 +291,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
 
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "GET") return { updates: [] } as T;
   if (/^\/tasks\/[^/]+\/runs$/.test(pathname) && method === "GET") return { runs: [] } as T;
+  if (/^\/tasks\/[^/]+\/agent-logs$/.test(pathname) && method === "GET") return { agentLogs: [], page: { limit: 100, hasMore: false, nextCursor: null } } as T;
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "POST") {
     return {
       update: {
@@ -394,6 +396,14 @@ export const api = {
     return { updates };
   },
   taskRuns: (id: string) => request<{ runs: AgentRun[] }>(`/tasks/${id}/runs`),
+  taskAgentLogs: async (id: string) => {
+    const logs: AgentLog[] = []; let cursor: string | null = null;
+    do {
+      const response: { agentLogs: AgentLog[]; page?: PageInfo } = await request<{ agentLogs: AgentLog[]; page?: PageInfo }>(`/tasks/${id}/agent-logs?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      logs.push(...response.agentLogs); cursor = response.page?.nextCursor ?? null;
+    } while (cursor);
+    return { agentLogs: logs };
+  },
   addTaskUpdate: (id: string, body: string) => request<{ update: TaskNote }>(`/tasks/${id}/updates`, { method: "POST", body: { body } }),
   taskAttachments: (id: string) => request<{ attachments: Attachment[] }>(`/tasks/${id}/attachments`),
   uploadTaskAttachment: (id: string, input: { fileName: string; mimeType: string; data: string }) => request<{ attachment: Attachment }>(`/tasks/${id}/attachments`, { method: "POST", body: input }),

@@ -484,6 +484,18 @@ export const migrations: readonly Migration[] = [
       await executor.run(dialect === "mysql" ? "ALTER TABLE projects ADD COLUMN local_repo_path VARCHAR(2048) NULL" : "ALTER TABLE projects ADD COLUMN local_repo_path TEXT", []);
     },
   },
+  {
+    version: "0014_agent_logs",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS agent_logs (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, run_id CHAR(36), provider VARCHAR(64) NOT NULL, stream VARCHAR(16) NOT NULL CHECK (stream IN ('stdout', 'stderr', 'system', 'callback')), category VARCHAR(16) NOT NULL CHECK (category IN ('output', 'progress', 'tool', 'callback', 'lifecycle')), `sequence` INT NOT NULL, event_id VARCHAR(180) UNIQUE, content TEXT NOT NULL, created_at VARCHAR(30) NOT NULL, INDEX idx_agent_logs_task_page (task_id, created_at, id), INDEX idx_agent_logs_run_sequence (run_id, `sequence`), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS agent_logs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL, provider TEXT NOT NULL, stream TEXT NOT NULL CHECK (stream IN ('stdout', 'stderr', 'system', 'callback')), category TEXT NOT NULL CHECK (category IN ('output', 'progress', 'tool', 'callback', 'lifecycle')), `sequence` INTEGER NOT NULL, event_id TEXT UNIQUE, content TEXT NOT NULL, created_at TEXT NOT NULL)", []);
+      if (dialect === "sqlite") {
+        await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_logs_task_page ON agent_logs(task_id, created_at, id)", []);
+        await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_logs_run_sequence ON agent_logs(run_id, `sequence`)", []);
+      }
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {
