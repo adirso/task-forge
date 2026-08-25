@@ -176,7 +176,7 @@ test("status changes enqueue a signed-delivery event for another agent", async (
   assert.equal(deliveries.length, 1, "an agent's own status change must not enqueue its webhook");
 });
 
-test("autonomous workflows enforce guarded status transitions", async () => {
+test("tasks can move between any statuses enabled by the project workflow", async () => {
   const task = {
     id: "task-guard", projectId: "project-1", number: 63, title: "Guarded workflow", description: "", definitionOfDone: "",
     status: "IN_PROGRESS", priority: "MEDIUM", type: "FEATURE", assigneeId: null, creatorId: "owner-1", parentId: null, branch: null,
@@ -188,7 +188,7 @@ test("autonomous workflows enforce guarded status transitions", async () => {
     tasks: { findById: async () => task, update: async (_id: string, input: Record<string, unknown>) => ({ ...task, ...input }) } as never,
   });
   const service = new TaskApplicationService({ run: async (work) => work(set) });
-  await assert.rejects(() => service.update({ actor: { userId: "owner-1", kind: "HUMAN", role: "ADMIN", tokenScopes: null } }, task.id, { status: "DONE" }), /Status transition IN_PROGRESS -> DONE is not allowed/);
+  await service.update({ actor: { userId: "owner-1", kind: "HUMAN", role: "ADMIN", tokenScopes: null } }, task.id, { status: "DONE" });
   await service.update({ actor: { userId: "owner-1", kind: "HUMAN", role: "ADMIN", tokenScopes: null } }, task.id, { status: "READY_FOR_REVIEW" });
 });
 

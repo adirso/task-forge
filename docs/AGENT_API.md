@@ -164,7 +164,7 @@ List filters are query parameters: `status`, `assigneeId`, `priority`, `type`, `
 
 ### Project workflow and task claiming
 
-`project.availableStatuses` is authoritative for agents. Read it from `GET /api/context` before every status transition and never send a disabled status. `project.defaultStatus` is only the default for task creation; it does not identify a work, review, or completion transition.
+`project.availableStatuses` is authoritative for agents. Read it from `GET /api/context` before every status transition and never send a disabled status. Any enabled status may be selected from any current status; the API does not impose a hard-coded transition graph. `project.defaultStatus` is only the default for task creation; it does not identify a work, review, or completion transition.
 
 Claiming uses this fixed semantic mapping:
 
