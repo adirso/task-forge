@@ -184,6 +184,12 @@ test("projects configure available statuses and the default API status", async (
   assert.deepEqual(configured.json().project.availableStatuses, ["REFINING", "READY_FOR_REVIEW", "CANCELLED"]);
   assert.equal(configured.json().project.defaultStatus, "REFINING");
 
+  const unavailableWorkflow = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: {
+    agentWorkflow: { implementationQueue: "TODO", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "FIX_IN_PROGRESS", reReview: "RE_REVIEW" },
+  } });
+  assert.equal(unavailableWorkflow.statusCode, 400, unavailableWorkflow.body);
+  assert.match(unavailableWorkflow.json().error, /Enable these statuses before assigning workflow roles/);
+
   const defaulted = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Uses project default" } });
   assert.equal(defaulted.statusCode, 201, defaulted.body);
   assert.equal(defaulted.json().task.status, "REFINING");
