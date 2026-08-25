@@ -6,6 +6,7 @@ import type { PageRequest, TaskDependencyEntity, TaskEntity, TaskUpdateEntity } 
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
 import type { TaskCreateInput, TaskFilters, TaskService, TaskUpdateInput } from "./services.js";
 import { AutomationEngine } from "./automation-service.js";
+import { enqueueTaskStatusWebhook } from "./transition-effects.js";
 
 export class TaskApplicationService implements TaskService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now: () => string = () => new Date().toISOString(), private readonly newId: () => string = randomUUID, private readonly automationEngine = new AutomationEngine()) {}
@@ -74,7 +75,7 @@ export class TaskApplicationService implements TaskService {
       if (input.status && reviewStatuses.has(input.status) && !reviewStatuses.has(existing.status) && existing.creatorId !== context.actor.userId) await this.notify(repositories, existing.creatorId, { ...existing, ...task, title: input.title ?? existing.title }, context, "REVIEW_REQUESTED", "Review requested");
       const automated = await this.automationEngine.apply(repositories, context, existing, { ...task, updatedAt: now }, "TASK_UPDATED");
       if (assigneeChanged && input.assigneeId && input.assigneeId !== context.actor.userId) await this.enqueueAssignmentWebhook(repositories, { ...task, assigneeId: input.assigneeId }, context);
-      if (automated.status !== existing.status && automated.assigneeId !== context.actor.userId) await this.enqueueStatusWebhook(repositories, automated, existing.status, context, runId ?? null);
+      if (automated.status !== existing.status && automated.assigneeId !== context.actor.userId) await enqueueTaskStatusWebhook(repositories, automated, existing.status, context, runId ?? null, this.newId, this.now);
       return repositories.tasks.findById ? await repositories.tasks.findById(automated.id) ?? automated : automated;
     });
   }
@@ -97,7 +98,7 @@ export class TaskApplicationService implements TaskService {
       const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS }, { ...options, taskId: run?.taskId });
       if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
-      if (task.assigneeId !== context.actor.userId) await this.enqueueStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context, options?.runId ?? null);
+      if (task.assigneeId !== context.actor.userId) await enqueueTaskStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context, options?.runId ?? null, this.newId, this.now);
       return task;
     });
   }
@@ -212,29 +213,4 @@ export class TaskApplicationService implements TaskService {
     await repositories.webhookDeliveries.create({ id, agentId: assignee.id, taskId: task.id, eventType: "task.update_added", payload: JSON.stringify(payload), status: "PENDING", attemptCount: 0, nextAttemptAt: update.createdAt, lockedUntil: null, lastAttemptAt: null, deliveredAt: null, failedAt: null, lastError: null, httpStatus: null, createdAt: update.createdAt, updatedAt: update.createdAt });
   }
 
-  private async enqueueStatusWebhook(repositories: RepositorySet, task: TaskEntity, previousStatus: TaskStatus, context: RequestContext, runId: string | null = null) {
-    if (!task.assigneeId) return;
-    const assignee = await repositories.users.findById(task.assigneeId);
-    if (!assignee || assignee.kind !== "AGENT" || !assignee.webhookUrl) return;
-    const project = await repositories.projects.findById(task.projectId);
-    const id = this.newId();
-    const timestamp = this.now();
-    const payload = {
-      id,
-      event: "task.status_changed",
-      task: {
-        id: task.id, number: task.number, title: task.title,
-        description: task.description, definitionOfDone: task.definitionOfDone,
-        status: task.status, priority: task.priority, type: task.type,
-        branch: task.branch, projectId: task.projectId,
-        projectKey: project?.key, projectName: project?.name,
-        assigneeId: task.assigneeId,
-      },
-      previousStatus,
-      runId,
-      changedBy: { id: context.actor.userId, name: context.actor.name },
-      timestamp,
-    };
-    await repositories.webhookDeliveries.create({ id, agentId: assignee.id, taskId: task.id, eventType: "task.status_changed", payload: JSON.stringify(payload), status: "PENDING", attemptCount: 0, nextAttemptAt: timestamp, lockedUntil: null, lastAttemptAt: null, deliveredAt: null, failedAt: null, lastError: null, httpStatus: null, createdAt: timestamp, updatedAt: timestamp });
-  }
 }
