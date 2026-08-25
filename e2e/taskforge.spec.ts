@@ -39,9 +39,15 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("dialog", { name: "Members & agents" }).getByText("Close", { exact: true }).click();
     await openProjectSettings(page);
 
+    await expect(page.getByText("Agent workflow", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Implementation Queue")).toHaveValue("TODO");
+    await page.getByLabel("Implementation Queue").selectOption("IN_PROGRESS");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Project updated")).toBeVisible();
+    await openProjectSettings(page);
+
     await page.getByRole("checkbox", { name: "Backlog" }).uncheck();
     await page.getByRole("checkbox", { name: "Refining" }).uncheck();
-    await page.getByRole("checkbox", { name: "Ready for dev" }).uncheck();
     await page.getByRole("checkbox", { name: "Ready for review" }).uncheck();
     await page.getByRole("checkbox", { name: "In review" }).uncheck();
     await page.getByRole("checkbox", { name: "Done" }).uncheck();
@@ -49,6 +55,10 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByRole("heading", { name: createdProjectName })).toBeVisible();
     await expect(page.getByRole("region", { name: "Done tasks" })).toHaveCount(0);
+    await openProjectSettings(page);
+    await expect(page.getByRole("button", { name: "Enable default agent workflow" })).toBeVisible();
+    await page.getByRole("button", { name: "Enable default agent workflow" }).click();
+    await expect(page.getByText("Agent workflow enabled")).toBeVisible();
 
     await page.getByRole("button", { name: "Create task" }).first().click();
     await page.getByLabel("Task name").fill("Browser regression task");

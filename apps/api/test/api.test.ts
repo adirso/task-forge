@@ -164,6 +164,9 @@ test("projects configure available statuses and the default API status", async (
   assert.deepEqual(statusProject.availableStatuses, ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED", "APPROVED", "RE_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "PENDING_DECISION", "FAILED"]);
   assert.equal(statusProject.defaultStatus, "TODO");
   assert.equal(statusProject.agentWorkflow.implementationQueue, "TODO");
+  const fetchedStatusProject = await app.inject({ method: "GET", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(fetchedStatusProject.statusCode, 200, fetchedStatusProject.body);
+  assert.equal(fetchedStatusProject.json().project.agentWorkflow.reviewHandoff, "READY_FOR_REVIEW");
 
   const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
   assert.equal(memberLogin.statusCode, 200, memberLogin.body);
@@ -212,6 +215,9 @@ test("projects configure available statuses and the default API status", async (
   assert.equal(enabledWorkflow.statusCode, 200, enabledWorkflow.body);
   assert.equal(enabledWorkflow.json().project.agentWorkflow.approved, "APPROVED");
   assert.ok(enabledWorkflow.json().project.availableStatuses.includes("FIX_IN_PROGRESS"));
+  const customWorkflow = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { agentWorkflow: { implementationQueue: "REFINING", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "FIX_IN_PROGRESS", reReview: "RE_REVIEW" } } });
+  assert.equal(customWorkflow.statusCode, 200, customWorkflow.body);
+  assert.equal(customWorkflow.json().project.agentWorkflow.implementationQueue, "REFINING");
   const memberEnable = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/agent-workflow/enable`, headers: { authorization: `Bearer ${memberLogin.json().token}` } });
   assert.equal(memberEnable.statusCode, 403, memberEnable.body);
   assert.match(memberEnable.json().error, /project owner or an administrator/);

@@ -56,6 +56,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
               const next = checked ? availableStatuses.filter((item) => item !== status) : TASK_STATUSES.filter((item) => item === status || availableStatuses.includes(item));
               setAvailableStatuses(next);
               if (!next.includes(defaultStatus)) setDefaultStatus(next[0]!);
+              if (agentWorkflow && Object.values(agentWorkflow).some((workflowStatus) => !next.includes(workflowStatus))) setAgentWorkflow(null);
             }} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>;
           })}</div>
           <label>Default status for API-created tasks<select value={defaultStatus} onChange={(event) => setDefaultStatus(event.target.value as TaskStatus)}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select><small>Used when an API request creates a task without a status.</small></label>
@@ -65,8 +66,10 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
           {!agentWorkflow ? <button type="button" className="button button-secondary" disabled={enabling} onClick={async () => {
             if (!onEnableWorkflow) { setAvailableStatuses([...TASK_STATUSES]); setDefaultStatus("TODO"); setAgentWorkflow({ ...DEFAULT_AGENT_WORKFLOW }); return; }
             setEnabling(true);
-            try { await onEnableWorkflow(); onClose(); } finally { setEnabling(false); }
-          }}>{enabling ? "Enabling…" : "Enable default agent workflow"}</button> : <div className="project-status-options">
+            try { await onEnableWorkflow(); onClose(); }
+            catch (err) { setError(err instanceof Error ? err.message : "Could not enable agent workflow"); }
+            finally { setEnabling(false); }
+          }}>{enabling ? "Enabling…" : "Enable default agent workflow"}</button> : <div className="agent-workflow-options">
             {(Object.keys(DEFAULT_AGENT_WORKFLOW) as Array<keyof AgentWorkflow>).map((role) => <label key={role}>{role.replace(/[A-Z]/g, (letter) => ` ${letter}`).replace(/^./, (letter) => letter.toUpperCase())}<select value={agentWorkflow[role]} onChange={(event) => setAgentWorkflow({ ...agentWorkflow, [role]: event.target.value as TaskStatus })}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select></label>)}
           </div>}
         </section>}

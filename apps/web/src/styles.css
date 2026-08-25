@@ -383,6 +383,9 @@ svg { flex: 0 0 auto; }
 .project-status-settings > div:first-child { display: grid; gap: 3px; }.project-status-settings > div:first-child strong { color: #253858; font-size: 13px; }.project-status-settings > div:first-child span { color: #6b778c; font-size: 11px; }
 .project-status-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .project-status-options label { min-width: 0; display: flex; grid-template-columns: none; align-items: center; gap: 7px; border: 1px solid #dfe1e6; border-radius: 6px; padding: 8px; color: #505f79; font-size: 11px; font-weight: 550; cursor: pointer; }.project-status-options label.is-selected { border-color: #b3a8e8; background: #faf9ff; color: #253858; }.project-status-options input { width: 14px; height: 14px; margin: 0; padding: 0; }.project-status-settings label small { color: #7a869a; font-size: 10px; font-weight: 450; line-height: 1.4; }
+.agent-workflow-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.agent-workflow-options label { display: grid; gap: 5px; color: #505f79; font-size: 11px; font-weight: 550; }
+.agent-workflow-options select { min-width: 0; }
 .optional { color: #a5adba; font-weight: 400; }
 
 .toast { position: fixed; z-index: 150; left: 50%; bottom: 24px; transform: translateX(-50%); background: #172b4d; color: white; padding: 10px 16px; border-radius: 7px; font-size: 11px; box-shadow: 0 10px 30px rgba(9,30,66,.24); animation: toast-in .18s ease-out; }
@@ -603,7 +606,7 @@ html[data-text-size="large"] body { zoom: 1.08; }
   .toolbar-filters.open .multi-filter-trigger { width: 100%; max-width: none; }
   .toolbar-filters.open .clear-filters { justify-self: end; }
   .task-total { margin-left: auto; }
-  .content-area { padding: 14px 12px; }.project-dashboard { gap: 20px; padding: 16px 12px 32px; }.project-dashboard-heading { padding: 20px; }.project-dashboard-metrics { grid-template-columns: 1fr 1fr; gap: 12px; }.project-dashboard-grid { grid-template-columns: 1fr; gap: 16px; }.modal-backdrop { padding: 10px; }.modal-grid { grid-template-columns: 1fr; }.task-modal > header { padding: 14px 16px 10px; }.task-modal-tabs { padding: 0 8px; }.task-modal-tabs button { padding: 0 10px; font-size: 11px; }.task-modal > .modal-body { padding: 16px 16px 10px; }.task-modal > footer { padding: 12px 16px 14px; flex-wrap: wrap; gap: 10px; }.modal-fields { grid-template-columns: 1fr; }.project-status-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .content-area { padding: 14px 12px; }.project-dashboard { gap: 20px; padding: 16px 12px 32px; }.project-dashboard-heading { padding: 20px; }.project-dashboard-metrics { grid-template-columns: 1fr 1fr; gap: 12px; }.project-dashboard-grid { grid-template-columns: 1fr; gap: 16px; }.modal-backdrop { padding: 10px; }.modal-grid { grid-template-columns: 1fr; }.task-modal > header { padding: 14px 16px 10px; }.task-modal-tabs { padding: 0 8px; }.task-modal-tabs button { padding: 0 10px; font-size: 11px; }.task-modal > .modal-body { padding: 16px 16px 10px; }.task-modal > footer { padding: 12px 16px 14px; flex-wrap: wrap; gap: 10px; }.modal-fields { grid-template-columns: 1fr; }.project-status-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }.agent-workflow-options { grid-template-columns: 1fr; }
   .board { min-width: 0; grid-template-columns: 1fr; gap: 10px; }
   .phase-list-stack, .task-table, .phases-page, .active-phase-banner, .no-active-phase, .empty-board-phase { min-width: 0; }
   .task-table { min-width: 760px; }
