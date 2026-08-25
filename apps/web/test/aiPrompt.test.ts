@@ -92,6 +92,29 @@ test("builds distinct implementation and review prompts", () => {
   assert.match(review, /do not commit, push, open, or merge a pull request/);
 });
 
+test("builds focused fix and re-review prompts from the review trail", () => {
+  const input = { provider: "codex" as const, project: { ...project, availableStatuses: ["IN_PROGRESS", "READY_FOR_REVIEW", "RE_REVIEW", "FIX_NEEDED", "DONE"] }, task: { ...task, branch: "agent/tas-77-fix" }, phaseNumber: 1, contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3", apiBaseUrl: "https://api.taskforge.example/api" };
+  const fix = buildAIPrompt({ ...input, mode: "FIX" });
+  const rereview = buildAIPrompt({ ...input, mode: "RE_REVIEW" });
+  assert.match(fix, /Fix needed mode:/);
+  assert.match(fix, /existing branch agent\/tas-77-fix/);
+  assert.match(fix, /GET https:\/\/api\.taskforge\.example\/api\/tasks\/task-id\/updates/);
+  assert.match(fix, /GET https:\/\/api\.taskforge\.example\/api\/tasks\/task-id\/agent-logs/);
+  assert.match(fix, /Resolve and test every finding individually/);
+  assert.match(fix, /commit and push fixes to the existing branch/);
+  assert.doesNotMatch(fix, /Do not create, commit, push, merge, or modify a pull request in fix mode/);
+  assert.doesNotMatch(fix, /Create or switch to the suggested branch/);
+  const missingBranch = buildAIPrompt({ ...input, task: { ...task, branch: null }, mode: "FIX" });
+  assert.match(missingBranch, /requires a real task branch/);
+  assert.match(missingBranch, /do not invent agent\/tas-3-add-send-to-ai-task-action/);
+  assert.doesNotMatch(missingBranch, /Work on the existing branch agent\/tas-3-add-send-to-ai-task-action/);
+  assert.match(rereview, /Re-review mode:/);
+  assert.match(rereview, /task was reviewed previously/);
+  assert.match(rereview, /current head SHA against every review finding/);
+  assert.match(rereview, /Do not assume approval/);
+  assert.doesNotMatch(rereview, /Implement the task description and every Definition of done item/);
+});
+
 test("preserves an existing task branch and creates a shareable task URL", () => {
   assert.equal(suggestedTaskBranch(project, { ...task, branch: "feature/existing" }), "feature/existing");
   assert.equal(
