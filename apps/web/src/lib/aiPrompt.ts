@@ -1,6 +1,7 @@
 import { TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES, type Project, type Task } from "@taskforge/contracts";
 
 export type AIProvider = "claude-code" | "codex" | "cursor";
+export type AIPromptMode = "IMPLEMENT" | "REVIEW";
 
 export const aiProviders: Array<{ id: AIProvider; name: string; badge: string; description: string; handoff: string }> = [
   { id: "claude-code", name: "Claude Code", badge: "C", description: "Terminal-first autonomous coding workflow", handoff: "Paste this prompt into Claude Code from the repository directory." },
@@ -43,8 +44,9 @@ export function buildTaskContextUrl(currentUrl: string, project: Project, task: 
   return url.toString();
 }
 
-export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl, apiBaseUrl }: {
+export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, phaseNumber, contextUrl, apiBaseUrl }: {
   provider: AIProvider;
+  mode?: AIPromptMode;
   project: Project;
   task: Task;
   phaseNumber: number | null;
@@ -71,6 +73,19 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
   const completionInstruction = enabledStatuses.has(TASK_COMPLETION_STATUS)
     ? `- Move the task to ${TASK_COMPLETION_STATUS} only when the definition of done is fully satisfied and no review or follow-up remains.`
     : `- Before reporting completion, refresh ${contextEndpoint} to discover the current workflow. If no completion status is enabled, keep the status unchanged and ask the project owner which enabled status to use.`;
+  const modeInstructions = mode === "REVIEW"
+    ? [
+      "Review mode:",
+      "- Inspect the current implementation and compare it against every Definition of done item; do not assume the task is complete because a pull request exists.",
+      "- Review code quality, correctness, security, performance, maintainability, tests, migrations, and responsive behavior where relevant.",
+      "- Run the relevant tests, typechecks, lint, and production build, and verify the actual pull request diff and head SHA.",
+      "- Report structured findings with severity, evidence, and a clear disposition recommendation. Do not merge or silently fix findings in review mode.",
+    ]
+    : [
+      "Implementation mode:",
+      "- Implement the task description and every Definition of done item with the smallest complete change.",
+      "- Preserve unrelated work, run the relevant validation commands, and report progress, blockers, and final evidence through TaskForge.",
+    ];
 
   return [
     `You are ${providerMeta.name}, responsible for completing TaskForge task ${taskKey}.`,
@@ -93,6 +108,8 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
     `- TaskForge URL: ${contextUrl}`,
     `- Attachments: ${task.attachments.length} (list with GET ${attachmentsEndpoint}; download each attachment using its downloadUrl)`,
     "",
+    ...modeInstructions,
+    "",
     "Description:",
     task.description || "No description provided.",
     "",
@@ -103,6 +120,7 @@ export function buildAIPrompt({ provider, project, task, phaseNumber, contextUrl
     "- Use the TaskForge credential already configured in your environment. Never print it, paste it into chat, commit it, or write it to repository files.",
     `- Resolve canonical context with GET ${contextEndpoint}. If access returns 403, stop and ask the project owner to add your agent as a project member.`,
     "- Before every status change, use project.availableStatuses from the latest context response and never PATCH a disabled status.",
+    "- If this prompt came from a signed assignment with a runId, preserve that runId on status changes and run callbacks; redact tokens, secrets, and credentials from updates, logs, and findings.",
     startInstruction,
     `- Post meaningful progress and blocker notes to POST ${updatesEndpoint} with a JSON body containing the body field.`,
     "- When a pull request is opened, PATCH the task with pullRequestUrl, pullRequestTitle, pullRequestState, and the final branch.",
