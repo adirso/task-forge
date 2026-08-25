@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { renderCommand } from "../src/command.js";
+import { executeCommand, renderCommand } from "../src/command.js";
 import { SmithyRunner } from "../src/runner.js";
 import { sign, verifySignature, redact } from "../src/security.js";
 import { MemoryJobStore } from "../src/store.js";
@@ -76,6 +76,27 @@ test("command templates become argument arrays without shell execution", () => {
   const command = renderCommand("codex exec '{prompt}'", "quote; echo unsafe");
   assert.equal(command.executable, "codex");
   assert.deepEqual(command.args, ["exec", "quote; echo unsafe"]);
+});
+
+test("provider commands cannot hang on stdin and stream output", async () => {
+  const output: string[] = [];
+  const result = await executeCommand(
+    `${process.execPath} -e "console.log('ready'); process.stdin.resume(); setTimeout(() => process.exit(0), 20)"`,
+    "ignored",
+    process.cwd(),
+    2_000,
+    (stream, chunk) => output.push(`${stream}:${chunk}`),
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.timedOut, false);
+  assert.match(result.stdout, /ready/);
+  assert.ok(output.some((chunk) => chunk.includes("stdout:ready")));
+});
+
+test("provider command timeout is explicit", async () => {
+  const result = await executeCommand(`${process.execPath} -e "setTimeout(() => {}, 1000)"`, "ignored", process.cwd(), 20);
+  assert.equal(result.code, null);
+  assert.equal(result.timedOut, true);
 });
 
 test("runner routes signed events, executes once, and deduplicates delivery", async () => {
