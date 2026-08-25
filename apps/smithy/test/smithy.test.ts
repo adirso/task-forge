@@ -158,20 +158,45 @@ test("runner processes a status event when context is still at the previous stat
   assert.ok(calls.some((path) => path.endsWith("/runs")));
 });
 
-test("runner walks BACKLOG through an enabled preparation status before implementation", async () => {
+test("runner leaves task transitions to the assigned agent and explains the workflow", async () => {
   const statusUpdates: string[] = [];
+  let prompt = "";
   const api = { request: async (path: string, init?: RequestInit) => {
     if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["BACKLOG", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW"] }, task: { ...event.task, status: "BACKLOG" } };
     if (path.includes("/api/tasks/") && init?.method === "PATCH") statusUpdates.push(String(init.body));
     if (path.endsWith("/runs")) return { run: { id: "run-backlog" } };
     return {};
   } };
-  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "ok", stderr: "" }), () => 1_700_000_000_000);
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, commandPrompt) => { prompt = commandPrompt; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
   const body = JSON.stringify(event);
   const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
   assert.equal((await runner.handle("claude", headers, body)).status, 202);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(statusUpdates.map((value) => JSON.parse(value).status), ["READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW"]);
+  assert.deepEqual(statusUpdates, []);
+  assert.match(prompt, /Smithy never changes the task status/);
+  assert.match(prompt, /Enabled workflow statuses: BACKLOG, READY_FOR_DEV, IN_PROGRESS, READY_FOR_REVIEW/);
+  assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"IN_PROGRESS","runId":"run-backlog"\}/);
+  assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"READY_FOR_REVIEW","runId":"run-backlog"\}/);
+});
+
+test("runner does not invent a transition when the workflow lacks semantic statuses", async () => {
+  let prompt = "";
+  const patches: string[] = [];
+  const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO"] }, task: { ...event.task, status: "TODO" } };
+    if (init?.method === "PATCH") patches.push(path);
+    if (path.endsWith("/runs")) return { run: { id: "run-minimal" } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, commandPrompt) => { prompt = commandPrompt; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const body = JSON.stringify(event);
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  assert.equal((await runner.handle("claude", headers, body)).status, 202);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(patches, []);
+  assert.match(prompt, /IN_PROGRESS is not enabled/);
+  assert.match(prompt, /ask the operator if no suitable transition exists/);
+  assert.match(prompt, /If a status PATCH returns 4xx/);
 });
 
 test("runner resumes a persisted pending job with the same event and run correlation", async () => {
