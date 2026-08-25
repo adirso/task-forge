@@ -14,6 +14,9 @@ const noopWorktree: WorktreeFactory = async (repo) => repo;
 
 export class SmithyRunner {
   private readonly store: JobStore;
+  private readonly activeByTask = new Map<string, string>();
+  private readonly controllers = new Map<string, AbortController>();
+  private readonly cancelled = new Set<string>();
   constructor(
     private readonly providers: Partial<Record<ProviderLabel, ProviderConfig>>,
     private readonly apiFactory: (config: ProviderConfig) => ApiClient = (config) => new ApiClient(process.env.TASKFORGE_API_URL ?? "http://127.0.0.1:4000", config.apiToken),
@@ -23,7 +26,32 @@ export class SmithyRunner {
     private readonly worktree: WorktreeFactory = noopWorktree,
   ) { this.store = store; }
 
-  async resume() { for (const job of this.store.pending()) void this.process(this.providers[job.provider as ProviderLabel], JSON.parse(job.body) as AgentEvent, job); }
+  async resume() {
+    for (const job of this.store.pending()) {
+      const event = JSON.parse(job.body) as AgentEvent;
+      if (this.activeByTask.has(job.taskId)) continue;
+      // A process that died after claiming a job leaves RUNNING in SQLite.
+      // Requeue only after the local lease window, retaining the event/run id
+      // so the API's conditional run claim performs the cross-process guard.
+      if (job.status === "RUNNING") {
+        const staleBefore = new Date(this.now() - 120_000).toISOString();
+        if (!this.store.requeue(job.eventId, staleBefore)) continue;
+      }
+      void this.process(this.providers[job.provider as ProviderLabel], event, job);
+    }
+  }
+
+  /** Cancel a local job and terminate the provider process when it is running. */
+  cancel(eventId: string) {
+    const controller = this.controllers.get(eventId);
+    if (controller) {
+      this.cancelled.add(eventId);
+      controller.abort();
+    }
+    const cancelled = this.store.cancel(eventId);
+    if (cancelled) this.cancelled.add(eventId);
+    return cancelled;
+  }
 
   async handle(provider: string, headers: Record<string, string | undefined>, body: string): Promise<RunnerResult> {
     const config = this.providers[provider as ProviderLabel];
@@ -33,7 +61,23 @@ export class SmithyRunner {
     try { event = JSON.parse(body) as AgentEvent; } catch { return { status: 400, body: JSON.stringify({ error: "Invalid JSON" }) }; }
     if (!event.id || !event.task?.id) return { status: 400, body: JSON.stringify({ error: "Event task and id are required" }) };
     const accepted = this.store.accept(event.id, provider, event.task.id, body);
-    if (accepted.duplicate) return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true }) };
+    if (accepted.duplicate) {
+      // A failed delivery may be replayed with the same event id. Requeue it
+      // so the persisted run id is retained and a second run is not created.
+      if (accepted.job.status === "FAILED") {
+        if (this.store.requeue(event.id)) {
+          void this.process(config, event, { ...accepted.job, status: "PENDING" }).catch(() => undefined);
+          return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, retried: true }) };
+        }
+        return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, retryExhausted: true }) };
+      }
+      return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true }) };
+    }
+    const owner = this.activeByTask.get(event.task.id);
+    if (owner && owner !== event.id) {
+      this.store.markComplete(event.id, "CANCELLED");
+      return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, activeEventId: owner }) };
+    }
     void this.process(config, event, accepted.job).catch(() => undefined);
     return { status: 202, body: JSON.stringify({ accepted: true, eventId: event.id }) };
   }
@@ -70,6 +114,21 @@ export class SmithyRunner {
 
   private async process(config: ProviderConfig | undefined, event: AgentEvent, job = this.store.accept(event.id, "unknown", event.task!.id, JSON.stringify(event)).job) {
     if (!config) return;
+    const taskId = event.task?.id ?? job.taskId;
+    const owner = this.activeByTask.get(taskId);
+    if (owner && owner !== event.id) {
+      this.store.markComplete(event.id, "CANCELLED");
+      return;
+    }
+    this.activeByTask.set(taskId, event.id);
+    const controller = new AbortController();
+    this.controllers.set(event.id, controller);
+    if (this.cancelled.has(event.id)) {
+      controller.abort();
+      this.controllers.delete(event.id);
+      this.activeByTask.delete(taskId);
+      return;
+    }
     this.store.markRunning(event.id);
     const api = this.apiFactory(config);
     let runId = event.runId ?? job.runId ?? null;
@@ -113,12 +172,28 @@ export class SmithyRunner {
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
+      if (this.cancelled.has(event.id)) {
+        await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: "Smithy run cancelled by operator." }) }).catch(() => undefined);
+        await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "CANCELLED" }) }).catch(() => undefined);
+        this.store.markComplete(event.id, "CANCELLED");
+        return;
+      }
       const result = await this.execute(config.cmd, prompt, cwd, undefined, (stream, chunk) => {
         const text = redact(chunk.trim()).slice(0, 1_000).trim();
         if (!text) return;
         appendLog(stream, "output", text);
-      });
+      }, controller.signal);
       await logQueue;
+      this.controllers.delete(event.id);
+      if (result.cancelled || this.cancelled.has(event.id)) {
+        const message = "Smithy run cancelled by operator.";
+        appendLog("system", "lifecycle", message);
+        await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: message }) }).catch(() => undefined);
+        await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "CANCELLED" }) }).catch(() => undefined);
+        this.store.markComplete(event.id, "CANCELLED");
+        await logQueue;
+        return;
+      }
       if (result.code !== 0) {
         const reason = result.timedOut ? "Provider command timed out" : (result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`));
         appendLog("system", "lifecycle", reason);
@@ -130,12 +205,19 @@ export class SmithyRunner {
       await logQueue;
       this.store.markComplete(event.id, "SUCCEEDED");
     } catch (error) {
-      this.store.markComplete(event.id, "FAILED");
+      const wasCancelled = this.cancelled.has(event.id);
+      this.store.markComplete(event.id, wasCancelled ? "CANCELLED" : "FAILED");
       logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:failure`, content: redact(error instanceof Error ? error.message : "Runner failure") }) }); }).catch(() => undefined);
       await logQueue;
-      await api.request(`/api/tasks/${event.task!.id}/updates`, { method: "POST", body: JSON.stringify({ body: `Smithy run failed: ${redact(error instanceof Error ? error.message : "Runner failure")}` }) }).catch(() => undefined);
-      if (runId) await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "FAILED", error: redact(error instanceof Error ? error.message : "Runner failure") }) }).catch(() => undefined);
-    } finally { if (heartbeat) clearInterval(heartbeat); }
+      const message = wasCancelled ? "Smithy run cancelled by operator." : `Smithy run failed: ${redact(error instanceof Error ? error.message : "Runner failure")}`;
+      await api.request(`/api/tasks/${event.task!.id}/updates`, { method: "POST", body: JSON.stringify({ body: message }) }).catch(() => undefined);
+      if (runId) await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: wasCancelled ? "CANCELLED" : "FAILED", ...(wasCancelled ? {} : { error: redact(error instanceof Error ? error.message : "Runner failure") }) }) }).catch(() => undefined);
+    } finally {
+      this.controllers.delete(event.id);
+      this.cancelled.delete(event.id);
+      if (this.activeByTask.get(taskId) === event.id) this.activeByTask.delete(taskId);
+      if (heartbeat) clearInterval(heartbeat);
+    }
     void job;
   }
 }

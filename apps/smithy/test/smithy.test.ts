@@ -92,6 +92,11 @@ test("job store deduplicates events and survives status transitions", () => {
   assert.equal(store.pending()[0]?.status, "RUNNING");
   store.markComplete("event-store", "SUCCEEDED");
   assert.equal(store.pending().length, 0);
+  store.markComplete("event-store", "FAILED");
+  assert.equal(store.requeue("event-store"), true);
+  assert.equal(store.pending()[0]?.status, "PENDING");
+  store.cancel("event-store");
+  assert.equal(store.pending().length, 0);
 });
 
 test("SQLite job store persists dedupe and recovery state", async (t) => {
@@ -103,10 +108,20 @@ test("SQLite job store persists dedupe and recovery state", async (t) => {
   try { first = new SqliteJobStore(file); } catch { t.skip("better-sqlite3 is unavailable for this Node ABI"); await rm(directory, { recursive: true, force: true }); return; }
   first.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event));
   first.markRunning("event-sqlite");
+  first.setRunId("event-sqlite", "run-sqlite");
   first.close?.();
   const second = new SqliteJobStore(file);
-  assert.equal(second.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event)).duplicate, true);
+  const duplicate = second.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event));
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.job.runId, "run-sqlite");
   assert.equal(second.pending()[0]?.status, "RUNNING");
+  second.markComplete("event-sqlite", "FAILED");
+  assert.equal(second.requeue("event-sqlite"), true);
+  const concurrent = new SqliteJobStore(file);
+  assert.equal(concurrent.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event)).duplicate, true);
+  assert.equal(concurrent.cancel("event-sqlite"), true);
+  assert.equal(concurrent.pending().length, 0);
+  concurrent.close?.();
   second.close?.();
   await rm(directory, { recursive: true, force: true });
 });
@@ -136,6 +151,15 @@ test("provider command timeout is explicit", async () => {
   const result = await executeCommand(`${process.execPath} -e "setTimeout(() => {}, 1000)"`, "ignored", process.cwd(), 20);
   assert.equal(result.code, null);
   assert.equal(result.timedOut, true);
+});
+
+test("provider command cancellation terminates the child", async () => {
+  const controller = new AbortController();
+  const resultPromise = executeCommand(`${process.execPath} -e "setTimeout(() => {}, 1000)"`, "ignored", process.cwd(), 2_000, undefined, controller.signal);
+  controller.abort();
+  const result = await resultPromise;
+  assert.equal(result.cancelled, true);
+  assert.equal(result.timedOut, false);
 });
 
 test("runner routes signed events, executes once, and deduplicates delivery", async () => {
@@ -283,4 +307,116 @@ test("runner resumes a persisted pending job with the same event and run correla
   assert.equal(accepted.job.runId, "run-existing");
   assert.ok(calls.includes("/api/runs/run-existing/claim"));
   assert.ok(calls.includes("/api/runs/run-existing/complete"));
+});
+
+test("runner only resumes stale RUNNING jobs after the lease window", async () => {
+  const freshStore = new MemoryJobStore();
+  const fresh = freshStore.accept("event-fresh-running", "claude", event.task.id, JSON.stringify(event)).job;
+  freshStore.markRunning(fresh.eventId);
+  let freshExecutions = 0;
+  const api = { request: async (path: string) => { if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-recovered" } }; return {}; } };
+  const freshRunner = new SmithyRunner({ claude: provider }, () => api as never, async () => { freshExecutions += 1; return { code: 0, stdout: "", stderr: "" }; }, () => Date.parse(fresh.updatedAt) + 60_000, freshStore);
+  await freshRunner.resume();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(freshExecutions, 0);
+
+  const staleStore = new MemoryJobStore();
+  const stale = staleStore.accept("event-stale-running", "claude", event.task.id, JSON.stringify(event)).job;
+  staleStore.markRunning(stale.eventId);
+  const staleUpdatedAt = Date.parse(stale.updatedAt);
+  let staleExecutions = 0;
+  const staleRunner = new SmithyRunner({ claude: provider }, () => api as never, async () => { staleExecutions += 1; return { code: 0, stdout: "", stderr: "" }; }, () => staleUpdatedAt + 120_001, staleStore);
+  await staleRunner.resume();
+  await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+  assert.equal(staleExecutions, 1);
+});
+
+test("runner replays a failed duplicate without creating a second run", async () => {
+  let executions = 0;
+  const calls: string[] = [];
+  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-retry" } }; return {}; } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { executions += 1; return executions === 1 ? { code: 1, stdout: "", stderr: "first failure" } : { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const body = JSON.stringify({ ...event, id: "event-retry" });
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  const retry = await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(retry.body, /\"retried\":true/);
+  assert.equal(executions, 2);
+  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 1);
+  assert.equal(calls.filter((path) => path.endsWith("/complete")).length, 2);
+});
+
+test("runner bounds failed duplicate replays to three local attempts", async () => {
+  let executions = 0;
+  const api = { request: async (path: string) => { if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-bounded" } }; return {}; } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { executions += 1; return { code: 1, stdout: "", stderr: "failure" }; }, () => 1_700_000_000_000);
+  const body = JSON.stringify({ ...event, id: "event-bounded" });
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  const exhausted = await runner.handle("claude", headers, body);
+  assert.match(exhausted.body, /retryExhausted/);
+  assert.equal(executions, 3);
+});
+
+test("runner prevents concurrent jobs for the same task", async () => {
+  let executions = 0;
+  let release!: () => void;
+  const running = new Promise<void>((resolve) => { release = resolve; });
+  const calls: string[] = [];
+  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: `run-${calls.length}` } }; return {}; } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { executions += 1; await running; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const first = { ...event, id: "event-concurrent-1" };
+  const second = { ...event, id: "event-concurrent-2" };
+  const signed = (value: object) => { const body = JSON.stringify(value); return { body, headers: { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` } }; };
+  await runner.handle("claude", signed(first).headers, signed(first).body);
+  await new Promise((resolve) => setImmediate(resolve));
+  await runner.handle("claude", signed(second).headers, signed(second).body);
+  assert.equal(executions, 1);
+  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 1);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("runner cancellation aborts the provider and completes the correlated run", async () => {
+  let signal!: AbortSignal;
+  const calls: Array<{ path: string; body?: string }> = [];
+  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-cancel" } }; return {}; } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (...args: unknown[]) => {
+    signal = args[5] as AbortSignal;
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+    return { code: null, stdout: "", stderr: "", cancelled: true };
+  }, () => 1_700_000_000_000);
+  const body = JSON.stringify({ ...event, id: "event-cancel" });
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(signal);
+  assert.equal(runner.cancel("event-cancel"), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const completion = calls.find((call) => call.path.endsWith("/complete"));
+  assert.match(completion?.body ?? "", /CANCELLED/);
+});
+
+test("runner cancellation during worktree preparation prevents provider start", async () => {
+  let executions = 0;
+  let release!: () => void;
+  const preparing = new Promise<void>((resolve) => { release = resolve; });
+  const calls: Array<{ path: string; body?: string }> = [];
+  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-pre-cancel" } }; return {}; } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { executions += 1; return { code: 0, stdout: "", stderr: "" }; }, () => 1_700_000_000_000, new MemoryJobStore(), async () => { await preparing; return "/tmp/repo"; });
+  const body = JSON.stringify({ ...event, id: "event-pre-cancel" });
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runner.cancel("event-pre-cancel"), true);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(executions, 0);
 });

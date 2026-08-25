@@ -12,6 +12,13 @@ export function createSmithyServer(config = loadConfig(), runner = new SmithyRun
       void runProviderPreflight(config.providers).then((providers) => { response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ enabled: true, providers })); }).catch(() => { response.writeHead(500, { "Content-Type": "application/json" }); response.end(JSON.stringify({ enabled: true, providers: [], error: "Provider health checks failed" })); });
       return;
     }
+    const cancelMatch = request.method === "POST" ? request.url?.match(/^\/jobs\/([^/]+)\/cancel$/) : null;
+    if (cancelMatch) {
+      const cancelled = runner.cancel(cancelMatch[1]!);
+      response.writeHead(cancelled ? 200 : 404, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(cancelled ? { cancelled: true, eventId: cancelMatch[1] } : { error: "Job is not cancellable" }));
+      return;
+    }
     if (request.method !== "POST" || !request.url?.startsWith("/agents/")) { response.writeHead(404); response.end(JSON.stringify({ error: "Not found" })); return; }
     const provider = request.url.slice("/agents/".length).split("/")[0] ?? "";
     const chunks: Buffer[] = [];
