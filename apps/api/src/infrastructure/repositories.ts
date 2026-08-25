@@ -331,8 +331,11 @@ function createAgentLogRepository(db: DatabasePort): AgentLogRepository {
       return input;
     },
     async purgeForTask(taskId, keep) {
-      const unlimited = db.dialect === "sqlite" ? "-1" : "18446744073709551615";
-      const rows = await db.prepare(`SELECT id FROM agent_logs WHERE task_id = ? ORDER BY created_at DESC, id ASC LIMIT ${unlimited} OFFSET ?`).all(taskId, Math.max(0, keep));
+      const countRow = await db.prepare("SELECT COUNT(*) AS count FROM agent_logs WHERE task_id = ?").get(taskId) as { count?: number } | undefined;
+      const count = Number(countRow?.count ?? 0);
+      const offset = Math.max(0, keep);
+      if (count <= offset) return 0;
+      const rows = await db.prepare(`SELECT id FROM agent_logs WHERE task_id = ? ORDER BY created_at DESC, id ASC LIMIT ${count - offset} OFFSET ${offset}`).all(taskId);
       if (!rows.length) return 0;
       return (await db.prepare(`DELETE FROM agent_logs WHERE id IN (${rows.map(() => "?").join(",")})`).run(...rows.map((row) => row.id))).changes;
     },
