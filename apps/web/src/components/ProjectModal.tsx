@@ -69,7 +69,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
             try { await onEnableWorkflow(); onClose(); }
             catch (err) { setError(err instanceof Error ? err.message : "Could not enable agent workflow"); }
             finally { setEnabling(false); }
-          }}>{enabling ? "Enabling…" : "Enable default agent workflow"}</button> : <div className="project-status-options">
+          }}>{enabling ? "Enabling…" : "Enable default agent workflow"}</button> : <div className="agent-workflow-options">
             {(Object.keys(DEFAULT_AGENT_WORKFLOW) as Array<keyof AgentWorkflow>).map((role) => <label key={role}>{role.replace(/[A-Z]/g, (letter) => ` ${letter}`).replace(/^./, (letter) => letter.toUpperCase())}<select value={agentWorkflow[role]} onChange={(event) => setAgentWorkflow({ ...agentWorkflow, [role]: event.target.value as TaskStatus })}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select></label>)}
           </div>}
         </section>}

@@ -55,6 +55,10 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByRole("heading", { name: createdProjectName })).toBeVisible();
     await expect(page.getByRole("region", { name: "Done tasks" })).toHaveCount(0);
+    await openProjectSettings(page);
+    await expect(page.getByRole("button", { name: "Enable default agent workflow" })).toBeVisible();
+    await page.getByRole("button", { name: "Enable default agent workflow" }).click();
+    await expect(page.getByText("Agent workflow enabled")).toBeVisible();
 
     await page.getByRole("button", { name: "Create task" }).first().click();
     await page.getByLabel("Task name").fill("Browser regression task");
