@@ -108,10 +108,20 @@ test("SQLite job store persists dedupe and recovery state", async (t) => {
   try { first = new SqliteJobStore(file); } catch { t.skip("better-sqlite3 is unavailable for this Node ABI"); await rm(directory, { recursive: true, force: true }); return; }
   first.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event));
   first.markRunning("event-sqlite");
+  first.setRunId("event-sqlite", "run-sqlite");
   first.close?.();
   const second = new SqliteJobStore(file);
-  assert.equal(second.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event)).duplicate, true);
+  const duplicate = second.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event));
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.job.runId, "run-sqlite");
   assert.equal(second.pending()[0]?.status, "RUNNING");
+  second.markComplete("event-sqlite", "FAILED");
+  assert.equal(second.requeue("event-sqlite"), true);
+  const concurrent = new SqliteJobStore(file);
+  assert.equal(concurrent.accept("event-sqlite", "codex", event.task.id, JSON.stringify(event)).duplicate, true);
+  assert.equal(concurrent.cancel("event-sqlite"), true);
+  assert.equal(concurrent.pending().length, 0);
+  concurrent.close?.();
   second.close?.();
   await rm(directory, { recursive: true, force: true });
 });
