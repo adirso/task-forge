@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { X } from "lucide-react";
-import { TASK_STATUSES, type Project, type TaskStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, type AgentWorkflow, type Project, type TaskStatus } from "@taskforge/contracts";
 import { statusMeta } from "../lib/ui";
 
-type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus };
+type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus; agentWorkflow?: AgentWorkflow | null };
 
-export function ProjectModal({ project, projects = [], onClose, onSave }: { project?: Project | null; projects?: Project[]; onClose: () => void; onSave: (project: ProjectFormInput) => Promise<void> }) {
+export function ProjectModal({ project, projects = [], onClose, onSave, onEnableWorkflow }: { project?: Project | null; projects?: Project[]; onClose: () => void; onSave: (project: ProjectFormInput) => Promise<void>; onEnableWorkflow?: () => Promise<void> }) {
   const [name, setName] = useState(project?.name ?? "");
   const [key, setKey] = useState(project?.key ?? "");
   const [keyEdited, setKeyEdited] = useState(false);
@@ -15,8 +15,10 @@ export function ProjectModal({ project, projects = [], onClose, onSave }: { proj
   const [color, setColor] = useState(project?.color ?? "#6554C0");
   const [availableStatuses, setAvailableStatuses] = useState<TaskStatus[]>(project?.availableStatuses ?? [...TASK_STATUSES]);
   const [defaultStatus, setDefaultStatus] = useState<TaskStatus>(project?.defaultStatus ?? "TODO");
+  const [agentWorkflow, setAgentWorkflow] = useState<AgentWorkflow | null>(project?.agentWorkflow ?? null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [enabling, setEnabling] = useState(false);
   function suggestedKey(value: string) {
     const base = value.replace(/[^A-Za-z0-9]/g, "").slice(0, 3).toUpperCase() || "NEW";
     const used = new Set(projects.map((item) => item.key.toUpperCase()));
@@ -30,7 +32,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave }: { proj
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    try { await onSave({ name, key, description, repoUrl: repoUrl || null, localRepoPath: localRepoPath.trim() || null, color, ...(project ? { availableStatuses, defaultStatus } : {}) }); onClose(); }
+    try { await onSave({ name, key, description, repoUrl: repoUrl || null, localRepoPath: localRepoPath.trim() || null, color, ...(project ? { availableStatuses, defaultStatus, agentWorkflow } : {}) }); onClose(); }
     catch (err) { setError(err instanceof Error ? err.message : `Could not ${project ? "update" : "create"} project`); }
     finally { setSaving(false); }
   }
@@ -57,6 +59,16 @@ export function ProjectModal({ project, projects = [], onClose, onSave }: { proj
             }} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>;
           })}</div>
           <label>Default status for API-created tasks<select value={defaultStatus} onChange={(event) => setDefaultStatus(event.target.value as TaskStatus)}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select><small>Used when an API request creates a task without a status.</small></label>
+        </section>}
+        {project && <section className="project-status-settings">
+          <div><strong>Agent workflow</strong><span>Configure the statuses Smithy uses for implementation and review handoffs.</span></div>
+          {!agentWorkflow ? <button type="button" className="button button-secondary" disabled={enabling} onClick={async () => {
+            if (!onEnableWorkflow) { setAvailableStatuses([...TASK_STATUSES]); setDefaultStatus("TODO"); setAgentWorkflow({ ...DEFAULT_AGENT_WORKFLOW }); return; }
+            setEnabling(true);
+            try { await onEnableWorkflow(); onClose(); } finally { setEnabling(false); }
+          }}>{enabling ? "Enabling…" : "Enable default agent workflow"}</button> : <div className="project-status-options">
+            {(Object.keys(DEFAULT_AGENT_WORKFLOW) as Array<keyof AgentWorkflow>).map((role) => <label key={role}>{role.replace(/[A-Z]/g, (letter) => ` ${letter}`).replace(/^./, (letter) => letter.toUpperCase())}<select value={agentWorkflow[role]} onChange={(event) => setAgentWorkflow({ ...agentWorkflow, [role]: event.target.value as TaskStatus })}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select></label>)}
+          </div>}
         </section>}
         {error && <div className="form-error">{error}</div>}
         <footer><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving}>{saving ? (project ? "Saving…" : "Creating…") : (project ? "Save changes" : "Create project")}</button></footer>
