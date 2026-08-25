@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { test } from "node:test";
 import os from "node:os";
 import path from "node:path";
@@ -31,17 +31,29 @@ test("fake provider matrix renders prompt arguments and streams redacted output"
   for (const label of selectedLabels) {
     const temp = await mkdtemp(path.join(os.tmpdir(), "smithy-matrix-"));
     try {
+      const bin = path.join(temp, "bin");
+      await mkdir(bin);
+      const shimLabels = ["claude", "codex", "cursor-agent", "custom-agent"];
+      for (const shim of shimLabels) {
+        const shimPath = path.join(bin, shim);
+        await writeFile(shimPath, `#!/usr/bin/env node\nimport { spawnSync } from "node:child_process";\nconst result = spawnSync(process.execPath, [${JSON.stringify(fixture)}, ...process.argv.slice(2)], { stdio: "inherit", env: process.env });\nprocess.exit(result.status ?? 1);\n`);
+        await chmod(shimPath, 0o755);
+      }
+      const previousPath = process.env.PATH;
+      process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ""}`;
       const prompt = "quote; echo SHOULD_NOT_RUN";
-      const template = `${process.execPath} ${fixture} ${label === "custom" ? "--prompt" : "-p"} {prompt}`;
+      const template = label === "custom" ? `custom-agent --prompt {prompt}` : HEADLESS_PROVIDER_COMMANDS[label]!;
       const command = renderCommand(template, prompt);
-      assert.equal(command.executable, process.execPath);
+      assert.equal(command.executable, label === "custom" ? "custom-agent" : label === "cursor" ? "cursor-agent" : label);
       const chunks: string[] = [];
-      const result = await executeCommand(template, prompt, temp, 2_000, (stream, chunk) => chunks.push(`${stream}:${chunk}`));
-      assert.equal(result.code, 0);
-      assert.match(result.stdout, /SHOULD_NOT_RUN/);
-      assert.ok(chunks.some((chunk) => chunk.startsWith("stdout:")));
-      assert.match(redact(result.stdout), /token=\[REDACTED\]/);
-      assert.doesNotMatch(redact(result.stdout), /tf_fake_secret/);
+      try {
+        const result = await executeCommand(template, prompt, temp, 2_000, (stream, chunk) => chunks.push(`${stream}:${chunk}`));
+        assert.equal(result.code, 0);
+        assert.match(result.stdout, /SHOULD_NOT_RUN/);
+        assert.ok(chunks.some((chunk) => chunk.startsWith("stdout:")));
+        assert.match(redact(result.stdout), /token=\[REDACTED\]/);
+        assert.doesNotMatch(redact(result.stdout), /tf_fake_secret/);
+      } finally { process.env.PATH = previousPath; }
     } finally { await rm(temp, { recursive: true, force: true }); }
   }
 });
@@ -74,8 +86,15 @@ test("fake provider runner is idempotent and redacts callback logs", async () =>
 test("fake provider timeout and missing installation diagnostics are deterministic", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "smithy-failure-matrix-"));
   try {
-    const timeout = await executeCommand(`${process.execPath} ${fixture}`, "ignored", temp, 20, undefined, undefined);
-    assert.equal(timeout.timedOut, true);
+    const previousMode = process.env.FAKE_PROVIDER_MODE;
+    process.env.FAKE_PROVIDER_MODE = "timeout";
+    try {
+      const timeout = await executeCommand(`${process.execPath} ${fixture}`, "ignored", temp, 100, undefined, undefined);
+      assert.equal(timeout.timedOut, true);
+    } finally {
+      if (previousMode === undefined) delete process.env.FAKE_PROVIDER_MODE;
+      else process.env.FAKE_PROVIDER_MODE = previousMode;
+    }
     const missing = await checkProvider("codex", { cmd: "definitely-missing-smithy-provider {prompt}", webhookSecret: "secret", apiToken: "tf_secret" }, executeCommand);
     assert.equal(missing.status, "MISSING");
     assert.doesNotMatch(missing.message, /tf_secret/);
