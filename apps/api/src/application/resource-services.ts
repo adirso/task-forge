@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { DEFAULT_PROJECT_STATUSES } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, agentWorkflowSchema } from "@taskforge/contracts";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { PhaseEntity, ProjectEntity, UserEntity } from "./models.js";
@@ -20,15 +20,26 @@ export class ProjectApplicationService implements ProjectService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now: () => string = () => new Date().toISOString(), private readonly newId: () => string = randomUUID) {}
   async list(context: RequestContext) { return this.unitOfWork.run((repositories) => repositories.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN")); }
   async get(context: ProjectContext) { return this.unitOfWork.run(async (repositories) => { const project = await projectAccess(repositories, context, context.projectId); const members = await repositories.memberships.list(context.projectId); return { ...project, members: members.map((member) => ({ ...member, projectRole: member.id === project.ownerId ? "OWNER" as const : "MEMBER" as const })) }; }); }
-  async create(context: RequestContext, input: ProjectCreateInput) { return this.unitOfWork.run(async (repositories) => { if (await repositories.projects.findByKey(input.key)) throw new ConflictError(`Project key ${input.key} is already in use`); const now = this.now(); const project: ProjectEntity = { ...input, sortOrder: await repositories.projects.allocateSortOrder(), availableStatuses: [...DEFAULT_PROJECT_STATUSES], defaultStatus: "TODO", id: this.newId(), ownerId: context.actor.userId, createdAt: now, updatedAt: now }; await repositories.projects.create(project); await repositories.memberships.add(project.id, context.actor.userId, "OWNER"); await repositories.phases.create({ id: this.newId(), projectId: project.id, number: 1, goal: "Plan and deliver the first project milestone.", isActive: true, createdAt: now, updatedAt: now }); return project; }); }
-  async update(context: ProjectContext, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus">>) { return this.unitOfWork.run(async (repositories) => {
+  async create(context: RequestContext, input: ProjectCreateInput) { return this.unitOfWork.run(async (repositories) => { if (await repositories.projects.findByKey(input.key)) throw new ConflictError(`Project key ${input.key} is already in use`); const now = this.now(); const project: ProjectEntity = { ...input, sortOrder: await repositories.projects.allocateSortOrder(), availableStatuses: [...TASK_STATUSES], defaultStatus: "TODO", agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW }, id: this.newId(), ownerId: context.actor.userId, createdAt: now, updatedAt: now }; await repositories.projects.create(project); await repositories.memberships.add(project.id, context.actor.userId, "OWNER"); await repositories.phases.create({ id: this.newId(), projectId: project.id, number: 1, goal: "Plan and deliver the first project milestone.", isActive: true, createdAt: now, updatedAt: now }); return project; }); }
+  async update(context: ProjectContext, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow">>) { return this.unitOfWork.run(async (repositories) => {
     const project = await projectAccess(repositories, context, context.projectId);
-    const changesStatusConfiguration = input.availableStatuses !== undefined || input.defaultStatus !== undefined;
+    let changes = input;
+    const changesStatusConfiguration = input.availableStatuses !== undefined || input.defaultStatus !== undefined || input.agentWorkflow !== undefined;
     if (changesStatusConfiguration && context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can manage task statuses");
     const availableStatuses = input.availableStatuses ?? project.availableStatuses;
     const defaultStatus = input.defaultStatus ?? project.defaultStatus;
     if (!availableStatuses.length) throw new ValidationError("At least one task status must be available");
     if (!availableStatuses.includes(defaultStatus)) throw new ValidationError("The default status must be available in this project");
+    const workflow = input.agentWorkflow !== undefined ? input.agentWorkflow : project.agentWorkflow;
+    if (workflow !== undefined && workflow !== null) {
+      const parsed = agentWorkflowSchema.safeParse(workflow);
+      if (!parsed.success) throw new ValidationError("Agent workflow must define all eight workflow roles");
+      const unavailable = Object.entries(parsed.data).filter(([, status]) => !availableStatuses.includes(status)).map(([role, status]) => `${role}=${status}`);
+      if (unavailable.length) {
+        if (input.agentWorkflow !== undefined) throw new ValidationError(`Enable these statuses before assigning workflow roles: ${unavailable.join(", ")}`);
+        changes = { ...input, agentWorkflow: null };
+      }
+    }
     if (input.availableStatuses) {
       const unavailableInUse = (await repositories.tasks.listUsedStatuses(context.projectId)).filter((status) => !availableStatuses.includes(status));
       if (unavailableInUse.length) throw new ValidationError(`Move tasks out of ${unavailableInUse.join(", ")} before disabling those statuses`);
@@ -39,8 +50,15 @@ export class ProjectApplicationService implements ProjectService {
       const unavailableInAutomation = [...new Set(automationStatuses.filter((status) => !availableStatuses.includes(status as ProjectEntity["defaultStatus"])))];
       if (unavailableInAutomation.length) throw new ValidationError(`Update automations using ${unavailableInAutomation.join(", ")} before disabling those statuses`);
     }
-    return repositories.projects.update(context.projectId, input);
+    return repositories.projects.update(context.projectId, changes);
   }); }
+  async enableAgentWorkflow(context: ProjectContext) {
+    return this.unitOfWork.run(async (repositories) => {
+      const project = await projectAccess(repositories, context, context.projectId);
+      if (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can enable the agent workflow");
+      return repositories.projects.update(project.id, { availableStatuses: [...new Set([...project.availableStatuses, ...Object.values(DEFAULT_AGENT_WORKFLOW)])], agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW } });
+    });
+  }
   async delete(context: ProjectContext) { return this.unitOfWork.run(async (repositories) => { const project = await projectAccess(repositories, context, context.projectId); if (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can delete this project"); await repositories.projects.delete(context.projectId); }); }
   async reorder(context: RequestContext, projectIds: string[]) { return this.unitOfWork.run(async (repositories) => { const accessible = await repositories.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN"); const allowed = new Set(accessible.map((project) => project.id)); if (projectIds.length !== accessible.length || projectIds.some((id) => !allowed.has(id))) throw new ValidationError("Project order must include every accessible project exactly once"); if (new Set(projectIds).size !== projectIds.length) throw new ValidationError("Project order contains duplicates"); await repositories.projects.reorder(projectIds); }); }
   async addMember(context: ProjectContext, userId: string, role: "OWNER" | "MEMBER") { return this.unitOfWork.run(async (repositories) => { const project = await projectAccess(repositories, context, context.projectId); if (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can manage members"); const user = await repositories.users.findById(userId); if (!user) throw new NotFoundError("User"); if (role === "OWNER" && userId !== project.ownerId) throw new ValidationError("A project can only have its original owner"); await repositories.memberships.add(context.projectId, userId, userId === project.ownerId ? "OWNER" : role); }); }

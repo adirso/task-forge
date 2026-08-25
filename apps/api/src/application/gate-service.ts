@@ -3,6 +3,7 @@ import type { RequestContext } from "./context.js";
 import type { TaskGateEntity } from "./models.js";
 import type { UnitOfWork } from "./repositories.js";
 import type { TaskGateService } from "./services.js";
+import { enqueueTaskStatusWebhook } from "./transition-effects.js";
 
 const sha = (value: string) => /^[0-9a-f]{7,64}$/i.test(value);
 
@@ -21,7 +22,10 @@ export class TaskGateApplicationService implements TaskGateService {
       const saved = await r.gates.save(gate);
       if (changedHead) {
         const reviewStatus = project.availableStatuses.includes("IN_REVIEW") ? "IN_REVIEW" : project.availableStatuses.includes("READY_FOR_REVIEW") ? "READY_FOR_REVIEW" : null;
-        if (reviewStatus && task.status !== reviewStatus) await r.tasks.update(taskId, { status: reviewStatus });
+        if (reviewStatus && task.status !== reviewStatus) {
+          const changed = await r.tasks.update(taskId, { status: reviewStatus });
+          await enqueueTaskStatusWebhook(r, changed, task.status, context, null, undefined, this.now);
+        }
       }
       return saved;
     });
