@@ -262,6 +262,32 @@ test("runner gives fix and re-review jobs focused, status-aware prompts", async 
   }
 });
 
+test("runner uses the project workflow mapping and ignores ordinary updates", async () => {
+  let prompt = "";
+  const calls: string[] = [];
+  const workflow = { implementationQueue: "QUEUE", implementationStart: "BUILDING", reviewHandoff: "HANDOFF", reviewStart: "REVIEWING", approved: "APPROVED", fixNeeded: "CHANGES", fixStart: "FIXING", reReview: "RECHECK" };
+  const api = { request: async (path: string) => {
+    calls.push(path);
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: Object.values(workflow), agentWorkflow: workflow }, task: { ...event.task, status: "QUEUE", branch: "agent/custom" } };
+    if (path.endsWith("/runs")) return { run: { id: "run-custom" } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, commandPrompt) => { prompt = commandPrompt; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const assigned = { ...event, id: "event-custom", task: { ...event.task, status: "QUEUE", branch: "agent/custom" } };
+  const body = JSON.stringify(assigned);
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(prompt, /status":"BUILDING/);
+  assert.match(prompt, /status":"HANDOFF/);
+
+  const update = { ...event, id: "event-comment", event: "task.update_added", task: { ...event.task, status: "QUEUE" } };
+  const updateBody = JSON.stringify(update);
+  await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, updateBody)}` }, updateBody);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 1);
+});
+
 test("runner fails closed when a fix run has no existing branch", async () => {
   const calls: Array<{ path: string; body?: string }> = [];
   const api = { request: async (path: string, init?: RequestInit) => {

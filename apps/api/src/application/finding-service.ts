@@ -4,9 +4,11 @@ import type { RequestContext } from "./context.js";
 import type { FindingDisposition, TaskFindingEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
 import type { TaskFindingService } from "./services.js";
+import { AutomationEngine } from "./automation-service.js";
+import { enqueueTaskStatusWebhook } from "./transition-effects.js";
 
 export class TaskFindingApplicationService implements TaskFindingService {
-  constructor(private readonly unitOfWork: UnitOfWork, private readonly now = () => new Date().toISOString(), private readonly newId = randomUUID) {}
+  constructor(private readonly unitOfWork: UnitOfWork, private readonly now = () => new Date().toISOString(), private readonly newId = randomUUID, private readonly automationEngine = new AutomationEngine()) {}
 
   async list(context: RequestContext, taskId: string) {
     return this.unitOfWork.run(async (r) => { const task = await r.tasks.findById(taskId); if (!task) throw new NotFoundError("Task"); await this.authorize(r, context, task.projectId); return r.findings.listForTask(taskId); });
@@ -43,11 +45,15 @@ export class TaskFindingApplicationService implements TaskFindingService {
         if (!fixStatus) throw new ValidationError("Project workflow must enable FIX_NEEDED or IN_PROGRESS before requesting fixes");
         const gate = await r.gates.findByTask(task.id);
         if (gate) await r.gates.save({ ...gate, approvedHeadSha: null, approvedById: null, approvedAt: null, mergedHeadSha: null, mergedById: null, mergedAt: null, updatedAt: now });
-        await r.tasks.update(task.id, { status: fixStatus });
+        const changed = await r.tasks.update(task.id, { status: fixStatus });
         const attemptCount = await r.runs.countForTask(task.id); if (attemptCount >= 6) throw new ValidationError("Task has reached the maximum autonomous delivery cycle limit");
-        await r.runs.create({ id: this.newId(), taskId: task.id, projectId: task.projectId, requestedById: context.actor.userId, kind: "FIX", status: "PENDING", attemptCount: 0, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: now, updatedAt: now, completedAt: null });
+        const run = await r.runs.create({ id: this.newId(), taskId: task.id, projectId: task.projectId, requestedById: context.actor.userId, kind: "FIX", status: "PENDING", attemptCount: 0, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: now, updatedAt: now, completedAt: null });
+        const automated = await this.automationEngine.apply(r, context, task, changed, "TASK_UPDATED");
+        await enqueueTaskStatusWebhook(r, automated, task.status, context, run.id, this.newId, this.now);
       } else if (input.disposition === "ESCALATED") {
-        await r.tasks.update(task.id, { status: "PENDING_DECISION" });
+        const changed = await r.tasks.update(task.id, { status: "PENDING_DECISION" });
+        const automated = await this.automationEngine.apply(r, context, task, changed, "TASK_UPDATED");
+        await enqueueTaskStatusWebhook(r, automated, task.status, context, null, this.newId, this.now);
       }
       await r.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.finding_disposed", metadata: { findingId, disposition: input.disposition, reason, decisionOwnerId: input.decisionOwnerId ?? null, dueAt: input.dueAt ?? null } }); return updated;
     });

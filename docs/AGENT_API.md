@@ -182,7 +182,9 @@ curl -sS -X POST "http://127.0.0.1:4000/api/projects/$PROJECT_ID/tasks/claim" \
   -d '{"priority":"HIGH"}'
 ```
 
-For handoff and lifecycle updates, use `READY_FOR_REVIEW` when enabled, otherwise `IN_REVIEW` when enabled. Use `DONE` for successful completion only when it is enabled; `CANCELLED` is not a completion substitute. If the project has no enabled review or completion status, refresh `GET /api/context`, leave the task status unchanged, and ask the project owner which enabled transition represents that step. Send-to-AI prompts follow these same rules and list the enabled statuses they were generated from.
+For handoff and lifecycle updates, read `project.agentWorkflow` from `GET /api/context` when configured. The default roles are `TODO`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `APPROVED`, `FIX_NEEDED`, `FIX_IN_PROGRESS`, and `RE_REVIEW`. Explicit project automations should assign the reviewer at `READY_FOR_REVIEW`, the implementer at `FIX_NEEDED`, and the reviewer again at `RE_REVIEW`. Agents own their status PATCHes; Smithy only routes signed prompts and records runs. A reviewer may set `APPROVED`, but a human authorizes the merge and moves the task to `DONE`. If no workflow is configured, preserve the legacy enabled-status guidance and never PATCH a disabled status.
+
+Project owners and administrators can enable or configure the workflow with `POST /api/projects/:id/agent-workflow/enable` or `PATCH /api/projects/:id` using `agentWorkflow`. All eight roles must be present and map to enabled project statuses. Existing projects are never silently changed by migrations.
 
 To replace dependencies without changing any other task fields, use the dedicated endpoint. The request replaces the full set atomically at the application level; send an empty array to remove all dependencies:
 
