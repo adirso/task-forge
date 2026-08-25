@@ -9,3 +9,4 @@ export * from "./resource-services.js";
 export * from "./cross-cutting-services.js";
 export * from "./attachment-service.js";
 export * from "./webhook-service.js";
+export * from "./agent-log-service.js";

@@ -203,6 +203,23 @@ GET  /api/tasks/:id/updates
 POST /api/tasks/:id/updates   {"body":"Implementation is ready for review."}
 ```
 
+Agent provider output is kept separate from human updates. Smithy (or another
+runner) may append redacted, structured log entries and consumers can page them
+without mixing tool output into the task discussion:
+
+```http
+GET  /api/tasks/:id/agent-logs?limit=50&cursor=...
+POST /api/tasks/:id/agent-logs
+     {"runId":"...","provider":"codex","stream":"stdout",
+      "category":"output","sequence":12,"eventId":"event:12",
+      "content":"..."}
+```
+
+Log entries are authorized using the same project membership boundary as the
+task, secrets are redacted server-side, duplicate `eventId` values are
+idempotent, and the server retains a bounded history per task. Use `updates`
+for decisions, handoffs, blockers, and other human-readable progress.
+
 Reusable project tags:
 
 ```http

@@ -728,3 +728,22 @@ test("login throttles by account and records redacted audit metadata", async () 
   assert.equal(audit.account, account);
   assert.doesNotMatch(JSON.stringify(audit), /not-the-password/);
 });
+
+test("agent logs are paginated, ordered, redacted, and idempotent", async () => {
+  const first = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/agent-logs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { provider: "codex", stream: "stdout", category: "output", sequence: 1, eventId: "api-log-event-1", content: "first password=secret-one" } });
+  assert.equal(first.statusCode, 201, first.body);
+  assert.equal(first.json().agentLog.content, "first password=[REDACTED]");
+  const duplicate = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/agent-logs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { provider: "codex", stream: "stdout", category: "output", sequence: 1, eventId: "api-log-event-1", content: "duplicate" } });
+  assert.equal(duplicate.statusCode, 200);
+  assert.equal(duplicate.json().duplicate, true);
+  for (const sequence of [2, 3]) {
+    const response = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/agent-logs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { provider: "codex", stream: "stdout", category: "output", sequence, eventId: `api-log-event-${sequence}`, content: `log-${sequence}` } });
+    assert.equal(response.statusCode, 201);
+  }
+  const page = await app.inject({ method: "GET", url: `/api/tasks/${taskId}/agent-logs?limit=2`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(page.statusCode, 200);
+  assert.deepEqual(page.json().agentLogs.map((log: { sequence: number }) => log.sequence), [3, 2]);
+  assert.equal(page.json().page.hasMore, true);
+  const next = await app.inject({ method: "GET", url: `/api/tasks/${taskId}/agent-logs?limit=2&cursor=${encodeURIComponent(page.json().page.nextCursor)}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.deepEqual(next.json().agentLogs.map((log: { sequence: number }) => log.sequence), [1]);
+});

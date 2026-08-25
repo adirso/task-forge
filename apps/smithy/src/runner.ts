@@ -68,8 +68,8 @@ export class SmithyRunner {
     const api = this.apiFactory(config);
     let runId = event.runId ?? job.runId ?? null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
-    let outputUpdates = Promise.resolve();
-    let lastOutputAt = 0;
+    let logSequence = 0;
+    let logQueue = Promise.resolve();
     try {
       const projectKey = event.task?.projectKey;
       const taskNumber = event.task?.number;
@@ -94,52 +94,43 @@ export class SmithyRunner {
       heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }).catch(() => undefined); }, 30_000);
       heartbeat.unref?.();
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `Smithy started ${kind.toLowerCase()} run ${runId}.` }) });
+      const appendLog = (stream: "stdout" | "stderr" | "system" | "callback", category: "output" | "progress" | "tool" | "callback" | "lifecycle", content: string) => {
+        const sequence = logSequence++;
+        const eventId = `${event.id}:${sequence}`;
+        logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${task.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream, category, sequence, eventId, content: redact(content).slice(0, 10_000) }) }); }).catch(() => undefined);
+      };
+      appendLog("system", "lifecycle", `Smithy started ${kind.toLowerCase()} run ${runId}.`);
       const statuses = context.project.availableStatuses;
       await this.moveToStartStatus(api, task, statuses, kind, runId);
       const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${task.title ?? ""}`, task.description ?? "", `Definition of done: ${task.definitionOfDone ?? ""}`, ...(task.updates ?? []).map((update) => `Update: ${update.body}`), "Report progress through the TaskForge API. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
-      const reportOutput = (stream: "stdout" | "stderr", chunk: string) => {
-        // Keep task updates useful without turning every provider progress
-        // token into a webhook/API request. Output is redacted before it ever
-        // leaves the runner and is bounded to one compact update.
-        const now = this.now();
-        if (now - lastOutputAt < 5_000) return;
+      const result = await this.execute(config.cmd, prompt, cwd, undefined, (stream, chunk) => {
         const text = redact(chunk.trim()).slice(0, 1_000).trim();
         if (!text) return;
-        lastOutputAt = now;
-        outputUpdates = outputUpdates.then(async () => {
-          await api.request(`/api/tasks/${task.id}/updates`, {
-            method: "POST",
-            body: JSON.stringify({ body: `Smithy provider output (${stream}):\n${text}${chunk.trim().length > 1_000 ? "\n[Provider output truncated]" : ""}` }),
-          });
-        }).catch(() => undefined);
-      };
-      const result = await this.execute(config.cmd, prompt, cwd, undefined, reportOutput);
-      await outputUpdates;
+        appendLog(stream, "output", text);
+      });
+      await logQueue;
       if (result.code !== 0) {
         const reason = result.timedOut ? "Provider command timed out" : (result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`));
+        appendLog("system", "lifecycle", reason);
         throw new Error(redact(reason));
       }
-      const summary = summarizeOutput(result.stdout, result.stderr);
-      await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `${kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.`}${summary ? `\n\nProvider response:\n${summary}` : ""}` }) });
+      await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });
       const handoffStatus = kind === "REVIEW" || kind === "RE_REVIEW" ? null : "READY_FOR_REVIEW";
       if (handoffStatus && statuses.includes(handoffStatus)) await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: handoffStatus, runId }) });
       await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }) });
+      appendLog("system", "lifecycle", `Smithy ${kind.toLowerCase()} run completed successfully.`);
+      await logQueue;
       this.store.markComplete(event.id, "SUCCEEDED");
     } catch (error) {
       this.store.markComplete(event.id, "FAILED");
+      logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:failure`, content: redact(error instanceof Error ? error.message : "Runner failure") }) }); }).catch(() => undefined);
+      await logQueue;
       await api.request(`/api/tasks/${event.task!.id}/updates`, { method: "POST", body: JSON.stringify({ body: `Smithy run failed: ${redact(error instanceof Error ? error.message : "Runner failure")}` }) }).catch(() => undefined);
       if (runId) await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "FAILED", error: redact(error instanceof Error ? error.message : "Runner failure") }) }).catch(() => undefined);
     } finally { if (heartbeat) clearInterval(heartbeat); }
     void job;
   }
-}
-
-function summarizeOutput(stdout: string, stderr: string): string {
-  const output = redact([stdout.trim(), stderr.trim()].filter(Boolean).join("\n")).trim();
-  if (!output) return "";
-  const limit = 4_000;
-  return output.length > limit ? `${output.slice(0, limit)}\n[Provider output truncated]` : output;
 }

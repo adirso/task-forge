@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentLastActiveEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -70,6 +70,12 @@ export interface TaskDependencyRepository {
 export interface TaskUpdateRepository {
   listForTask(taskId: string, page: PageRequest): Promise<Page<TaskUpdateEntity>>;
   create(input: TaskUpdateEntity): Promise<TaskUpdateEntity>;
+}
+
+export interface AgentLogRepository {
+  listForTask(taskId: string, page: PageRequest): Promise<Page<AgentLogEntity>>;
+  append(input: AgentLogEntity): Promise<AgentLogEntity | null>;
+  purgeForTask(taskId: string, keep: number): Promise<number>;
 }
 
 export interface AttachmentRepository {
@@ -159,6 +165,7 @@ export interface RepositorySet {
   tags: TaskTagRepository;
   dependencies: TaskDependencyRepository;
   updates: TaskUpdateRepository;
+  agentLogs: AgentLogRepository;
   attachments: AttachmentRepository;
   automations: AutomationRepository;
   notifications: NotificationRepository;

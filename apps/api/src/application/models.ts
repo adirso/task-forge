@@ -241,6 +241,21 @@ export interface TaskUpdateEntity {
   author?: UserEntity;
 }
 
+export type AgentLogStream = "stdout" | "stderr" | "system" | "callback";
+export type AgentLogCategory = "output" | "progress" | "tool" | "callback" | "lifecycle";
+export interface AgentLogEntity {
+  id: string;
+  taskId: string;
+  runId: string | null;
+  provider: string;
+  stream: AgentLogStream;
+  category: AgentLogCategory;
+  sequence: number;
+  eventId: string | null;
+  content: string;
+  createdAt: string;
+}
+
 export interface AttachmentEntity {
   id: string;
   taskId: string;
