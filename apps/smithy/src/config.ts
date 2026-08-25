@@ -1,6 +1,13 @@
 /** Provider names are routing labels; Smithy does not contain provider-specific code. */
 export type ProviderLabel = string;
 
+/** Headless-safe defaults used by the configurator and integration matrix. */
+export const HEADLESS_PROVIDER_COMMANDS: Readonly<Record<string, string>> = Object.freeze({
+  claude: "claude -p --permission-mode auto {prompt}",
+  codex: "codex exec --approve-for-me {prompt}",
+  cursor: "cursor-agent -p --force --trust {prompt}",
+});
+
 export interface ProviderConfig {
   cmd: string;
   /** Optional operator-owned command used for authentication diagnostics. */

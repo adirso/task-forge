@@ -2,15 +2,9 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import path from "node:path";
 import { defaultEnvFile, readProviders, writeProviders, type SmithyProviderValues } from "./env-file.js";
+import { HEADLESS_PROVIDER_COMMANDS } from "./config.js";
 
 const labels = ["claude", "codex", "cursor", "other"] as const;
-const defaultCommands: Record<string, string> = {
-  // These are headless-safe defaults for Smithy's isolated worktrees.
-  claude: "claude -p --permission-mode auto {prompt}",
-  codex: "codex exec --approve-for-me {prompt}",
-  cursor: "cursor-agent -p --force --trust {prompt}",
-};
-
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : undefined;
@@ -50,7 +44,7 @@ async function configure(file: string): Promise<void> {
       const name = selected === "other" ? await promptRequired(rl, "Custom provider label") : selected;
       if (!/^[a-z][a-z0-9_-]{0,63}$/i.test(name)) throw new Error("Provider label must start with a letter and contain only letters, numbers, '_' or '-'.");
       const current = providers[name];
-      const cmd = current?.cmd ?? defaultCommands[name];
+      const cmd = current?.cmd ?? HEADLESS_PROVIDER_COMMANDS[name];
       if (!cmd) {
         // Custom providers deliberately require an explicit operator-owned command.
         throw new Error("Command template (use {prompt}) is required for custom providers");

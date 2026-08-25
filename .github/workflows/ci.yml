@@ -124,6 +124,33 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  smithy-integration:
+    name: Smithy provider matrix (${{ matrix.provider }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [claude, codex, cursor, custom]
+    env:
+      SMITHY_PROVIDER_LABEL: ${{ matrix.provider }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run deterministic Smithy integration matrix
+        run: npm run test:integration -w @taskforge/smithy
+
   browser-e2e:
     name: Browser E2E
     runs-on: ubuntu-latest

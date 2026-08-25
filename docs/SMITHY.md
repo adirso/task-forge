@@ -51,4 +51,11 @@ TaskForge delivery is at-least-once. Administrators can inspect failed deliverie
 
 Delivery health is available from the administrator-only webhook metrics endpoint. Delivered history can be purged with the retention endpoint after a backup; pending, retrying, and failed deliveries are never removed by retention. A disaster-recovery drill should restore both stores, replay a failed delivery, and verify that duplicate event IDs remain idempotent.
 
-Run tests with `npm test -w @taskforge/smithy`; the suite covers signature verification, path routing, command boundaries, idempotent delivery, redaction, and missing-provider behavior.
+Run the complete Smithy suite with `npm test -w @taskforge/smithy`. The deterministic provider matrix can be run separately with `npm run test:integration -w @taskforge/smithy`; set `SMITHY_PROVIDER_LABEL=claude|codex|cursor|custom` to exercise one matrix row, or omit it to run all four labels. The matrix uses a checked-in fake executable, never provider credentials, and covers headless command defaults, argument boundaries, streaming/redaction, callback idempotency, timeout, missing installations, and isolated reusable worktrees. CI runs the same command as four parallel matrix jobs.
+
+### Troubleshooting provider integration locally
+
+- If a matrix test reports an unknown label, use one of `claude`, `codex`, `cursor`, or `custom`; custom providers must supply their own command template in the real environment.
+- A `MISSING` preflight result means the configured executable is not installed; the fake matrix does not install or authenticate any provider.
+- If worktree tests fail, verify Git is installed and that the temporary repository can set a local user name/email. Do not point tests at a production checkout.
+- If the full suite skips the SQLite test with a `better-sqlite3` ABI message, run Node.js 22 and reinstall dependencies with `npm ci` before retrying.
