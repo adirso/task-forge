@@ -18,6 +18,6 @@ test("agent logs redact secrets, validate run ownership, and deduplicate event I
   const service = new AgentLogApplicationService(unit(repositories), () => "2026-08-25T00:00:00.000Z", () => "log-1");
   const first = await service.append(context, "task-1", { runId: "run-1", provider: "codex", stream: "stderr", category: "output", sequence: 1, eventId: "event:1", content: "Authorization: Bearer tf_private password=hunter2" });
   assert.equal(first.content, "Authorization: Bearer [REDACTED] password=[REDACTED]");
-  assert.equal((await service.append(context, "task-1", { runId: "run-1", provider: "codex", stream: "stderr", category: "output", sequence: 1, eventId: "event:1", content: "duplicate" })).id, "log-1");
+  assert.equal(await service.append(context, "task-1", { runId: "run-1", provider: "codex", stream: "stderr", category: "output", sequence: 1, eventId: "event:1", content: "duplicate" }), null);
   await assert.rejects(() => service.append(context, "task-1", { runId: "other-run", provider: "codex", stream: "stdout", category: "output", sequence: 2, eventId: null, content: "x" }), /runId must reference/);
 });

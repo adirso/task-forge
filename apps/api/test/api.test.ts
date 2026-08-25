@@ -737,6 +737,7 @@ test("agent logs are paginated, ordered, redacted, and idempotent", async () => 
   assert.equal(duplicate.statusCode, 200);
   assert.equal(duplicate.json().duplicate, true);
   for (const sequence of [2, 3]) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
     const response = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/agent-logs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { provider: "codex", stream: "stdout", category: "output", sequence, eventId: `api-log-event-${sequence}`, content: `log-${sequence}` } });
     assert.equal(response.statusCode, 201);
   }

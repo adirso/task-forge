@@ -323,7 +323,7 @@ function createAgentLogRepository(db: DatabasePort): AgentLogRepository {
     },
     async append(input) {
       try {
-        await db.prepare("INSERT INTO agent_logs (id, task_id, run_id, provider, stream, category, sequence, event_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.runId, input.provider, input.stream, input.category, input.sequence, input.eventId, input.content, input.createdAt);
+        await db.prepare("INSERT INTO agent_logs (id, task_id, run_id, provider, stream, category, `sequence`, event_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.runId, input.provider, input.stream, input.category, input.sequence, input.eventId, input.content, input.createdAt);
       } catch (error) {
         if (input.eventId && /unique|duplicate/i.test(error instanceof Error ? error.message : String(error))) return null;
         throw error;
