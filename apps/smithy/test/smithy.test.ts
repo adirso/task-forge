@@ -253,6 +253,7 @@ test("runner leaves task transitions to the assigned agent and explains the work
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(statusUpdates, []);
   assert.match(prompt, /Smithy never changes the task status/);
+  assert.match(prompt, /Branch: \(no branch configured\)/);
   assert.match(prompt, /Enabled workflow statuses: BACKLOG, TODO, IN_PROGRESS, READY_FOR_REVIEW/);
   assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"IN_PROGRESS","runId":"run-backlog"\}/);
   assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"READY_FOR_REVIEW","runId":"run-backlog"\}/);
@@ -281,10 +282,12 @@ test("runner gives fix and re-review jobs focused, status-aware prompts", async 
 test("runner uses the project workflow mapping and ignores ordinary updates", async () => {
   let prompt = "";
   const calls: string[] = [];
+  let contextStatus = "QUEUE";
   const workflow = { implementationQueue: "QUEUE", implementationStart: "BUILDING", reviewHandoff: "HANDOFF", reviewStart: "REVIEWING", approved: "APPROVED", fixNeeded: "CHANGES", fixStart: "FIXING", reReview: "RECHECK" };
   const api = { request: async (path: string) => {
     calls.push(path);
-    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: Object.values(workflow), agentWorkflow: workflow }, task: { ...event.task, status: "QUEUE", branch: "agent/custom" } };
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: Object.values(workflow), agentWorkflow: workflow }, task: { ...event.task, status: contextStatus, branch: "agent/custom" } };
+    if (path.endsWith("/findings")) return { findings: [{ severity: "P2", disposition: "OPEN", title: "Review item", body: "Inspect this path." }] };
     if (path.endsWith("/runs")) return { run: { id: "run-custom" } };
     return {};
   } };
@@ -296,12 +299,60 @@ test("runner uses the project workflow mapping and ignores ordinary updates", as
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(prompt, /status":"BUILDING/);
   assert.match(prompt, /status":"HANDOFF/);
+  assert.match(prompt, /Branch: agent\/custom/);
+
+  contextStatus = "HANDOFF";
+  const review = { ...event, id: "event-custom-review", event: "task.status_changed", previousStatus: "BUILDING", task: { ...event.task, status: "HANDOFF", branch: "agent/custom" } };
+  const reviewBody = JSON.stringify(review);
+  await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, reviewBody)}` }, reviewBody);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(prompt, /status":"REVIEWING/);
+  assert.match(prompt, /Review findings:/);
+  assert.match(prompt, /Review item/);
 
   const update = { ...event, id: "event-comment", event: "task.update_added", task: { ...event.task, status: "QUEUE" } };
   const updateBody = JSON.stringify(update);
   await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, updateBody)}` }, updateBody);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 1);
+  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 2);
+});
+
+test("runner includes redacted findings in fix prompts and rejects invalid mappings visibly", async () => {
+  let prompt = "";
+  const workflow = { implementationQueue: "QUEUE", implementationStart: "BUILDING", reviewHandoff: "HANDOFF", reviewStart: "REVIEWING", approved: "APPROVED", fixNeeded: "CHANGES", fixStart: "FIXING", reReview: "RECHECK" };
+  const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: Object.values(workflow), agentWorkflow: workflow }, task: { ...event.task, status: "CHANGES", branch: "agent/custom" } };
+    if (path.endsWith("/findings")) return { findings: [{ severity: "P1", disposition: "OPEN", title: "Leaked token", body: "token=secret-value" }] };
+    if (path.endsWith("/runs")) return { run: { id: "run-findings" } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, commandPrompt) => { prompt = commandPrompt; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const fixEvent = { ...event, id: "event-findings", event: "task.status_changed", task: { ...event.task, status: "CHANGES", branch: "agent/custom" } };
+  const body = JSON.stringify(fixEvent);
+  assert.equal((await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` }, body)).status, 202);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(prompt, /Review findings:/);
+  assert.match(prompt, /Leaked token/);
+  assert.doesNotMatch(prompt, /secret-value/);
+
+  let failure = "";
+  const invalidApi = { request: async (path: string, init?: RequestInit) => {
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["QUEUE", "BUILDING"], agentWorkflow: { ...workflow, reviewHandoff: "HANDOFF" } }, task: { ...event.task, status: "QUEUE" } };
+    if (path.endsWith("/updates")) { failure = String(init?.body ?? ""); return {}; }
+    return {};
+  } };
+  const invalidRunner = new SmithyRunner({ claude: provider }, () => invalidApi as never, async () => { throw new Error("must not execute"); }, () => 1_700_000_000_000);
+  const invalidBody = JSON.stringify({ ...event, id: "event-invalid-map", task: { ...event.task, status: "QUEUE" } });
+  await invalidRunner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, invalidBody)}` }, invalidBody);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(failure, /Invalid project agent workflow mapping/);
+
+  failure = "";
+  const update = { ...event, id: "event-invalid-map-update", event: "task.update_added", task: { ...event.task, status: "QUEUE" } };
+  const updateBody = JSON.stringify(update);
+  await invalidRunner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, updateBody)}` }, updateBody);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(failure, "", "ordinary updates remain inert even when a mapping is invalid");
 });
 
 test("runner fails closed when a fix run has no existing branch", async () => {
