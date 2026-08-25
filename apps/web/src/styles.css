@@ -234,12 +234,23 @@ svg { flex: 0 0 auto; }
 .new-phase-form { margin-top: 20px; border-top: 1px solid #ebecf0; padding-top: 18px; display: grid; gap: 12px; }.new-phase-form h3 { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; }.new-phase-form h3 svg { width: 15px; color: #6554c0; }.new-phase-form > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 10px; }.new-phase-form label { display: grid; gap: 6px; color: #42526e; font-size: 11px; font-weight: 650; }.new-phase-form input { height: 40px; border: 1px solid #dfe1e6; border-radius: 6px; padding: 0 10px; outline: 0; font-size: 12px; }.new-phase-form input:focus { border-color: #8777d9; box-shadow: 0 0 0 3px rgba(101,84,192,.1); }.new-phase-form .checkbox-label { display: flex; grid-template-columns: none; align-items: center; gap: 7px; font-weight: 500; }.new-phase-form .checkbox-label input { width: 15px; height: 15px; }.new-phase-form .checkbox-label svg { width: 14px; color: #6554c0; }.new-phase-form footer { display: flex; justify-content: flex-end; }
 @keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(.985); } }
 .task-modal > header, .project-modal > header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
-.task-modal > header { flex: 0 0 auto; align-items: center; gap: 16px; margin: 0; padding: 18px 25px 16px; border-bottom: 1px solid #ebecf0; background: #fff; }
+.task-modal > header { flex: 0 0 auto; align-items: center; gap: 16px; margin: 0; padding: 18px 25px 14px; border-bottom: 0; background: #fff; }
 .task-modal .modal-header-copy { min-width: 0; flex: 1 1 auto; }
 .task-modal h2, .project-modal h2 { margin: 4px 0 0; font-size: 23px; letter-spacing: -.3px; }
 .task-modal h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; color: #172b4d; }
 .modal-kicker { color: #6554c0; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
 .task-modal .modal-header-actions { flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
+.task-modal-tabs { flex: 0 0 auto; display: flex; align-items: stretch; gap: 2px; padding: 0 18px; border-bottom: 1px solid #ebecf0; background: #fff; overflow-x: auto; scrollbar-width: thin; }
+.task-modal-tabs button { flex: 0 0 auto; height: 40px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #6b778c; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.task-modal-tabs button svg { width: 14px; }
+.task-modal-tabs button:hover:not(:disabled) { color: #403294; }
+.task-modal-tabs button.active { color: #5243aa; border-bottom-color: #6554c0; }
+.task-modal-tabs button:disabled { color: #a5adba; cursor: not-allowed; }
+.task-modal-tabs button b { margin-left: 2px; border-radius: 9px; background: #ebecf0; color: #6b778c; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+.task-modal-tabs button.active b { background: #eae6ff; color: #403294; }
+.task-tab-panel { display: grid; gap: 16px; }
+.task-agents .task-runs, .task-agents .task-agent-logs { margin-top: 0; padding-top: 0; border-top: 0; }
+.task-updates.task-tab-panel .task-activity { margin-top: 8px; padding-top: 16px; }
 .icon-button { width: 32px; height: 32px; border-radius: 6px; border: 0; background: transparent; display: grid; place-items: center; color: #6b778c; }
 .icon-button:hover { background: #f1f2f4; }
 .icon-button svg { width: 17px; }
@@ -520,7 +531,7 @@ html[data-text-size="large"] body { zoom: 1.08; }
   .toolbar-filters.open .estimate-filter { grid-column: 1 / -1; }
   .toolbar-filters.open .clear-filters { justify-self: end; }
   .task-total { margin-left: auto; }
-  .content-area { padding: 14px 12px; }.project-dashboard { gap: 20px; padding: 16px 12px 32px; }.project-dashboard-heading { padding: 20px; }.project-dashboard-metrics { grid-template-columns: 1fr 1fr; gap: 12px; }.project-dashboard-grid { grid-template-columns: 1fr; gap: 16px; }.modal-backdrop { padding: 10px; }.modal-grid { grid-template-columns: 1fr; }.task-modal > header { padding: 14px 16px 12px; }.task-modal > .modal-body { padding: 16px 16px 10px; }.task-modal > footer { padding: 12px 16px 14px; flex-wrap: wrap; gap: 10px; }.modal-fields { grid-template-columns: 1fr; }.project-status-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .content-area { padding: 14px 12px; }.project-dashboard { gap: 20px; padding: 16px 12px 32px; }.project-dashboard-heading { padding: 20px; }.project-dashboard-metrics { grid-template-columns: 1fr 1fr; gap: 12px; }.project-dashboard-grid { grid-template-columns: 1fr; gap: 16px; }.modal-backdrop { padding: 10px; }.modal-grid { grid-template-columns: 1fr; }.task-modal > header { padding: 14px 16px 10px; }.task-modal-tabs { padding: 0 8px; }.task-modal-tabs button { padding: 0 10px; font-size: 11px; }.task-modal > .modal-body { padding: 16px 16px 10px; }.task-modal > footer { padding: 12px 16px 14px; flex-wrap: wrap; gap: 10px; }.modal-fields { grid-template-columns: 1fr; }.project-status-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .board { min-width: 0; grid-template-columns: 1fr; gap: 10px; }
   .phase-list-stack, .task-table, .phases-page, .active-phase-banner, .no-active-phase, .empty-board-phase { min-width: 0; }
   .task-table { min-width: 760px; }
@@ -700,4 +711,17 @@ html[data-text-size="large"] body { zoom: 1.08; }
 .widget-picker-text { display: flex; flex-direction: column; gap: 2px; }
 .widget-picker-text strong { font-size: 13px; color: #172b4d; }
 .widget-picker-text small { font-size: 11px; color: #8993a4; line-height: 1.4; }
-.task-status-duration { border-top: 1px solid #ebecf0; padding-top: 12px; }.task-status-duration > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }.task-status-duration > div:last-child > span { display: inline-flex; gap: 5px; padding: 5px 8px; border-radius: 6px; background: #f4f5f7; color: #6b778c; font-size: 11px; }.task-status-duration strong { color: #42526e; }
+.task-status-duration { border: 1px solid #ebecf0; border-radius: 8px; background: #fafbfc; padding: 12px 14px; display: grid; gap: 10px; }
+.task-status-duration .section-heading small { color: #6b778c; font-size: 11px; font-weight: 650; }
+.task-status-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: #ebecf0; }
+.task-status-bar > span { display: block; height: 100%; min-width: 3px; flex: 0 0 auto; }
+.task-status-bar > span.slate { background: #8993a4; }.task-status-bar > span.teal { background: #00a3bf; }.task-status-bar > span.blue { background: #2684ff; }.task-status-bar > span.indigo { background: #4c6fff; }.task-status-bar > span.purple { background: #6554c0; }.task-status-bar > span.orange { background: #ff8b00; }.task-status-bar > span.amber { background: #ff991f; }.task-status-bar > span.green { background: #36b37e; }.task-status-bar > span.red { background: #de350b; }
+.task-status-duration-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.task-status-duration-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; padding: 4px 6px; border-radius: 6px; }
+.task-status-duration-list li.is-current { background: #fff; box-shadow: inset 0 0 0 1px #dfe1e6; }
+.task-status-duration-label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: #42526e; font-size: 12px; }
+.task-status-duration-label strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+.task-status-duration-label em { flex: 0 0 auto; border-radius: 4px; background: #eae6ff; color: #403294; padding: 1px 5px; font-size: 9px; font-style: normal; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
+.task-status-duration-meta { flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 8px; color: #6b778c; font-size: 11px; }
+.task-status-duration-meta b { color: #253858; font-weight: 700; font-variant-numeric: tabular-nums; }
+.task-status-duration-meta small { min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
