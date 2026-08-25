@@ -33,7 +33,10 @@ export class SmithyRunner {
       // A process that died after claiming a job leaves RUNNING in SQLite.
       // Requeue only after the local lease window, retaining the event/run id
       // so the API's conditional run claim performs the cross-process guard.
-      if (job.status === "RUNNING" && this.now() - Date.parse(job.updatedAt) >= 120_000) this.store.requeue(job.eventId);
+      if (job.status === "RUNNING") {
+        const staleBefore = new Date(this.now() - 120_000).toISOString();
+        if (!this.store.requeue(job.eventId, staleBefore)) continue;
+      }
       void this.process(this.providers[job.provider as ProviderLabel], event, job);
     }
   }
@@ -61,15 +64,18 @@ export class SmithyRunner {
     if (accepted.duplicate) {
       // A failed delivery may be replayed with the same event id. Requeue it
       // so the persisted run id is retained and a second run is not created.
-      if (accepted.job.status === "FAILED" && this.store.requeue(event.id)) {
-        void this.process(config, event, { ...accepted.job, status: "PENDING" }).catch(() => undefined);
-        return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, retried: true }) };
+      if (accepted.job.status === "FAILED") {
+        if (this.store.requeue(event.id)) {
+          void this.process(config, event, { ...accepted.job, status: "PENDING" }).catch(() => undefined);
+          return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, retried: true }) };
+        }
+        return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, retryExhausted: true }) };
       }
       return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true }) };
     }
     const owner = this.activeByTask.get(event.task.id);
     if (owner && owner !== event.id) {
-      this.store.markComplete(event.id, "SUCCEEDED");
+      this.store.markComplete(event.id, "CANCELLED");
       return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, activeEventId: owner }) };
     }
     void this.process(config, event, accepted.job).catch(() => undefined);
@@ -111,11 +117,15 @@ export class SmithyRunner {
     const taskId = event.task?.id ?? job.taskId;
     const owner = this.activeByTask.get(taskId);
     if (owner && owner !== event.id) {
-      this.store.markComplete(event.id, "SUCCEEDED");
+      this.store.markComplete(event.id, "CANCELLED");
       return;
     }
     this.activeByTask.set(taskId, event.id);
+    const controller = new AbortController();
+    this.controllers.set(event.id, controller);
     if (this.cancelled.has(event.id)) {
+      controller.abort();
+      this.controllers.delete(event.id);
       this.activeByTask.delete(taskId);
       return;
     }
@@ -162,8 +172,12 @@ export class SmithyRunner {
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
-      const controller = new AbortController();
-      this.controllers.set(event.id, controller);
+      if (this.cancelled.has(event.id)) {
+        await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: "Smithy run cancelled by operator." }) }).catch(() => undefined);
+        await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "CANCELLED" }) }).catch(() => undefined);
+        this.store.markComplete(event.id, "CANCELLED");
+        return;
+      }
       const result = await this.execute(config.cmd, prompt, cwd, undefined, (stream, chunk) => {
         const text = redact(chunk.trim()).slice(0, 1_000).trim();
         if (!text) return;
