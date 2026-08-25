@@ -47,19 +47,24 @@ export class SmithyRunner {
     return "IMPLEMENTATION";
   }
 
-  private async moveToStartStatus(api: ApiClient, task: NonNullable<AgentEvent["task"]>, statuses: string[], kind: ReturnType<SmithyRunner["kind"]>, runId: string) {
-    const target = kind === "IMPLEMENTATION" || kind === "FIX" ? "IN_PROGRESS" : kind === "RE_REVIEW" ? "RE_REVIEW" : "IN_REVIEW";
-    if (!statuses.includes(target) || task.status === target) return;
-    // The workflow guard deliberately does not allow BACKLOG/REFINING to jump
-    // straight to IN_PROGRESS. Walk through the project's enabled preparation
-    // status first, preserving the same guard rules a human would use.
-    if (target === "IN_PROGRESS" && (task.status === "BACKLOG" || task.status === "REFINING")) {
-      const bridge = ["READY_FOR_DEV", "TODO"].find((status) => statuses.includes(status));
-      if (!bridge) throw new Error("Project workflow must enable READY_FOR_DEV or TODO before Smithy can start implementation");
-      await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: bridge, runId }) });
-      task.status = bridge;
-    }
-    await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: target, runId }) });
+  private statusPrompt(task: NonNullable<AgentEvent["task"]>, statuses: string[], kind: ReturnType<SmithyRunner["kind"]>, contextEndpoint: string, runId: string) {
+    const taskEndpoint = `/api/tasks/${task.id}`;
+    const transition = (status: string, purpose: string) => statuses.includes(status)
+      ? `- You own the ${purpose} transition: PATCH ${taskEndpoint} with {"status":"${status}","runId":"${runId}"} only after refreshing ${contextEndpoint} and confirming that ${status} is enabled.`
+      : `- ${purpose}: ${status} is not enabled. Refresh ${contextEndpoint}, choose an enabled status with the same meaning, and ask the operator if no suitable transition exists.`;
+    const lines = [
+      "Status ownership:",
+      "- Smithy never changes the task status. The assigned agent owns every implementation, review, fix, and re-review transition.",
+      `- Enabled workflow statuses: ${statuses.join(", ") || "(none returned; discover the workflow before changing status)"}. Never guess a status key or PATCH a disabled status.`,
+      "- Before every transition, GET the canonical context and use its latest project.availableStatuses.",
+      "- If a status PATCH returns 4xx, preserve the API error in the agent log and task update, stop that handoff, and report it. Do not silently retry with another status.",
+      "- Run completion is separate from task status: Smithy records the run result, but a successful run does not authorize or perform a task transition.",
+    ];
+    if (kind === "IMPLEMENTATION") lines.push(transition("IN_PROGRESS", "implementation start"), transition("READY_FOR_REVIEW", "implementation handoff for review"));
+    else if (kind === "FIX") lines.push(transition("IN_PROGRESS", "fix start"), transition("READY_FOR_REVIEW", "fix handoff for review"));
+    else if (kind === "RE_REVIEW") lines.push(transition("RE_REVIEW", "re-review start"), "- After re-review, report findings and evidence; do not approve or merge unless the workflow and operator policy explicitly authorize that action.");
+    else lines.push(transition("IN_REVIEW", "review start"), "- After review, record structured findings and evidence. Leave approval and merge decisions to the configured human/reviewer policy.");
+    return lines.join("\n");
   }
 
   private async process(config: ProviderConfig | undefined, event: AgentEvent, job = this.store.accept(event.id, "unknown", event.task!.id, JSON.stringify(event)).job) {
@@ -101,8 +106,8 @@ export class SmithyRunner {
       };
       appendLog("system", "lifecycle", `Smithy started ${kind.toLowerCase()} run ${runId}.`);
       const statuses = context.project.availableStatuses;
-      await this.moveToStartStatus(api, task, statuses, kind, runId);
-      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${task.title ?? ""}`, task.description ?? "", `Definition of done: ${task.definitionOfDone ?? ""}`, ...(task.updates ?? []).map((update) => `Update: ${update.body}`), "Report progress through the TaskForge API. Do not merge changes yourself."].join("\n\n");
+      const contextEndpoint = `/api/context?project=${encodeURIComponent(projectKey)}&task=${encodeURIComponent(`${projectKey}-${taskNumber}`)}`;
+      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${task.title ?? ""}`, task.description ?? "", `Definition of done: ${task.definitionOfDone ?? ""}`, ...(task.updates ?? []).map((update) => `Update: ${update.body}`), this.statusPrompt(task, statuses, kind, contextEndpoint, runId), "Report progress through the TaskForge API. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
@@ -118,8 +123,6 @@ export class SmithyRunner {
         throw new Error(redact(reason));
       }
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });
-      const handoffStatus = kind === "REVIEW" || kind === "RE_REVIEW" ? null : "READY_FOR_REVIEW";
-      if (handoffStatus && statuses.includes(handoffStatus)) await api.request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: handoffStatus, runId }) });
       await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }) });
       appendLog("system", "lifecycle", `Smithy ${kind.toLowerCase()} run completed successfully.`);
       await logQueue;
