@@ -49,6 +49,7 @@ export class SmithyRunner {
 
   private statusPrompt(task: NonNullable<AgentEvent["task"]>, statuses: string[], kind: ReturnType<SmithyRunner["kind"]>, contextEndpoint: string, runId: string) {
     const taskEndpoint = `/api/tasks/${task.id}`;
+    const findings = `GET ${taskEndpoint}/updates and GET ${taskEndpoint}/agent-logs`;
     const transition = (status: string, purpose: string) => statuses.includes(status)
       ? `- You own the ${purpose} transition: PATCH ${taskEndpoint} with {"status":"${status}","runId":"${runId}"} only after refreshing ${contextEndpoint} and confirming that ${status} is enabled.`
       : `- ${purpose}: ${status} is not enabled. Refresh ${contextEndpoint}, choose an enabled status with the same meaning, and ask the operator if no suitable transition exists.`;
@@ -61,8 +62,8 @@ export class SmithyRunner {
       "- Run completion is separate from task status: Smithy records the run result, but a successful run does not authorize or perform a task transition.",
     ];
     if (kind === "IMPLEMENTATION") lines.push(transition("IN_PROGRESS", "implementation start"), transition("READY_FOR_REVIEW", "implementation handoff for review"));
-    else if (kind === "FIX") lines.push(transition("IN_PROGRESS", "fix start"), transition("READY_FOR_REVIEW", "fix handoff for review"));
-    else if (kind === "RE_REVIEW") lines.push(transition("RE_REVIEW", "re-review start"), "- After re-review, report findings and evidence; do not approve or merge unless the workflow and operator policy explicitly authorize that action.");
+    else if (kind === "FIX") lines.push(task.branch ? `- Fix needed mode: remain on the existing branch ${task.branch}; do not create or switch branches.` : "- Fix needed mode requires a configured existing task branch; stop before editing and ask the operator to set it. Never invent a branch.", `- Read the latest review findings from ${findings}, resolve and test each finding, then request re-review.`, transition("IN_PROGRESS", "fix start"), transition("READY_FOR_REVIEW", "fix handoff for review"));
+    else if (kind === "RE_REVIEW") lines.push(`- Re-review mode: this task was previously reviewed. Read the latest findings from ${findings}, compare the current head against each finding and the Definition of done, and report remaining issues.`, transition("RE_REVIEW", "re-review start"), "- Do not assume approval or merge; report findings and evidence for the human/operator decision.");
     else lines.push(transition("IN_REVIEW", "review start"), "- After review, record structured findings and evidence. Leave approval and merge decisions to the configured human/reviewer policy.");
     return lines.join("\n");
   }
@@ -90,6 +91,7 @@ export class SmithyRunner {
         return;
       }
       const kind = this.kind({ ...event, task: { ...event.task, ...task } });
+      if (kind === "FIX" && !task.branch?.trim()) throw new Error("Fix run requires an existing task branch; configure the branch before retrying");
       if (!runId) {
         const created = await api.request(`/api/tasks/${task.id}/runs`, { method: "POST", body: JSON.stringify({ kind }) });
         runId = String((created.run as { id: string }).id);
@@ -107,7 +109,7 @@ export class SmithyRunner {
       appendLog("system", "lifecycle", `Smithy started ${kind.toLowerCase()} run ${runId}.`);
       const statuses = context.project.availableStatuses;
       const contextEndpoint = `/api/context?project=${encodeURIComponent(projectKey)}&task=${encodeURIComponent(`${projectKey}-${taskNumber}`)}`;
-      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${task.title ?? ""}`, task.description ?? "", `Definition of done: ${task.definitionOfDone ?? ""}`, ...(task.updates ?? []).map((update) => `Update: ${update.body}`), this.statusPrompt(task, statuses, kind, contextEndpoint, runId), "Report progress through the TaskForge API. Do not merge changes yourself."].join("\n\n");
+      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${task.title ?? ""}`, task.description ?? "", `Definition of done: ${task.definitionOfDone ?? ""}`, ...(task.updates ?? []).map((update) => `Human update: ${update.body}`), this.statusPrompt(task, statuses, kind, contextEndpoint, runId), "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
