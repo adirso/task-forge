@@ -184,14 +184,14 @@ export class SmithyRunner {
       const eventTask = event.previousStatus && event.task?.status && event.previousStatus === task.status
         ? { ...task, status: event.task.status }
         : { ...event.task, ...task };
-      const workflow = this.resolveWorkflow(context.project.agentWorkflow, context.project.availableStatuses);
-      // Keep legacy assignment semantics for projects without an opt-in mapping;
-      // the validated fallback is used only to render status-aware instructions.
+      // Determine whether this event is actionable before validating an opt-in
+      // mapping. Inert updates/statuses must remain harmless no-ops.
       const kind = this.kind({ ...event, task: eventTask }, context.project.agentWorkflow);
       if (!kind) {
         this.store.markComplete(event.id, "SUCCEEDED");
         return;
       }
+      const workflow = this.resolveWorkflow(context.project.agentWorkflow, context.project.availableStatuses);
       if (kind === "FIX" && !task.branch?.trim()) throw new Error("Fix run requires an existing task branch; configure the branch before retrying");
       if (!runId) {
         const created = await api.request(`/api/tasks/${task.id}/runs`, { method: "POST", body: JSON.stringify({ kind }) });
@@ -213,7 +213,7 @@ export class SmithyRunner {
       const findings = Array.isArray(findingResponse.findings) ? findingResponse.findings : [];
       const contextEndpoint = `/api/context?project=${encodeURIComponent(projectKey)}&task=${encodeURIComponent(`${projectKey}-${taskNumber}`)}`;
       const findingLines = findings.map((finding) => `Finding [${finding.severity ?? "UNKNOWN"}] ${finding.disposition ? `(${finding.disposition}) ` : ""}${redact(finding.title ?? "")}: ${redact(finding.body ?? "")}${finding.filePath ? ` (${finding.filePath}${finding.lineNumber ? `:${finding.lineNumber}` : ""})` : ""}`);
-      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...(task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
+      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, `Branch: ${task.branch?.trim() || "(no branch configured)"}`, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...(task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
