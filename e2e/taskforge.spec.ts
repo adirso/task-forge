@@ -91,6 +91,38 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0);
     await expect(page.getByRole("menuitem", { name: "Delete" })).toHaveCount(0);
   });
+
+  test("shows live, stalled, failed, and completed Smithy run observability", async ({ page }) => {
+    await signIn(page);
+    await createProject(page, `Observability Workspace ${Date.now() % 10000}`, `O${Date.now() % 1000000}`);
+    await page.getByRole("button", { name: "Create task" }).first().click();
+    await page.getByLabel("Task name").fill("Browser observability task");
+    await page.getByLabel("Description").fill("Run observability fixture");
+    await page.getByLabel("Definition of done").fill("Run health is visible");
+    await page.getByLabel("Task status").selectOption("TODO");
+    await page.getByRole("dialog", { name: "Create a task" }).getByRole("button", { name: "Create task", exact: true }).click();
+    await expect(page.getByRole("button", { name: /Browser observability task/ })).toBeVisible();
+
+    const now = Date.now();
+    await page.route("**/api/tasks/*/runs", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ runs: [
+      { id: "00000000-0000-4000-8000-000000000701", taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now + 120000).toISOString(), heartbeatAt: new Date(now - 30000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 60000).toISOString(), updatedAt: new Date(now - 30000).toISOString(), completedAt: null },
+      { id: "00000000-0000-4000-8000-000000000702", taskId: "task", projectId: "project", requestedById: "agent", kind: "FIX", status: "RUNNING", attemptCount: 2, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now - 1000).toISOString(), heartbeatAt: new Date(now - 180000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 240000).toISOString(), updatedAt: new Date(now - 180000).toISOString(), completedAt: null },
+      { id: "00000000-0000-4000-8000-000000000703", taskId: "task", projectId: "project", requestedById: "agent", kind: "REVIEW", status: "FAILED", attemptCount: 3, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: "Provider exited", createdAt: new Date(now - 300000).toISOString(), updatedAt: new Date(now - 240000).toISOString(), completedAt: new Date(now - 240000).toISOString() },
+      { id: "00000000-0000-4000-8000-000000000704", taskId: "task", projectId: "project", requestedById: "agent", kind: "RE_REVIEW", status: "SUCCEEDED", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: new Date(now - 600000).toISOString(), timeoutAt: null, lastError: null, createdAt: new Date(now - 600000).toISOString(), updatedAt: new Date(now - 500000).toISOString(), completedAt: new Date(now - 500000).toISOString() },
+    ] }) }));
+    await page.route("**/api/tasks/*/agent-logs*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agentLogs: [
+      { id: "log-701", taskId: "task", runId: "00000000-0000-4000-8000-000000000701", provider: "codex", stream: "stdout", category: "output", sequence: 3, eventId: null, content: "Waiting for permission to continue", createdAt: new Date(now - 10000).toISOString() },
+      { id: "log-702", taskId: "task", runId: "00000000-0000-4000-8000-000000000702", provider: "codex", stream: "stderr", category: "output", sequence: 2, eventId: null, content: "Last stalled output", createdAt: new Date(now - 180000).toISOString() },
+    ], page: { limit: 100, hasMore: false, nextCursor: null } }) }));
+    await page.getByRole("button", { name: /Browser observability task/ }).click();
+    await expect(page.getByText("Agent runs")).toBeVisible();
+    await expect(page.getByText("Live", { exact: true })).toBeVisible();
+    await expect(page.getByText("Lease expired", { exact: true })).toBeVisible();
+    await expect(page.getByText("Failed", { exact: true })).toBeVisible();
+    await expect(page.getByText("Completed", { exact: true })).toBeVisible();
+    await expect(page.getByText("Waiting for provider input", { exact: true })).toBeVisible();
+    await expect(page.getByText("Provider response timeline", { exact: false }).first()).toBeVisible();
+  });
 });
 
 test.describe("mobile workspace smoke", () => {
