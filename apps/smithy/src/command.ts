@@ -13,18 +13,23 @@ export function renderCommand(template: string, prompt: string) {
   return { executable: tokens[0], args: tokens.slice(1) };
 }
 
-export interface CommandResult { code: number | null; stdout: string; stderr: string; error?: Error; }
+export interface CommandResult { code: number | null; stdout: string; stderr: string; error?: Error; timedOut?: boolean; }
 
-export function executeCommand(template: string, prompt: string, cwd: string, timeoutMs = 30 * 60_000): Promise<CommandResult> {
+export type CommandOutput = (stream: "stdout" | "stderr", chunk: string) => void;
+
+export function executeCommand(template: string, prompt: string, cwd: string, timeoutMs = 30 * 60_000, onOutput?: CommandOutput): Promise<CommandResult> {
   const { executable, args } = renderCommand(template, prompt);
   return new Promise((resolve) => {
-    const child = spawn(executable, args, { cwd, shell: false, env: process.env });
+    // Providers must run unattended. A piped stdin can leave a CLI waiting
+    // forever for a permission/login answer that Smithy cannot provide.
+    const child = spawn(executable, args, { cwd, shell: false, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    child.on("error", (error) => { clearTimeout(timer); resolve({ code: null, stdout, stderr, error }); });
-    child.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs);
+    child.stdout.on("data", (chunk: Buffer) => { const text = chunk.toString(); stdout += text; onOutput?.("stdout", text); });
+    child.stderr.on("data", (chunk: Buffer) => { const text = chunk.toString(); stderr += text; onOutput?.("stderr", text); });
+    child.on("error", (error) => { clearTimeout(timer); resolve({ code: null, stdout, stderr, error, timedOut }); });
+    child.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr, timedOut }); });
   });
 }

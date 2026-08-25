@@ -68,6 +68,8 @@ export class SmithyRunner {
     const api = this.apiFactory(config);
     let runId = event.runId ?? job.runId ?? null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
+    let outputUpdates = Promise.resolve();
+    let lastOutputAt = 0;
     try {
       const projectKey = event.task?.projectKey;
       const taskNumber = event.task?.number;
@@ -98,8 +100,28 @@ export class SmithyRunner {
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
-      const result = await this.execute(config.cmd, prompt, cwd);
-      if (result.code !== 0) throw new Error(redact(result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`)));
+      const reportOutput = (stream: "stdout" | "stderr", chunk: string) => {
+        // Keep task updates useful without turning every provider progress
+        // token into a webhook/API request. Output is redacted before it ever
+        // leaves the runner and is bounded to one compact update.
+        const now = this.now();
+        if (now - lastOutputAt < 5_000) return;
+        const text = redact(chunk.trim()).slice(0, 1_000).trim();
+        if (!text) return;
+        lastOutputAt = now;
+        outputUpdates = outputUpdates.then(async () => {
+          await api.request(`/api/tasks/${task.id}/updates`, {
+            method: "POST",
+            body: JSON.stringify({ body: `Smithy provider output (${stream}):\n${text}${chunk.trim().length > 1_000 ? "\n[Provider output truncated]" : ""}` }),
+          });
+        }).catch(() => undefined);
+      };
+      const result = await this.execute(config.cmd, prompt, cwd, undefined, reportOutput);
+      await outputUpdates;
+      if (result.code !== 0) {
+        const reason = result.timedOut ? "Provider command timed out" : (result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`));
+        throw new Error(redact(reason));
+      }
       const summary = summarizeOutput(result.stdout, result.stderr);
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `${kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.`}${summary ? `\n\nProvider response:\n${summary}` : ""}` }) });
       const handoffStatus = kind === "REVIEW" || kind === "RE_REVIEW" ? null : "READY_FOR_REVIEW";
