@@ -60,7 +60,6 @@ export class TaskApplicationService implements TaskService {
         const project = await repositories.projects.findById(existing.projectId);
         if (!project) throw new NotFoundError("Project");
         this.assertStatusAvailable(project.availableStatuses, input.status);
-        this.assertStatusTransition(project.availableStatuses, existing.status, input.status);
       }
       await this.validateRelations(repositories, existing.projectId, taskId, input);
       const { tags, dependencyIds, runId, ...fields } = input;
@@ -146,25 +145,6 @@ export class TaskApplicationService implements TaskService {
 
   private assertStatusAvailable(availableStatuses: TaskStatus[], status: TaskStatus) {
     if (!availableStatuses.includes(status)) throw new ValidationError(`Status ${status} is not available in this project`);
-  }
-
-  private assertStatusTransition(availableStatuses: TaskStatus[], from: TaskStatus, to: TaskStatus) {
-    if (from === to || !availableStatuses.some((status) => ["APPROVED", "RE_REVIEW", "FIX_NEEDED", "PENDING_DECISION", "FAILED"].includes(status))) return;
-    const allowed: Partial<Record<TaskStatus, readonly TaskStatus[]>> = {
-      BACKLOG: ["REFINING", "TODO", "READY_FOR_DEV", "CANCELLED"],
-      REFINING: ["TODO", "READY_FOR_DEV", "CANCELLED"],
-      TODO: ["REFINING", "READY_FOR_DEV", "IN_PROGRESS", "CANCELLED"],
-      READY_FOR_DEV: ["TODO", "IN_PROGRESS", "CANCELLED"],
-      IN_PROGRESS: ["TODO", "READY_FOR_REVIEW", "RE_REVIEW", "FAILED", "CANCELLED"],
-      READY_FOR_REVIEW: ["IN_PROGRESS", "IN_REVIEW", "RE_REVIEW", "CANCELLED"],
-      IN_REVIEW: ["APPROVED", "FIX_NEEDED", "PENDING_DECISION", "FAILED", "CANCELLED"],
-      RE_REVIEW: ["APPROVED", "FIX_NEEDED", "PENDING_DECISION", "FAILED", "CANCELLED"],
-      FIX_NEEDED: ["IN_PROGRESS", "CANCELLED"],
-      PENDING_DECISION: ["IN_PROGRESS", "IN_REVIEW", "CANCELLED"],
-      APPROVED: ["DONE", "IN_REVIEW", "FAILED", "CANCELLED"],
-      FAILED: ["IN_PROGRESS", "CANCELLED"],
-    };
-    if (!allowed[from]?.includes(to)) throw new ValidationError(`Status transition ${from} -> ${to} is not allowed by the project workflow`);
   }
 
   private async requireTask(repositories: RepositorySet, taskId: string) { const task = await repositories.tasks.findById(taskId); if (!task) throw new NotFoundError("Task"); return task; }
