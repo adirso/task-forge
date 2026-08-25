@@ -221,6 +221,22 @@ test("runner processes a status event when context is still at the previous stat
   assert.ok(calls.some((path) => path.endsWith("/runs")));
 });
 
+test("legacy projects do not interpret IN_PROGRESS as a fix run", async () => {
+  const calls: string[] = [];
+  const api = { request: async (path: string) => {
+    calls.push(path);
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: { ...event.task, status: "IN_PROGRESS" } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { throw new Error("must not execute"); }, () => 1_700_000_000_000);
+  const statusEvent = { ...event, id: "event-legacy-in-progress", event: "task.status_changed", previousStatus: "TODO", task: { ...event.task, status: "IN_PROGRESS" } };
+  const body = JSON.stringify(statusEvent);
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  assert.equal((await runner.handle("claude", headers, body)).status, 202);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.some((path) => path.endsWith("/runs")), false);
+});
+
 test("runner leaves task transitions to the assigned agent and explains the workflow", async () => {
   const statusUpdates: string[] = [];
   let prompt = "";

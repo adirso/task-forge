@@ -204,6 +204,17 @@ test("projects configure available statuses and the default API status", async (
   const statusInUse = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["READY_FOR_REVIEW", "CANCELLED"], defaultStatus: "READY_FOR_REVIEW" } });
   assert.equal(statusInUse.statusCode, 400, statusInUse.body);
   assert.match(statusInUse.json().error, /Move tasks out of REFINING/);
+
+  const clearedWorkflow = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { agentWorkflow: null } });
+  assert.equal(clearedWorkflow.statusCode, 200, clearedWorkflow.body);
+  assert.equal(clearedWorkflow.json().project.agentWorkflow, null);
+  const enabledWorkflow = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/agent-workflow/enable`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(enabledWorkflow.statusCode, 200, enabledWorkflow.body);
+  assert.equal(enabledWorkflow.json().project.agentWorkflow.approved, "APPROVED");
+  assert.ok(enabledWorkflow.json().project.availableStatuses.includes("FIX_IN_PROGRESS"));
+  const memberEnable = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/agent-workflow/enable`, headers: { authorization: `Bearer ${memberLogin.json().token}` } });
+  assert.equal(memberEnable.statusCode, 403, memberEnable.body);
+  assert.match(memberEnable.json().error, /project owner or an administrator/);
   const removed = await app.inject({ method: "DELETE", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(removed.statusCode, 204, removed.body);
 });

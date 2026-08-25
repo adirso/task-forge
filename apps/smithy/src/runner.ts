@@ -11,6 +11,19 @@ type AgentWorkflow = { implementationQueue: string; implementationStart: string;
 type ContextResponse = { project: { key: string; availableStatuses: string[]; localRepoPath?: string | null; agentWorkflow?: AgentWorkflow | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }> } };
 type WorktreeFactory = (repo: string, branch: string | null, taskId: string) => Promise<string>;
 
+// Legacy projects have no persisted mapping. Keep their historical routing
+// semantics without treating the ordinary IN_PROGRESS status as a fix run.
+const LEGACY_AGENT_WORKFLOW: AgentWorkflow = {
+  implementationQueue: "TODO",
+  implementationStart: "IN_PROGRESS",
+  reviewHandoff: "READY_FOR_REVIEW",
+  reviewStart: "IN_REVIEW",
+  approved: "APPROVED",
+  fixNeeded: "FIX_NEEDED",
+  fixStart: "FIX_IN_PROGRESS",
+  reReview: "RE_REVIEW",
+};
+
 const noopWorktree: WorktreeFactory = async (repo) => repo;
 
 export class SmithyRunner {
@@ -88,7 +101,7 @@ export class SmithyRunner {
     if (!status && event.event === "task.assigned") return "IMPLEMENTATION";
     if (!status || !["task.assigned", "task.status_changed"].includes(event.event)) return null;
     if (!workflow && event.event === "task.assigned") return "IMPLEMENTATION";
-    const configured = workflow ?? { implementationQueue: "TODO", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "IN_PROGRESS", reReview: "RE_REVIEW" };
+    const configured = workflow ?? LEGACY_AGENT_WORKFLOW;
     if (status === configured.implementationQueue) return "IMPLEMENTATION";
     if (status === configured.reviewHandoff || (status === configured.reviewStart && event.previousStatus !== configured.reviewHandoff)) return "REVIEW";
     if (status === configured.fixNeeded || (status === configured.fixStart && event.previousStatus !== configured.fixNeeded)) return "FIX";
@@ -110,7 +123,7 @@ export class SmithyRunner {
       "- If a status PATCH returns 4xx, preserve the API error in the agent log and task update, stop that handoff, and report it. Do not silently retry with another status.",
       "- Run completion is separate from task status: Smithy records the run result, but a successful run does not authorize or perform a task transition.",
     ];
-    const configured = workflow ?? { implementationQueue: "TODO", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "IN_PROGRESS", reReview: "READY_FOR_REVIEW" };
+    const configured = workflow ?? LEGACY_AGENT_WORKFLOW;
     if (kind === "IMPLEMENTATION") lines.push(transition(configured.implementationStart, "implementation start"), transition(configured.reviewHandoff, "implementation handoff for review"));
     else if (kind === "FIX") lines.push(task.branch ? `- Fix needed mode: remain on the existing branch ${task.branch}; do not create or switch branches.` : "- Fix needed mode requires a configured existing task branch; stop before editing and ask the operator to set it. Never invent a branch.", `- Read the latest review findings from ${findings}, resolve and test each finding, then request re-review.`, transition(configured.fixStart, "fix start"), transition(configured.reReview, "fix handoff for re-review"));
     else if (kind === "RE_REVIEW") lines.push(`- Re-review mode: this task was previously reviewed. Read the latest findings from ${findings}, compare the current head against each finding and the Definition of done, and report remaining issues.`, transition(configured.reReview, "re-review start"), transition(configured.approved, "clean re-review approval"), transition(configured.fixNeeded, "remaining-finding fix request"), "- Do not assume approval or merge; report findings and evidence for the human/operator decision.");
