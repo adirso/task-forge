@@ -1,6 +1,6 @@
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import type { ActivityEvent, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
-import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, RefreshCw as RefreshCwIcon, Send, ShieldCheck, Sparkles, Terminal, Trash2, UploadCloud, Wrench as WrenchIcon, X } from "lucide-react";
+import { Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Terminal, Trash2, UploadCloud, X } from "lucide-react";
 import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
 import { api, type AgentLog, type AgentRun } from "../lib/api";
 import { Avatar } from "./Avatar";
@@ -104,13 +104,10 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
             <h2 id="task-modal-title" title={headerTitle}>{headerTitle}</h2>
           </div>
           <div className="modal-header-actions">
-            {task && <div className="ai-action-buttons">
-              <button type="button" className="send-to-ai-button" onClick={() => setAIMode("IMPLEMENT")}><Sparkles /> Implement</button>
-              <button type="button" className="send-to-ai-button review" onClick={() => setAIMode("REVIEW")}><ShieldCheck /> Review</button>
-              <button type="button" className="send-to-ai-button fix" onClick={() => setAIMode("FIX")}><WrenchIcon /> Fix needed</button>
-              <button type="button" className="send-to-ai-button rereview" onClick={() => setAIMode("RE_REVIEW")}><RefreshCwIcon /> Re-review</button>
-            </div>}
-            {task && <button type="button" className="copy-task-link" onClick={() => copyTaskLink().catch(() => setError("Could not copy task link"))}>{linkCopied ? <Check /> : <Link2 />}{linkCopied ? "Copied" : "Copy link"}</button>}
+            {task && <>
+              <button type="button" className="send-to-ai-button" onClick={() => setAIMode("IMPLEMENT")}><Sparkles /> Send to AI</button>
+              <button type="button" className="copy-task-link" onClick={() => copyTaskLink().catch(() => setError("Could not copy task link"))}>{linkCopied ? <Check /> : <Link2 />}{linkCopied ? "Copied" : "Copy link"}</button>
+            </>}
             <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X /></button>
           </div>
         </header>
