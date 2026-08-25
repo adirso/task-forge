@@ -25,6 +25,32 @@ test("unit of work exposes the complete repository set through the database port
   assert.equal(transactionCalls, 1);
 });
 
+test("unit of work can persist a failure audit after the business transaction rolls back", async () => {
+  let transactions = 0;
+  const audit: string[] = [];
+  const repositories = { activity: { record: async (event: { action: string }) => { audit.push(event.action); } } } as never;
+  const database: DatabasePort = {
+    dialect: "sqlite",
+    prepare() { throw new Error("query should not run"); },
+    transaction(callback) {
+      return async () => {
+        transactions += 1;
+        if (transactions === 1) {
+          await callback();
+          throw new Error("business transaction rolled back");
+        }
+        return callback();
+      };
+    },
+  };
+  const unitOfWork = createUnitOfWork(database, repositories);
+  await assert.rejects(() => unitOfWork.run(async () => { throw new Error("handoff failed"); }, async () => {
+    await unitOfWork.run(async (r) => r.activity.record({ action: "automation.failed" }));
+  }), /handoff failed/);
+  assert.deepEqual(audit, ["automation.failed"]);
+  assert.equal(transactions, 2);
+});
+
 test("reporting repository owns portable reporting queries and row mapping", async () => {
   const queries: Array<{ sql: string; params: unknown[] }> = [];
   const database: DatabasePort = {

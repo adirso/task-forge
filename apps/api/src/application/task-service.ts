@@ -5,7 +5,7 @@ import type { ProjectContext, RequestContext, TokenScope } from "./context.js";
 import type { PageRequest, TaskDependencyEntity, TaskEntity, TaskUpdateEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
 import type { TaskCreateInput, TaskFilters, TaskService, TaskUpdateInput } from "./services.js";
-import { AutomationEngine } from "./automation-service.js";
+import { AutomationEngine, AutomationFailureError } from "./automation-service.js";
 import { enqueueTaskStatusWebhook } from "./transition-effects.js";
 
 export class TaskApplicationService implements TaskService {
@@ -45,7 +45,7 @@ export class TaskApplicationService implements TaskService {
       const automated = await this.automationEngine.apply(repositories, context, null, task, "TASK_CREATED");
       if (automated.assigneeId && automated.assigneeId !== context.actor.userId) await this.enqueueAssignmentWebhook(repositories, automated, context);
       return repositories.tasks.findById ? await repositories.tasks.findById(automated.id) ?? automated : automated;
-    });
+    }, (error) => this.persistAutomationFailure(error));
   }
 
   async update(context: RequestContext, taskId: string, input: TaskUpdateInput) {
@@ -77,7 +77,7 @@ export class TaskApplicationService implements TaskService {
       if (assigneeChanged && input.assigneeId && input.assigneeId !== context.actor.userId) await this.enqueueAssignmentWebhook(repositories, { ...task, assigneeId: input.assigneeId }, context);
       if (automated.status !== existing.status && automated.assigneeId !== context.actor.userId) await enqueueTaskStatusWebhook(repositories, automated, existing.status, context, runId ?? null, this.newId, this.now);
       return repositories.tasks.findById ? await repositories.tasks.findById(automated.id) ?? automated : automated;
-    });
+    }, (error) => this.persistAutomationFailure(error));
   }
 
   async claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string; runId?: string | null }) {
@@ -164,6 +164,13 @@ export class TaskApplicationService implements TaskService {
   private async replaceMetadata(repositories: RepositorySet, task: TaskEntity, tags: string[] | undefined, dependencyIds: string[] | undefined, now: string) { if (tags !== undefined) await repositories.tags.replaceForTask(task.id, task.projectId, tags, now); if (dependencyIds !== undefined) await repositories.dependencies.replaceForTask(task.id, dependencyIds, now); }
 
   private async notify(repositories: RepositorySet, userId: string, task: TaskEntity, context: RequestContext, type: string, title: string) { await repositories.notifications.notify({ userId, projectId: task.projectId, taskId: task.id, type, title, message: `${context.actor.name ?? "A teammate"} updated “${task.title}”.` }); }
+
+  private async persistAutomationFailure(error: unknown) {
+    if (!(error instanceof AutomationFailureError)) return;
+    await this.unitOfWork.run(async (repositories) => {
+      await repositories.activity.record(error.auditEvent);
+    }).catch(() => undefined);
+  }
 
   private async enqueueAssignmentWebhook(repositories: RepositorySet, task: TaskEntity, context: RequestContext) {
     if (!task.assigneeId) return;

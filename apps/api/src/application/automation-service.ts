@@ -18,6 +18,14 @@ export class AutomationApplicationService {
 type Trigger = "TASK_CREATED" | "TASK_UPDATED";
 const value = (task: TaskEntity, field: string): unknown => task[field as keyof TaskEntity];
 const empty = (v: unknown) => v === null || v === undefined || v === "";
+
+export class AutomationFailureError extends Error {
+  constructor(public readonly auditEvent: { projectId: string; taskId: string; actorId: string; action: string; metadata: Record<string, unknown> }, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "AutomationFailureError";
+  }
+}
+
 export class AutomationEngine {
   async apply(r: RepositorySet, context: RequestContext, before: TaskEntity | null, after: TaskEntity, trigger: Trigger) {
     if (!r.automations) return after;
@@ -38,7 +46,7 @@ export class AutomationEngine {
             metadata: { automationId: rule.id, trigger, patch },
           });
         } catch (error) {
-          await r.activity.record({
+          throw new AutomationFailureError({
             projectId: after.projectId,
             taskId: after.id,
             actorId: context.actor.userId,
@@ -48,8 +56,7 @@ export class AutomationEngine {
               trigger,
               error: error instanceof Error ? error.message : String(error),
             },
-          }).catch(() => undefined);
-          throw error;
+          }, error);
         }
       }
     }
