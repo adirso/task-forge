@@ -57,6 +57,18 @@ export const phaseCreateSchema = z.object({
 
 export const phaseUpdateSchema = phaseCreateSchema.partial();
 
+export const phaseDeleteSchema = z.object({
+  taskAction: z.enum(["move", "delete"]).optional(),
+  targetPhaseId: z.string().uuid().optional(),
+}).superRefine((value, context) => {
+  if (value.taskAction === "move" && !value.targetPhaseId) {
+    context.addIssue({ code: "custom", path: ["targetPhaseId"], message: "Choose a phase to move tasks into" });
+  }
+  if (value.targetPhaseId && value.taskAction !== "move") {
+    context.addIssue({ code: "custom", path: ["taskAction"], message: "taskAction must be move when targetPhaseId is set" });
+  }
+});
+
 export const taskCreateSchema = z.object({
   title: z.string().trim().min(1).max(240),
   description: z.string().trim().max(10000).default(""),

@@ -42,7 +42,7 @@ export interface PhaseService {
   list(context: ProjectContext): Promise<PhaseEntity[]>;
   create(context: ProjectContext, input: { number: number; goal: string; isActive: boolean }): Promise<PhaseEntity>;
   update(context: RequestContext, phaseId: string, input: Partial<Pick<PhaseEntity, "number" | "goal" | "isActive">>): Promise<PhaseEntity>;
-  delete(context: RequestContext, phaseId: string): Promise<void>;
+  delete(context: RequestContext, phaseId: string, options?: { taskAction?: "move" | "delete"; targetPhaseId?: string }): Promise<void>;
 }
 
 export interface TaskService {

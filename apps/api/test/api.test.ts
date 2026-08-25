@@ -98,6 +98,37 @@ test("human can log in and create a project", async () => {
   assert.equal(deletedEmpty.statusCode, 204);
 });
 
+test("deleting a phase with tasks requires move or delete disposition", async () => {
+  const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `PHD${randomUUID().slice(0, 4)}`, name: "Phase delete", description: "Disposition", color: "#654321" } });
+  const disposeProjectId = createdProject.json().project.id as string;
+  const listed = await app.inject({ method: "GET", url: `/api/projects/${disposeProjectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` } });
+  const sourcePhaseId = listed.json().phases[0].id as string;
+  const targetPhase = await app.inject({ method: "POST", url: `/api/projects/${disposeProjectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { number: 2, goal: "Keep these tasks", isActive: false } });
+  assert.equal(targetPhase.statusCode, 201, targetPhase.body);
+  const targetPhaseId = targetPhase.json().phase.id as string;
+  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${disposeProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Needs a new home", phaseId: sourcePhaseId, status: "TODO" } });
+  assert.equal(createdTask.statusCode, 201, createdTask.body);
+  const taskId = createdTask.json().task.id as string;
+
+  const rejected = await app.inject({ method: "DELETE", url: `/api/phases/${sourcePhaseId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(rejected.statusCode, 400, rejected.body);
+
+  const moved = await app.inject({ method: "DELETE", url: `/api/phases/${sourcePhaseId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { taskAction: "move", targetPhaseId } });
+  assert.equal(moved.statusCode, 204, moved.body);
+  const afterMove = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(afterMove.statusCode, 200, afterMove.body);
+  assert.equal(afterMove.json().task.phaseId, targetPhaseId);
+
+  const another = await app.inject({ method: "POST", url: `/api/projects/${disposeProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Delete with phase", phaseId: targetPhaseId, status: "TODO" } });
+  assert.equal(another.statusCode, 201, another.body);
+  const deletedWithTasks = await app.inject({ method: "DELETE", url: `/api/phases/${targetPhaseId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { taskAction: "delete" } });
+  assert.equal(deletedWithTasks.statusCode, 204, deletedWithTasks.body);
+  const gone = await app.inject({ method: "GET", url: `/api/tasks/${another.json().task.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(gone.statusCode, 404, gone.body);
+  const cleaned = await app.inject({ method: "DELETE", url: `/api/projects/${disposeProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(cleaned.statusCode, 204, cleaned.body);
+});
+
 test("project owners can update project details", async () => {
   const updated = await app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Updated API project", repoUrl: "https://github.com/example/updated", color: "#123456" } });
   assert.equal(updated.statusCode, 200, updated.body);

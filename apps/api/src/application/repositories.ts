@@ -42,6 +42,8 @@ export interface PhaseRepository {
   delete(id: string): Promise<void>;
 }
 
+export type PhaseDeleteOptions = { taskAction?: "move" | "delete"; targetPhaseId?: string };
+
 export interface TaskRepository {
   findById(id: string): Promise<TaskEntity | null>;
   findByProjectNumber(projectId: string, number: number): Promise<TaskEntity | null>;
@@ -51,6 +53,9 @@ export interface TaskRepository {
   claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"] }, options?: { phaseId?: string | null; priority?: string; taskId?: string }): Promise<(TaskEntity & { previousStatus?: TaskEntity["status"] }) | null>;
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   unassignForProjectMember(projectId: string, userId: string): Promise<void>;
+  countByPhase(phaseId: string): Promise<number>;
+  reassignPhase(fromPhaseId: string, toPhaseId: string): Promise<number>;
+  deleteByPhase(phaseId: string): Promise<number>;
   create(input: TaskEntity): Promise<TaskEntity>;
   update(id: string, input: Partial<TaskEntity>): Promise<TaskEntity>;
   delete(id: string): Promise<void>;
