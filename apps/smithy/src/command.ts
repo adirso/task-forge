@@ -13,20 +13,24 @@ export function renderCommand(template: string, prompt: string) {
   return { executable: tokens[0], args: tokens.slice(1) };
 }
 
-export interface CommandResult { code: number | null; stdout: string; stderr: string; error?: Error; timedOut?: boolean; }
+export interface CommandResult { code: number | null; stdout: string; stderr: string; error?: Error; timedOut?: boolean; cancelled?: boolean; }
 export type CommandOutput = (stream: "stdout" | "stderr", chunk: string) => void;
 
-export function executeCommand(template: string, prompt: string, cwd: string, timeoutMs = 30 * 60_000, onOutput?: CommandOutput): Promise<CommandResult> {
+export function executeCommand(template: string, prompt: string, cwd: string, timeoutMs = 30 * 60_000, onOutput?: CommandOutput, signal?: AbortSignal): Promise<CommandResult> {
   const { executable, args } = renderCommand(template, prompt);
   return new Promise((resolve) => {
     const child = spawn(executable, args, { cwd, shell: false, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let cancelled = false;
     const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs);
+    const abort = () => { cancelled = true; child.kill("SIGTERM"); };
+    if (signal?.aborted) abort();
+    signal?.addEventListener("abort", abort, { once: true });
     child.stdout.on("data", (chunk: Buffer) => { const text = chunk.toString(); stdout += text; onOutput?.("stdout", text); });
     child.stderr.on("data", (chunk: Buffer) => { const text = chunk.toString(); stderr += text; onOutput?.("stderr", text); });
-    child.on("error", (error) => { clearTimeout(timer); resolve({ code: null, stdout, stderr, error, timedOut }); });
-    child.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr, timedOut }); });
+    child.on("error", (error) => { clearTimeout(timer); signal?.removeEventListener("abort", abort); resolve({ code: null, stdout, stderr, error, timedOut, cancelled }); });
+    child.on("close", (code) => { clearTimeout(timer); signal?.removeEventListener("abort", abort); resolve({ code, stdout, stderr, timedOut, cancelled }); });
   });
 }
