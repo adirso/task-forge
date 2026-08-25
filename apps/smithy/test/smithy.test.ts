@@ -10,6 +10,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { readProviders, writeProviders } from "../src/env-file.js";
+import { checkProvider, runProviderPreflight } from "../src/preflight.js";
+import { createSmithyServer } from "../src/server.js";
 
 const secret = "runner-secret";
 const event = { id: "event-1", event: "task.assigned", task: { id: "00000000-0000-4000-8000-000000000064", number: 64, projectKey: "TAS", title: "Build runner", description: "Implement it", definitionOfDone: "Tests pass" } };
@@ -27,7 +29,44 @@ test("signature verification enforces timestamp and exact body", () => {
 test("configuration rejects non-loopback execution hosts", () => {
   assert.throws(() => loadConfig({ SMITHY_HOST: "0.0.0.0", SMITHY_PROVIDERS: "{}" }), /loopback/);
   assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PROVIDERS: "{}" }).host, "127.0.0.1");
+  assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PREFLIGHT: "true", SMITHY_PROVIDERS: JSON.stringify({ codex: { cmd: "codex exec {prompt}", healthCmd: "codex login status", webhookSecret: "secret", apiToken: "token" } }) }).preflight, true);
 });
+
+test("provider preflight is optional, provider-neutral, and redacts diagnostics", async () => {
+  const labels = ["claude", "codex", "cursor", "custom"];
+  const providers = Object.fromEntries(labels.map((label) => [label, { cmd: `${label} {prompt}`, webhookSecret: "secret", apiToken: "tf_private" } ]));
+  const commands: string[] = [];
+  const execute = async (command: string) => { commands.push(command); return { code: 0, stdout: `${command} version 1`, stderr: "" }; };
+  const healthy = await runProviderPreflight(providers, execute as never);
+  assert.deepEqual(healthy.map((result) => result.status), ["OK", "OK", "OK", "OK"]);
+  assert.deepEqual(commands, ["claude --version", "codex --version", "cursor --version", "custom --version"]);
+  assert.ok(healthy.every((result) => !result.message.includes("tf_private")));
+  const missing = await checkProvider("codex", providers.codex!, async () => ({ code: null, stdout: "", stderr: "", error: Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" }) }) as never);
+  assert.equal(missing.status, "MISSING");
+  const unauthenticated = await checkProvider("claude", providers.claude!, async () => ({ code: 1, stdout: "", stderr: "Error: authentication required; token=tf_private" }) as never);
+  assert.equal(unauthenticated.status, "UNAUTHENTICATED");
+  assert.doesNotMatch(unauthenticated.message, /tf_private/);
+  const denied = await checkProvider("cursor", providers.cursor!, async () => ({ code: null, stdout: "", stderr: "permission denied", error: Object.assign(new Error("permission denied"), { code: "EACCES" }) }) as never);
+  assert.equal(denied.status, "PERMISSION_DENIED");
+});
+
+test("health endpoint runs on-demand checks even when startup preflight is disabled", async () => {
+  const runner = { resume: async () => undefined, handle: async () => ({ status: 202, body: "{}" }) };
+  const config = { host: "127.0.0.1", port: 0, apiUrl: "http://127.0.0.1:4000", dbPath: ":memory:", preflight: false, providers: { claude: { cmd: `${process.execPath} {prompt}`, webhookSecret: "secret", apiToken: "tf_private" } } };
+  const server = createSmithyServer(config, runner as never);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address() as { port: number };
+    const response = await fetch(`http://127.0.0.1:${address.port}/health/providers`);
+    assert.equal(response.status, 200);
+    const body = await response.json() as { enabled: boolean; providers: Array<{ provider: string; status: string; message: string }> };
+    assert.equal(body.enabled, true);
+    assert.equal(body.providers[0]?.provider, "claude");
+    assert.equal(body.providers[0]?.status, "OK");
+    assert.doesNotMatch(JSON.stringify(body), /tf_private/);
+  } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+});
+
 
 test("provider env updates preserve unrelated settings and support custom labels", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "smithy-env-"));

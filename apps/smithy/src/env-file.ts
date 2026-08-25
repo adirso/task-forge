@@ -4,6 +4,7 @@ import path from "node:path";
 
 export interface SmithyProviderValues {
   cmd: string;
+  healthCmd?: string;
   webhookSecret: string;
   apiToken: string;
   repo?: string;

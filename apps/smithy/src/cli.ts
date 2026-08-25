@@ -56,9 +56,11 @@ async function configure(file: string): Promise<void> {
         throw new Error("Command template (use {prompt}) is required for custom providers");
       }
       const repoAnswer = (await rl.question(`Fallback repository path${current?.repo ? ` [${current.repo}]` : " (optional)"}: `)).trim();
+      const healthAnswer = (await rl.question(`Health check command${current?.healthCmd ? ` [${current.healthCmd}]` : " (optional; defaults to <command> --version)"}: `)).trim();
       const secret = await promptRequired(rl, "Webhook secret (blank keeps existing)", current?.webhookSecret);
       const token = await promptRequired(rl, "TaskForge API token (blank keeps existing)", current?.apiToken);
       const next: SmithyProviderValues = { cmd, webhookSecret: secret, apiToken: token };
+      if (healthAnswer || current?.healthCmd) next.healthCmd = healthAnswer || current?.healthCmd;
       if (repoAnswer || current?.repo) next.repo = repoAnswer || current?.repo;
       providers[name] = next;
       await writeProviders(file, providers);

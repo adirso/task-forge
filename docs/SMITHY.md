@@ -9,12 +9,15 @@ Copy `apps/smithy/.env.example` to a private env file and fill in the agent webh
 ```bash
 export TASKFORGE_API_URL=http://127.0.0.1:4000
 export SMITHY_PORT=4500
+export SMITHY_PREFLIGHT=true # optional startup diagnostics; default is disabled
 export SMITHY_PROVIDERS='{
   "claude": {"cmd":"claude -p --permission-mode auto {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."},
   "codex": {"cmd":"codex exec --approve-for-me {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."},
   "cursor": {"cmd":"cursor-agent -p --force --trust {prompt}","webhookSecret":"whsec_...","apiToken":"tf_..."}
 }'
 ```
+
+Smithy exposes `GET http://127.0.0.1:4500/health/providers` for a safe, on-demand provider check. Results contain only a provider label, status, redacted actionable message, and timestamp—never API tokens, webhook secrets, or full command output. By default each configured command's executable is checked with `--version`; add an optional provider `healthCmd` when an operator wants an authentication/login-status check. Set `SMITHY_PREFLIGHT=true` to run these checks at startup and print the same redacted diagnostics. Missing binaries, authentication failures, and permission errors are classified separately; checks never block webhook routing unless the provider command itself cannot execute.
 
 For example:
 
