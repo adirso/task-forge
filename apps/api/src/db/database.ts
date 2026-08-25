@@ -169,6 +169,7 @@ async function runStatements(executor: Executor, statements: string[]) {
 }
 
 const taskStatusSql = TASK_STATUSES.map((status) => `'${status}'`).join(", ");
+const legacyTaskStatusSql = [...TASK_STATUSES.slice(0, 3), "READY_FOR_DEV", ...TASK_STATUSES.slice(3)].map((status) => `'${status}'`).join(", ");
 const defaultAvailableStatuses = JSON.stringify(DEFAULT_PROJECT_STATUSES);
 const legacyDefaultAvailableStatuses = defaultAvailableStatuses;
 const legacyAvailableStatuses = JSON.stringify(["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"]);
@@ -234,11 +235,13 @@ const mysqlSchema = [
   `CREATE TABLE IF NOT EXISTS webhook_deliveries (id CHAR(36) PRIMARY KEY, agent_id CHAR(36) NOT NULL, task_id CHAR(36), event_type VARCHAR(40) NOT NULL CHECK (event_type IN ('task.assigned', 'task.update_added', 'task.status_changed')), payload JSON NOT NULL, status VARCHAR(16) NOT NULL CHECK (status IN ('PENDING', 'RETRYING', 'DELIVERED', 'FAILED')), attempt_count INT NOT NULL DEFAULT 0, next_attempt_at VARCHAR(30) NOT NULL, locked_until VARCHAR(30), last_attempt_at VARCHAR(30), delivered_at VARCHAR(30), failed_at VARCHAR(30), last_error VARCHAR(255), http_status INT, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_webhook_deliveries_due (status, next_attempt_at, locked_until), INDEX idx_webhook_deliveries_agent (agent_id, created_at), FOREIGN KEY (agent_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
-async function migrateSqliteTaskStatusCheck(executor: Executor) {
+async function migrateSqliteTaskStatusCheck(executor: Executor, force = false, includeLegacyReady = false) {
   const table = await executor.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'", []);
-  if (table?.sql.includes("APPROVED") && table.sql.includes("PENDING_DECISION") && table.sql.includes("FAILED")) return;
+  if (!force && table?.sql.includes("APPROVED") && table.sql.includes("PENDING_DECISION") && table.sql.includes("FAILED") && table.sql.includes("FIX_IN_PROGRESS")) return;
+  if (force && !table?.sql.includes("READY_FOR_DEV")) return;
   await executor.run("DROP TABLE IF EXISTS tasks_status_migration", []);
-  await executor.run(`CREATE TABLE tasks_status_migration (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition_of_done TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'TODO' CHECK (status IN (${taskStatusSql})), priority TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type TEXT NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL, creator_id TEXT NOT NULL REFERENCES users(id), parent_id TEXT REFERENCES tasks_status_migration(id) ON DELETE CASCADE, branch TEXT, due_date TEXT, estimate_points INTEGER, phase_id TEXT REFERENCES phases(id) ON DELETE SET NULL, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, number))`, []);
+  const statusSql = includeLegacyReady ? legacyTaskStatusSql : taskStatusSql;
+  await executor.run(`CREATE TABLE tasks_status_migration (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition_of_done TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'TODO' CHECK (status IN (${statusSql})), priority TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')), type TEXT NOT NULL DEFAULT 'FEATURE' CHECK (type IN ('FEATURE', 'BUG', 'INFRA', 'UPDATE', 'SECURITY', 'DOCS', 'CHORE')), assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL, creator_id TEXT NOT NULL REFERENCES users(id), parent_id TEXT REFERENCES tasks_status_migration(id) ON DELETE CASCADE, branch TEXT, due_date TEXT, estimate_points INTEGER, phase_id TEXT REFERENCES phases(id) ON DELETE SET NULL, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (project_id, number))`, []);
   await executor.run("INSERT INTO tasks_status_migration (id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at) SELECT id, project_id, number, title, description, definition_of_done, status, priority, type, assignee_id, creator_id, parent_id, branch, due_date, estimate_points, phase_id, pull_request_url, pull_request_title, pull_request_state, position, created_at, updated_at FROM tasks", []);
   await executor.run("DROP TABLE tasks", []);
   await executor.run("ALTER TABLE tasks_status_migration RENAME TO tasks", []);
@@ -250,15 +253,17 @@ async function migrateSqliteTaskStatusCheck(executor: Executor) {
   if (violation) throw new Error(`Task status migration left a foreign key violation: table=${violation.table}, rowid=${violation.rowid}, parent=${violation.parent}`);
 }
 
-async function migrateMysqlTaskStatusCheck(executor: Executor) {
+async function migrateMysqlTaskStatusCheck(executor: Executor, force = false, includeLegacyReady = false) {
   const checks = await executor.all<{ constraint_name: string; check_clause: string }>(`SELECT tc.CONSTRAINT_NAME AS constraint_name, cc.CHECK_CLAUSE AS check_clause FROM information_schema.TABLE_CONSTRAINTS tc JOIN information_schema.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'tasks' AND tc.CONSTRAINT_TYPE = 'CHECK'`, []);
   const statusChecks = checks.filter((check) => /\bstatus\b/i.test(check.check_clause));
-  if (statusChecks.some((check) => check.check_clause.includes("APPROVED") && check.check_clause.includes("PENDING_DECISION") && check.check_clause.includes("FAILED"))) return;
+  if (!force && statusChecks.some((check) => check.check_clause.includes("APPROVED") && check.check_clause.includes("PENDING_DECISION") && check.check_clause.includes("FAILED") && check.check_clause.includes("FIX_IN_PROGRESS"))) return;
+  if (force && !statusChecks.some((check) => check.check_clause.includes("READY_FOR_DEV"))) return;
   for (const check of statusChecks) {
     if (!/^[A-Za-z0-9_$]+$/.test(check.constraint_name)) throw new Error("Unsafe MySQL task status constraint name");
     await executor.run(`ALTER TABLE tasks DROP CHECK \`${check.constraint_name}\``, []);
   }
-  await executor.run(`ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN (${taskStatusSql}))`, []);
+  const statusSql = includeLegacyReady ? legacyTaskStatusSql : taskStatusSql;
+  await executor.run(`ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN (${statusSql}))`, []);
 }
 
 async function migrateSqliteWebhookEventCheck(executor: Executor) {
@@ -322,13 +327,45 @@ async function addLegacyColumns(executor: Executor, dialect: DatabaseDriver) {
   }
 }
 
-async function preflightTaskStatuses(executor: Executor, dialect: DatabaseDriver) {
+async function preflightTaskStatuses(executor: Executor, dialect: DatabaseDriver, allowLegacyReady = false) {
   if (!(await tableExists(executor, dialect, "tasks"))) return;
-  const placeholders = TASK_STATUSES.map(() => "?").join(", ");
-  const invalid = await executor.all<{ id: string; project_id: string; status: string }>(`SELECT id, project_id, status FROM tasks WHERE status NOT IN (${placeholders}) ORDER BY project_id, id`, [...TASK_STATUSES]);
+  const allowedStatuses = allowLegacyReady ? [...TASK_STATUSES, "READY_FOR_DEV"] : TASK_STATUSES;
+  const placeholders = allowedStatuses.map(() => "?").join(", ");
+  const invalid = await executor.all<{ id: string; project_id: string; status: string }>(`SELECT id, project_id, status FROM tasks WHERE status NOT IN (${placeholders}) ORDER BY project_id, id`, [...allowedStatuses]);
   if (invalid.length === 0) return;
   const rows = invalid.map((row) => `task_id=${row.id}, project_id=${row.project_id}, status=${row.status}`).join("; ");
   throw new Error(`Migration 0003_expand_task_statuses cannot change the task status constraint because unsupported status rows exist: ${rows}`);
+}
+
+async function removeReadyForDev(executor: Executor, dialect: DatabaseDriver) {
+  if (await tableExists(executor, dialect, "tasks")) {
+    await executor.run("UPDATE tasks SET status = 'TODO' WHERE status = 'READY_FOR_DEV'", []);
+  }
+  if (await tableExists(executor, dialect, "task_status_history")) {
+    await executor.run("UPDATE task_status_history SET status = 'TODO' WHERE status = 'READY_FOR_DEV'", []);
+  }
+  if (await tableExists(executor, dialect, "projects")) {
+    const projects = await executor.all<{ id: string; available_statuses: string; default_status: string }>("SELECT id, available_statuses, default_status FROM projects", []);
+    for (const project of projects) {
+      let statuses: string[];
+      try {
+        statuses = JSON.parse(project.available_statuses);
+      } catch {
+        statuses = [];
+      }
+      const filtered = statuses.filter((status) => status !== "READY_FOR_DEV");
+      const nextStatuses = filtered.length > 0 ? filtered : ["TODO"];
+      const defaultStatus = project.default_status === "READY_FOR_DEV" || !nextStatuses.includes(project.default_status) ? nextStatuses[0]! : project.default_status;
+      await executor.run("UPDATE projects SET available_statuses = ?, default_status = ? WHERE id = ?", [JSON.stringify(nextStatuses), defaultStatus, project.id]);
+    }
+  }
+  if (await tableExists(executor, dialect, "automations")) {
+    const automations = await executor.all<{ id: string; conditions: string; actions: string }>("SELECT id, conditions, actions FROM automations", []);
+    for (const automation of automations) {
+      const replace = (value: string) => value.replaceAll('"READY_FOR_DEV"', '"TODO"');
+      await executor.run("UPDATE automations SET conditions = ?, actions = ? WHERE id = ?", [replace(automation.conditions), replace(automation.actions), automation.id]);
+    }
+  }
 }
 
 const mysqlIndexes: Array<[string, string, string]> = [
@@ -381,12 +418,12 @@ export const migrations: readonly Migration[] = [
   {
     version: "0003_expand_task_statuses",
     before: async (adapter, dialect) => {
-      await preflightTaskStatuses(adapter, dialect);
+      await preflightTaskStatuses(adapter, dialect, true);
       if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = OFF", []);
     },
     async up(executor, dialect) {
-      if (dialect === "sqlite") await migrateSqliteTaskStatusCheck(executor);
-      else await migrateMysqlTaskStatusCheck(executor);
+      if (dialect === "sqlite") await migrateSqliteTaskStatusCheck(executor, false, true);
+      else await migrateMysqlTaskStatusCheck(executor, false, true);
     },
     after: async (adapter, dialect) => {
       if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = ON", []);
@@ -431,12 +468,12 @@ export const migrations: readonly Migration[] = [
   {
     version: "0008_autonomous_workflow_statuses",
     before: async (adapter, dialect) => {
-      await preflightTaskStatuses(adapter, dialect);
+      await preflightTaskStatuses(adapter, dialect, true);
       if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = OFF", []);
     },
     async up(executor, dialect) {
-      if (dialect === "sqlite") await migrateSqliteTaskStatusCheck(executor);
-      else await migrateMysqlTaskStatusCheck(executor);
+      if (dialect === "sqlite") await migrateSqliteTaskStatusCheck(executor, false, true);
+      else await migrateMysqlTaskStatusCheck(executor, false, true);
     },
     after: async (adapter, dialect) => {
       if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = ON", []);
@@ -494,6 +531,34 @@ export const migrations: readonly Migration[] = [
         await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_logs_task_page ON agent_logs(task_id, created_at, id)", []);
         await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_logs_run_sequence ON agent_logs(run_id, `sequence`)", []);
       }
+    },
+  },
+  {
+    version: "0015_fix_in_progress_status",
+    before: async (adapter, dialect) => {
+      await preflightTaskStatuses(adapter, dialect, true);
+      if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = OFF", []);
+    },
+    async up(executor, dialect) {
+      if (dialect === "sqlite") await migrateSqliteTaskStatusCheck(executor, false, true);
+      else await migrateMysqlTaskStatusCheck(executor, false, true);
+    },
+    after: async (adapter, dialect) => {
+      if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = ON", []);
+    },
+  },
+  {
+    version: "0016_remove_ready_for_dev_status",
+    before: async (adapter, dialect) => {
+      await removeReadyForDev(adapter, dialect);
+      if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = OFF", []);
+    },
+    async up(executor, dialect) {
+      if (dialect === "sqlite") await migrateSqliteTaskStatusCheck(executor, true);
+      else await migrateMysqlTaskStatusCheck(executor, true);
+    },
+    after: async (adapter, dialect) => {
+      if (dialect === "sqlite") await adapter.run("PRAGMA foreign_keys = ON", []);
     },
   },
 ];

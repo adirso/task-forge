@@ -5,7 +5,7 @@ import type { RepositorySet } from "../src/application/repositories.js";
 
 function repositories(overrides: Partial<RepositorySet> = {}): RepositorySet {
   return {
-    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"], defaultStatus: "TODO", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"], defaultStatus: "TODO", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
     memberships: { isMember: async () => true } as never,
     tasks: { allocateNumber: async () => ({ number: 7, position: 2 }), create: async (task: unknown) => task } as never,
     phases: { findById: async () => null } as never,
@@ -58,17 +58,17 @@ test("task claiming passes enabled sources and target to the atomic repository o
     pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "",
   };
   const set = repositories({
-    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["READY_FOR_DEV", "IN_PROGRESS", "DONE"], defaultStatus: "READY_FOR_DEV", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["TODO", "IN_PROGRESS", "DONE"], defaultStatus: "TODO", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
     tasks: { claimNext: async (_projectId: string, _claimantId: string, input: typeof workflow) => { workflow = input; return claimed; } } as never,
   });
   const service = new TaskApplicationService({ run: async (work) => work(set) });
   const task = await service.claimTask({ actor: { userId: "agent-1", kind: "AGENT", role: "MEMBER", tokenScopes: ["task:claim"] }, projectId: "project-1" });
   assert.equal(task.id, "task-49");
-  assert.deepEqual(workflow, { sourceStatuses: ["READY_FOR_DEV"], targetStatus: "IN_PROGRESS" });
+  assert.deepEqual(workflow, { sourceStatuses: ["TODO"], targetStatus: "IN_PROGRESS" });
 });
 
 test("task claiming reports actionable workflow configuration errors", async () => {
-  let availableStatuses = ["READY_FOR_DEV", "DONE"];
+  let availableStatuses = ["TODO", "DONE"];
   const set = repositories({
     projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses, defaultStatus: availableStatuses[0], ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
     tasks: { claimNext: async () => { throw new Error("claim repository must not run for an invalid workflow"); } } as never,
@@ -77,7 +77,7 @@ test("task claiming reports actionable workflow configuration errors", async () 
   const context = { actor: { userId: "agent-1", kind: "AGENT" as const, role: "MEMBER" as const, tokenScopes: ["task:claim" as const] }, projectId: "project-1" };
   await assert.rejects(() => service.claimTask(context), /requires IN_PROGRESS to be enabled.*project settings/);
   availableStatuses = ["IN_PROGRESS", "DONE"];
-  await assert.rejects(() => service.claimTask(context), /requires at least one claim source status \(BACKLOG, TODO, READY_FOR_DEV\).*project settings/);
+  await assert.rejects(() => service.claimTask(context), /requires at least one claim source status \(BACKLOG, TODO\).*project settings/);
 });
 
 test("adding an update durably enqueues an event and prevents an assignee loop", async () => {
@@ -194,9 +194,9 @@ test("tasks can move between any statuses enabled by the project workflow", asyn
 
 test("claim emits a status-changed event with the source status", async () => {
   const deliveries: Array<Record<string, unknown>> = [];
-  const claimed = { id: "task-claim", projectId: "project-1", number: 64, title: "Claimed", description: "", definitionOfDone: "", status: "IN_PROGRESS", priority: "HIGH", type: "FEATURE", assigneeId: "agent-1", creatorId: "owner-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "", previousStatus: "READY_FOR_DEV" };
+  const claimed = { id: "task-claim", projectId: "project-1", number: 64, title: "Claimed", description: "", definitionOfDone: "", status: "IN_PROGRESS", priority: "HIGH", type: "FEATURE", assigneeId: "agent-1", creatorId: "owner-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "", previousStatus: "TODO" };
   const set = repositories({
-    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["READY_FOR_DEV", "IN_PROGRESS", "APPROVED"], defaultStatus: "READY_FOR_DEV", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["TODO", "IN_PROGRESS", "APPROVED"], defaultStatus: "TODO", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
     tasks: { claimNext: async () => claimed } as never,
     runs: { findById: async () => ({ id: "00000000-0000-4000-8000-000000000063", taskId: claimed.id, projectId: claimed.projectId, status: "PENDING", maxAttempts: 2, attemptCount: 0 }) } as never,
     users: { findById: async (id: string) => id === "agent-1" ? { id, name: "Builder", kind: "AGENT", webhookUrl: "https://agent.example/webhook" } : null } as never,
@@ -206,6 +206,6 @@ test("claim emits a status-changed event with the source status", async () => {
   await service.claimTask({ actor: { userId: "owner-1", name: "Owner", kind: "HUMAN", role: "ADMIN", tokenScopes: ["task:claim"] }, projectId: "project-1" }, { runId: "00000000-0000-4000-8000-000000000063" });
   assert.equal(deliveries.length, 1);
   assert.equal(deliveries[0]?.eventType, "task.status_changed");
-  assert.equal(JSON.parse(String(deliveries[0]?.payload)).previousStatus, "READY_FOR_DEV");
+  assert.equal(JSON.parse(String(deliveries[0]?.payload)).previousStatus, "TODO");
   assert.equal(JSON.parse(String(deliveries[0]?.payload)).runId, "00000000-0000-4000-8000-000000000063");
 });

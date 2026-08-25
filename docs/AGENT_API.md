@@ -126,7 +126,7 @@ Task creation and update fields include:
 | --- | --- |
 | `title` | Required string |
 | `description`, `definitionOfDone` | Optional text |
-| `status` | `BACKLOG`, `REFINING`, `TODO`, `READY_FOR_DEV`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`, `APPROVED`, `RE_REVIEW`, `FIX_NEEDED`, `PENDING_DECISION`, `FAILED`; must be enabled for the project. If omitted during creation, the project's `defaultStatus` is used. New orchestration statuses are opt-in and are not enabled on existing or new projects by default. |
+| `status` | `BACKLOG`, `REFINING`, `TODO`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`, `APPROVED`, `RE_REVIEW`, `FIX_NEEDED`, `FIX_IN_PROGRESS`, `PENDING_DECISION`, `FAILED`; must be enabled for the project. If omitted during creation, the project's `defaultStatus` is used. New orchestration statuses are opt-in and are not enabled on existing or new projects by default. |
 | `priority` | `LOW`, `MEDIUM`, `HIGH`, `URGENT` |
 | `type` | `FEATURE`, `BUG`, `INFRA`, `UPDATE`, `SECURITY`, `DOCS`, `CHORE` |
 | `assigneeId` | Project-member UUID or `null` |
@@ -168,7 +168,7 @@ List filters are query parameters: `status`, `assigneeId`, `priority`, `type`, `
 
 Claiming uses this fixed semantic mapping:
 
-- Enabled `BACKLOG`, `TODO`, and `READY_FOR_DEV` statuses are eligible claim sources.
+- Enabled `BACKLOG` and `TODO` statuses are eligible claim sources.
 - `IN_PROGRESS` is the claim target and must be enabled.
 - At least one claim source must be enabled. A project without `IN_PROGRESS`, or without any enabled claim source, returns `400` with instructions to update project settings.
 - The winning task is selected by priority and position. Assignment, source-status eligibility, and the move to `IN_PROGRESS` are repeated in one conditional update, so concurrent callers cannot both claim the same task.
@@ -320,7 +320,7 @@ A status-change envelope includes `previousStatus`, `changedBy`, and the resolve
   "id": "...",
   "event": "task.status_changed",
   "task": { "id": "...", "projectKey": "TAS", "number": 51, "status": "IN_PROGRESS", "assigneeId": "..." },
-  "previousStatus": "READY_FOR_DEV",
+  "previousStatus": "TODO",
   "changedBy": { "id": "...", "name": "Project owner" },
   "timestamp": "2026-08-23T10:00:00.000Z"
 }

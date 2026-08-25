@@ -161,7 +161,7 @@ test("projects configure available statuses and the default API status", async (
   const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "STS", name: "Status project", description: "Custom status coverage", color: "#00A3BF" } });
   assert.equal(created.statusCode, 201, created.body);
   const statusProject = created.json().project;
-  assert.deepEqual(statusProject.availableStatuses, ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
+  assert.deepEqual(statusProject.availableStatuses, ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
   assert.equal(statusProject.defaultStatus, "TODO");
 
   const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
@@ -172,20 +172,20 @@ test("projects configure available statuses and the default API status", async (
   assert.equal(forbiddenConfiguration.statusCode, 403, forbiddenConfiguration.body);
   assert.match(forbiddenConfiguration.json().error, /project owner or an administrator/);
 
-  for (const status of ["REFINING", "READY_FOR_DEV", "READY_FOR_REVIEW", "CANCELLED"]) {
+  for (const status of ["REFINING", "READY_FOR_REVIEW", "CANCELLED"]) {
     const task = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: `${status} task`, status } });
     assert.equal(task.statusCode, 201, task.body);
     assert.equal(task.json().task.status, status);
   }
 
-  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["CANCELLED", "READY_FOR_REVIEW", "READY_FOR_DEV", "REFINING"], defaultStatus: "READY_FOR_DEV" } });
+  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["CANCELLED", "READY_FOR_REVIEW", "REFINING"], defaultStatus: "REFINING" } });
   assert.equal(configured.statusCode, 200, configured.body);
-  assert.deepEqual(configured.json().project.availableStatuses, ["REFINING", "READY_FOR_DEV", "READY_FOR_REVIEW", "CANCELLED"]);
-  assert.equal(configured.json().project.defaultStatus, "READY_FOR_DEV");
+  assert.deepEqual(configured.json().project.availableStatuses, ["REFINING", "READY_FOR_REVIEW", "CANCELLED"]);
+  assert.equal(configured.json().project.defaultStatus, "REFINING");
 
   const defaulted = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Uses project default" } });
   assert.equal(defaulted.statusCode, 201, defaulted.body);
-  assert.equal(defaulted.json().task.status, "READY_FOR_DEV");
+  assert.equal(defaulted.json().task.status, "REFINING");
 
   const unavailable = await app.inject({ method: "POST", url: `/api/projects/${statusProject.id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Unavailable status", status: "TODO" } });
   assert.equal(unavailable.statusCode, 400, unavailable.body);
@@ -194,7 +194,7 @@ test("projects configure available statuses and the default API status", async (
   const invalidDefault = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { defaultStatus: "TODO" } });
   assert.equal(invalidDefault.statusCode, 400, invalidDefault.body);
 
-  const statusInUse = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["READY_FOR_DEV", "READY_FOR_REVIEW", "CANCELLED"], defaultStatus: "READY_FOR_DEV" } });
+  const statusInUse = await app.inject({ method: "PATCH", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["READY_FOR_REVIEW", "CANCELLED"], defaultStatus: "READY_FOR_REVIEW" } });
   assert.equal(statusInUse.statusCode, 400, statusInUse.body);
   assert.match(statusInUse.json().error, /Move tasks out of REFINING/);
   const removed = await app.inject({ method: "DELETE", url: `/api/projects/${statusProject.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
@@ -205,11 +205,11 @@ test("task claiming respects enabled project statuses and remains race-safe", as
   const claimProjectResponse = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "CLM", name: "Claim workflow", description: "Status-aware claim coverage", color: "#0052CC" } });
   assert.equal(claimProjectResponse.statusCode, 201, claimProjectResponse.body);
   const claimProjectId = claimProjectResponse.json().project.id as string;
-  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${claimProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "DONE"], defaultStatus: "READY_FOR_DEV" } });
+  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${claimProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "DONE"], defaultStatus: "TODO" } });
   assert.equal(configured.statusCode, 200, configured.body);
   const readyTask = await app.inject({ method: "POST", url: `/api/projects/${claimProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Ready to claim", priority: "HIGH" } });
   assert.equal(readyTask.statusCode, 201, readyTask.body);
-  assert.equal(readyTask.json().task.status, "READY_FOR_DEV");
+  assert.equal(readyTask.json().task.status, "TODO");
 
   const claims = await Promise.all([1, 2].map(() => app.inject({ method: "POST", url: `/api/projects/${claimProjectId}/tasks/claim`, headers: { authorization: `Bearer ${jwtToken}` }, payload: {} })));
   assert.deepEqual(claims.map(({ statusCode }) => statusCode).sort((left, right) => left - right), [200, 404]);
@@ -221,7 +221,7 @@ test("task claiming respects enabled project statuses and remains race-safe", as
   const missingTargetResponse = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "NTG", name: "No claim target", description: "", color: "#FF5630" } });
   assert.equal(missingTargetResponse.statusCode, 201, missingTargetResponse.body);
   const missingTargetId = missingTargetResponse.json().project.id as string;
-  await app.inject({ method: "PATCH", url: `/api/projects/${missingTargetId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["READY_FOR_DEV", "DONE"], defaultStatus: "READY_FOR_DEV" } });
+  await app.inject({ method: "PATCH", url: `/api/projects/${missingTargetId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["TODO", "DONE"], defaultStatus: "TODO" } });
   const missingTargetClaim = await app.inject({ method: "POST", url: `/api/projects/${missingTargetId}/tasks/claim`, headers: { authorization: `Bearer ${jwtToken}` }, payload: {} });
   assert.equal(missingTargetClaim.statusCode, 400, missingTargetClaim.body);
   assert.match(missingTargetClaim.json().error, /requires IN_PROGRESS to be enabled.*project settings/);
@@ -232,7 +232,7 @@ test("task claiming respects enabled project statuses and remains race-safe", as
   await app.inject({ method: "PATCH", url: `/api/projects/${missingSourceId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: ["IN_PROGRESS", "DONE"], defaultStatus: "IN_PROGRESS" } });
   const missingSourceClaim = await app.inject({ method: "POST", url: `/api/projects/${missingSourceId}/tasks/claim`, headers: { authorization: `Bearer ${jwtToken}` }, payload: {} });
   assert.equal(missingSourceClaim.statusCode, 400, missingSourceClaim.body);
-  assert.match(missingSourceClaim.json().error, /requires at least one claim source status \(BACKLOG, TODO, READY_FOR_DEV\).*project settings/);
+  assert.match(missingSourceClaim.json().error, /requires at least one claim source status \(BACKLOG, TODO\).*project settings/);
 
   for (const id of [claimProjectId, missingTargetId, missingSourceId]) {
     const removed = await app.inject({ method: "DELETE", url: `/api/projects/${id}`, headers: { authorization: `Bearer ${jwtToken}` } });

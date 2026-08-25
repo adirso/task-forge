@@ -133,13 +133,13 @@ test("handles projects without a configured repository", () => {
 test("uses only enabled project statuses in handoff transitions", () => {
   const prompt = buildAIPrompt({
     provider: "codex",
-    project: { ...project, availableStatuses: ["REFINING", "READY_FOR_DEV", "READY_FOR_REVIEW", "CANCELLED"], defaultStatus: "READY_FOR_DEV" },
-    task: { ...task, status: "READY_FOR_DEV" },
+    project: { ...project, availableStatuses: ["REFINING", "TODO", "READY_FOR_REVIEW", "CANCELLED"], defaultStatus: "TODO" },
+    task: { ...task, status: "TODO" },
     phaseNumber: 1,
     contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3",
     apiBaseUrl: "https://api.taskforge.example/api",
   });
-  assert.match(prompt, /Enabled statuses: REFINING, READY_FOR_DEV, READY_FOR_REVIEW, CANCELLED/);
+  assert.match(prompt, /Enabled statuses: REFINING, TODO, READY_FOR_REVIEW, CANCELLED/);
   assert.match(prompt, /PATCH .* with branch .* only/);
   assert.match(prompt, /Move the task to READY_FOR_REVIEW when review is required/);
   assert.match(prompt, /Before reporting completion, refresh .*\/context\?project=TAS&task=TAS-3/);
@@ -150,8 +150,8 @@ test("uses only enabled project statuses in handoff transitions", () => {
 test("requires workflow discovery when no enabled review status exists", () => {
   const prompt = buildAIPrompt({
     provider: "cursor",
-    project: { ...project, availableStatuses: ["READY_FOR_DEV", "IN_PROGRESS", "CANCELLED"], defaultStatus: "READY_FOR_DEV" },
-    task: { ...task, status: "READY_FOR_DEV" },
+    project: { ...project, availableStatuses: ["TODO", "IN_PROGRESS", "CANCELLED"], defaultStatus: "TODO" },
+    task: { ...task, status: "TODO" },
     phaseNumber: null,
     contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3",
     apiBaseUrl: "https://api.taskforge.example/api",

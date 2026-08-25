@@ -14,7 +14,7 @@ export function ProjectStatusWidget() {
   return (
     <div className="widget-project-status">
       {data.projects.map((p) => {
-        const planned = p.counts.REFINING + p.counts.TODO + p.counts.READY_FOR_DEV;
+        const planned = p.counts.REFINING + p.counts.TODO;
         const review = p.counts.READY_FOR_REVIEW + p.counts.IN_REVIEW;
         const closed = p.counts.DONE + p.counts.CANCELLED;
         const active = planned + p.counts.IN_PROGRESS + review;

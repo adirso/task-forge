@@ -67,10 +67,11 @@ async function withFixture(driver: DatabaseDriver, callback: (adapter: Adapter) 
 }
 
 const legacyStatuses = ["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"];
-const currentStatuses = ["BACKLOG", "REFINING", "TODO", "READY_FOR_DEV", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"];
+const currentStatuses = ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"];
+const preRemovalStatuses = [...currentStatuses.slice(0, 3), "READY_FOR_DEV", ...currentStatuses.slice(3)];
 
 async function createLegacyFixture(adapter: Adapter, driver: DatabaseDriver, markerEra = false, invalidStatus = false) {
-  const statuses = markerEra ? currentStatuses : legacyStatuses;
+  const statuses = markerEra ? preRemovalStatuses : legacyStatuses;
   const check = invalidStatus ? "" : ` CHECK (status IN (${statuses.map((status) => `'${status}'`).join(", ")}))`;
   if (driver === "sqlite") {
     await adapter.run("CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT NOT NULL, password_hash TEXT, kind TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'MEMBER', avatar_url TEXT, created_at TEXT NOT NULL)", []);
@@ -87,6 +88,9 @@ async function createLegacyFixture(adapter: Adapter, driver: DatabaseDriver, mar
   await adapter.run("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ["task-1", "project-1", 1, "Legacy task", "", "", invalidStatus ? "CUSTOM_UNKNOWN" : "TODO", "user-1", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z"]);
   if (invalidStatus) {
     await adapter.run("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ["task-2", "project-1", 2, "Second invalid task", "", "", "ANOTHER_UNKNOWN", "user-1", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z"]);
+  }
+  if (markerEra) {
+    await adapter.run("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ["task-ready-for-dev", "project-1", 3, "Legacy ready task", "", "", "READY_FOR_DEV", "user-1", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z"]);
   }
 
   if (markerEra) {
@@ -105,6 +109,7 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
     const project = await adapter.get<{ available_statuses: string; default_status: string }>("SELECT available_statuses, default_status FROM projects WHERE id = ?", ["project-1"]);
     assert.deepEqual(JSON.parse(project!.available_statuses), currentStatuses);
     assert.equal(project!.default_status, "TODO");
+    assert.equal((await adapter.get<{ status: string }>("SELECT status FROM tasks WHERE id = ?", ["task-ready-for-dev"]))?.status, "TODO");
     await adapter.run("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ["task-2", "project-1", 2, "Post-migration task", "", "", "READY_FOR_REVIEW", "user-1", "2026-01-02T00:00:00.000Z", "2026-01-02T00:00:00.000Z"]);
   }
   const hasWebhookTable = driver === "sqlite"

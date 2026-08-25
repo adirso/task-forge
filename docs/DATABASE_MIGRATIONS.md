@@ -9,6 +9,8 @@ The current registry is:
 3. `0003_expand_task_statuses`
 4. `0004_project_status_defaults`
 5. `0005_query_indexes`
+6. `0006_security_audit_events` through `0015_fix_in_progress_status`
+7. `0016_remove_ready_for_dev_status` (maps legacy `READY_FOR_DEV` tasks to `TODO`, removes it from project workflows, and rebuilds the status constraint)
 
 `20260821_workflow_status_storage`, `20260821_workflow_system_default_guard`, and `20260822_task_statuses` are recognized markers written by startup migrations that preceded this registry. The first two can remain after the configurable-workflow rollout was cancelled. They are retained for upgrade compatibility but are not part of the ordered sequence.
 

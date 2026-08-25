@@ -12,8 +12,8 @@ Routing is assignment, not a new configuration model. One TaskForge agent identi
 
 | Capability | What exists on `main` | Phase 5 gap |
 | --- | --- | --- |
-| Workflow selection | Projects select a subset of the global nine-key `TASK_STATUSES`: `BACKLOG`, `REFINING`, `TODO`, `READY_FOR_DEV`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`. | Add only missing orchestration keys and guards; do not invent per-status metadata unless TAS-62 explicitly chooses that larger model. |
-| Claim/review behavior | Module constants define claim sources (`BACKLOG`, `TODO`, `READY_FOR_DEV`), claim target (`IN_PROGRESS`), review keys, and completion (`DONE`). | Keep these constants and the orchestration state machine in lockstep. |
+| Workflow selection | Projects select a subset of the global task statuses: `BACKLOG`, `REFINING`, `TODO`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`, plus the orchestration statuses. | Add only missing orchestration keys and guards; do not invent per-status metadata unless TAS-62 explicitly chooses that larger model. |
+| Claim/review behavior | Module constants define claim sources (`BACKLOG`, `TODO`), claim target (`IN_PROGRESS`), review keys, and completion (`DONE`). | Keep these constants and the orchestration state machine in lockstep. |
 | Outbound webhooks | `webhook_deliveries` and `WebhookDispatcher` already provide post-commit enqueue, HMAC signing, bounded retries, leasing, admin retry, and self-event suppression for `task.assigned` and `task.update_added`. | Add status-change events, inbound callback authentication, and run-aware routing; do not rebuild the dispatcher. |
 | Durable execution | No run, attempt, or lease tables. | TAS-63 adds ownership, heartbeat, timeout, attempt, and cancellation bookkeeping; it does not manage processes. |
 
@@ -32,7 +32,7 @@ The task remains the source of truth. Every automated action is associated with 
 
 The loop uses the shipped keys wherever possible; it does not introduce duplicate vocabulary. The default mapping is:
 
-`READY_FOR_DEV` (ready for agent) → `IN_PROGRESS` (implementing) → `READY_FOR_REVIEW` (waiting for review) → `IN_REVIEW` (first review) → `APPROVED` (approved and awaiting merge) → `DONE`
+`TODO` (ready for agent) → `IN_PROGRESS` (implementing) → `READY_FOR_REVIEW` (waiting for review) → `IN_REVIEW` (first review) → `APPROVED` (approved and awaiting merge) → `DONE`
 
 Review cycles use two explicit additional keys: `FIX_NEEDED` when findings require implementation work, followed by `RE_REVIEW` when the updated PR is ready for another review. Other exception paths are `PENDING_DECISION` and `FAILED` (new keys), plus the already-shipped `CANCELLED`. Projects may subset the global keys, so orchestration must discover enabled statuses and either use the mapped key or stop with an actionable workflow error. TAS-62 must choose explicitly between adding only these global keys or introducing a separate per-status metadata model; the latter is out of scope for this plan.
 
@@ -40,7 +40,7 @@ Under the shipped model, adding a key is a global contract change: `TASK_STATUSE
 
 | Transition | Guard | Owner/evidence |
 | --- | --- | --- |
-| `READY_FOR_DEV` → `IN_PROGRESS` | task assigned, lease acquired, implementation agent configured | Coordinator; run record |
+| `TODO` → `IN_PROGRESS` | task assigned, lease acquired, implementation agent configured | Coordinator; run record |
 | `IN_PROGRESS` → `READY_FOR_REVIEW` | branch/PR exists, required tests recorded, agent handoff complete | Claude; PR URL + commit SHA |
 | `READY_FOR_REVIEW` → `IN_REVIEW` | PR is reachable and reviewer lease acquired | Coordinator/Codex; review run |
 | `IN_REVIEW` → `FIX_NEEDED` | one or more P0–P2 findings or explicitly selected P3 finding | Codex; finding records |
