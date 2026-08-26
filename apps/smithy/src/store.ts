@@ -57,7 +57,7 @@ export class MemoryJobStore implements JobStore {
   setRunId(eventId: string, runId: string) { const job = this.jobs.get(eventId); if (job) { job.runId = runId; job.updatedAt = new Date().toISOString(); } }
   markRunning(eventId: string) { const job = this.jobs.get(eventId); if (job && ["PENDING", "RUNNING"].includes(job.status) && job.attemptCount < job.maxAttempts) { job.status = "RUNNING"; job.attemptCount += 1; job.updatedAt = new Date().toISOString(); } }
   markComplete(eventId: string, status: "SUCCEEDED" | "FAILED" | "CANCELLED") { const job = this.jobs.get(eventId); if (job) { job.status = status; job.updatedAt = new Date().toISOString(); } }
-  requeue(eventId: string, staleBefore?: string) { const job = this.jobs.get(eventId); if (!job || job.attemptCount >= job.maxAttempts || !(job.status === "FAILED" || (job.status === "RUNNING" && !!staleBefore && job.updatedAt <= staleBefore))) return false; job.status = "PENDING"; job.updatedAt = new Date().toISOString(); return true; }
+  requeue(eventId: string, staleBefore?: string) { const job = this.jobs.get(eventId); if (!job || job.attemptCount >= job.maxAttempts || !(job.status === "FAILED" || (job.status === "RUNNING" && (!staleBefore || job.updatedAt <= staleBefore)))) return false; job.status = "PENDING"; job.updatedAt = new Date().toISOString(); return true; }
   cancel(eventId: string) { const job = this.jobs.get(eventId); if (!job || !["PENDING", "RUNNING", "FAILED"].includes(job.status)) return false; job.status = "CANCELLED"; job.updatedAt = new Date().toISOString(); return true; }
   pending() { return [...this.jobs.values()].filter((job) => job.status === "PENDING" || job.status === "RUNNING"); }
 }

@@ -42,6 +42,7 @@ export class SmithyRunner {
     private readonly now = () => Date.now(),
     store: JobStore = new MemoryJobStore(),
     private readonly worktree: WorktreeFactory = noopWorktree,
+    private readonly heartbeatIntervalMs = 30_000,
   ) { this.store = store; }
 
   async resume() {
@@ -168,6 +169,7 @@ export class SmithyRunner {
     const api = this.apiFactory(config);
     let runId = event.runId ?? job.runId ?? null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
+    let leaseLost = false;
     let logSequence = 0;
     let logQueue = Promise.resolve();
     try {
@@ -202,12 +204,12 @@ export class SmithyRunner {
         this.store.setRunId(event.id, runId);
       }
       await api.request(`/api/runs/${runId}/claim`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) });
-      heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }).catch(() => undefined); }, 30_000);
+      heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }).catch((error) => { if (error instanceof Error && /lease is not owned|already leased|no longer runnable/i.test(error.message)) { leaseLost = true; controller.abort(); } }); }, this.heartbeatIntervalMs);
       heartbeat.unref?.();
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `Smithy started ${kind.toLowerCase()} run ${runId}.` }) });
       const appendLog = (stream: "stdout" | "stderr" | "system" | "callback", category: "output" | "progress" | "tool" | "callback" | "lifecycle", content: string) => {
         const sequence = logSequence++;
-        const eventId = `${event.id}:${sequence}`;
+        const eventId = `${event.id}:${job.attemptCount + 1}:${sequence}`;
         logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${task.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream, category, sequence, eventId, content: redact(content).slice(0, 10_000) }) }); }).catch(() => undefined);
       };
       appendLog("system", "lifecycle", `Smithy started ${kind.toLowerCase()} run ${runId}.`);
@@ -231,6 +233,7 @@ export class SmithyRunner {
         if (!text) return;
         appendLog(stream, "output", text);
       }, controller.signal);
+      if (leaseLost) throw new Error("Run lease was lost; provider execution was stopped and recovery will resume the existing run");
       await logQueue;
       this.controllers.delete(event.id);
       if (result.cancelled || this.cancelled.has(event.id)) {
@@ -262,8 +265,15 @@ export class SmithyRunner {
       this.store.markComplete(event.id, "SUCCEEDED");
     } catch (error) {
       const wasCancelled = this.cancelled.has(event.id);
+      if (leaseLost) {
+        this.store.requeue(event.id);
+        logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:${job.attemptCount + 1}:lease-lost`, content: "Run lease was lost; queued the existing run for recovery." }) }); }).catch(() => undefined);
+        await logQueue;
+        setTimeout(() => { void this.resume(); }, 0).unref?.();
+        return;
+      }
       this.store.markComplete(event.id, wasCancelled ? "CANCELLED" : "FAILED");
-      logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:failure`, content: redact(error instanceof Error ? error.message : "Runner failure") }) }); }).catch(() => undefined);
+      logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:${job.attemptCount + 1}:failure`, content: redact(error instanceof Error ? error.message : "Runner failure") }) }); }).catch(() => undefined);
       await logQueue;
       const message = wasCancelled ? "Smithy run cancelled by operator." : `Smithy run failed: ${redact(error instanceof Error ? error.message : "Runner failure")}`;
       await api.request(`/api/tasks/${event.task!.id}/updates`, { method: "POST", body: JSON.stringify({ body: message }) }).catch(() => undefined);
