@@ -86,6 +86,7 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: /E\d+-\d+: Browser regression task/ }).click();
     await page.getByLabel("Task name").fill("Edited browser regression task");
     await page.getByLabel("Task status").selectOption("IN_PROGRESS");
+    await page.getByRole("tab", { name: /Updates & activity/ }).click();
     await page.getByPlaceholder("Share progress, a decision, or a blocker…").fill("Browser note survived the edit flow");
     await page.getByRole("button", { name: "Post update" }).click();
     await page.locator('input[type="file"]').setInputFiles({ name: "e2e.txt", mimeType: "text/plain", buffer: Buffer.from("attachment") });
@@ -146,6 +147,7 @@ test.describe("workspace browser smoke", () => {
       { id: "log-702", taskId: "task", runId: "00000000-0000-4000-8000-000000000702", provider: "codex", stream: "stderr", category: "output", sequence: 2, eventId: null, content: "Last stalled output", createdAt: new Date(now - 180000).toISOString() },
     ], page: { limit: 100, hasMore: false, nextCursor: null } }) }));
     await page.getByRole("button", { name: /Browser observability task/ }).click();
+    await page.getByRole("tab", { name: /Agents/ }).click();
     await expect(page.getByText("Agent runs")).toBeVisible();
     await expect(page.getByText("Live", { exact: true })).toBeVisible();
     await expect(page.getByText("Lease expired", { exact: true })).toBeVisible();
