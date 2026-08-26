@@ -5,8 +5,8 @@ export const userRoleSchema = z.enum(["ADMIN", "MEMBER"]);
 export const projectMemberRoleSchema = z.enum(["OWNER", "MEMBER"]);
 // Keep the canonical order aligned with the delivery workflow. Project subsets
 // are normalized against this list, so this also controls board column order.
-export const TASK_STATUSES = ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "APPROVED", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW", "PENDING_DECISION", "DONE", "CANCELLED", "FAILED"] as const;
-export const DEFAULT_PROJECT_STATUSES = ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"] as const;
+export const TASK_STATUSES = ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW", "APPROVED", "PENDING_DECISION", "CANCELLED", "FAILED", "DONE"] as const;
+export const DEFAULT_PROJECT_STATUSES = ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "CANCELLED", "DONE"] as const;
 export const TASK_CLAIM_SOURCE_STATUSES = ["BACKLOG", "TODO"] as const;
 export const TASK_CLAIM_TARGET_STATUS = "IN_PROGRESS" as const;
 export const TASK_REVIEW_STATUSES = ["READY_FOR_REVIEW", "IN_REVIEW", "RE_REVIEW"] as const;
