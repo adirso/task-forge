@@ -76,16 +76,16 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
   const readOnlyMode = mode === "REVIEW" || mode === "RE_REVIEW";
   const startInstruction = readOnlyMode
       ? mode === "RE_REVIEW" && enabledStatuses.has(reReview)
-      ? `- Re-review mode is read-only: do not start implementation or PATCH ${taskEndpoint} to ${implementationStart}. If the workflow requires entering re-review, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reReview}; otherwise leave the current status unchanged.`
+      ? `- Re-review mode is read-only for code changes. Before inspecting or editing anything, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reviewStart} (IN_REVIEW workflow start) and runId when provided; confirm it is enabled. Do not PATCH ${taskEndpoint} to ${implementationStart}.`
       : reviewStart && enabledStatuses.has(reviewStart)
-        ? `- Review mode is read-only: do not start implementation or PATCH ${taskEndpoint} to ${implementationStart}. If the workflow requires entering review, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reviewStart}; otherwise leave the current status unchanged.`
+        ? `- Review mode is read-only for code changes. Before inspecting or editing anything, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reviewStart} (IN_REVIEW workflow start) and runId when provided; confirm it is enabled. Do not PATCH ${taskEndpoint} to ${implementationStart}.`
         : `- Review mode is read-only: do not change the task status. Refresh ${contextEndpoint}; if no review status is enabled, leave the current status unchanged and report that the operator must choose the review state.`
     : mode === "FIX"
       ? existingBranch
-        ? `- Fix mode must stay on the existing branch ${existingBranch}; do not create or switch branches. Refresh ${contextEndpoint}, read the latest findings from ${updatesEndpoint} and ${agentLogsEndpoint}, then move to ${fixStart} only when that enabled workflow status is the correct start state.`
+        ? `- Fix mode must stay on the existing branch ${existingBranch}; do not create or switch branches. Before reading findings or editing anything, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${fixStart} (FIX_IN_PROGRESS workflow start) and runId when provided; confirm it is enabled. Then read the latest findings from ${updatesEndpoint} and ${agentLogsEndpoint}.`
         : `- Fix mode requires a real task branch. No branch is configured, so stop before editing, do not invent ${branch}, and ask the operator to set the review branch in TaskForge.`
       : enabledStatuses.has(implementationStart)
-      ? `- When starting, PATCH ${taskEndpoint} with status ${implementationStart} and branch ${branch}.`
+      ? `- Before inspecting or editing anything, refresh ${contextEndpoint}, confirm ${implementationStart} is enabled, then PATCH ${taskEndpoint} with {"status":"${implementationStart}","branch":"${branch}","runId":"<signed-run-id>"} (PATCH with status ${implementationStart} and branch; the IN_PROGRESS workflow start; preserve the real runId when provided).`
       : `- When starting, PATCH ${taskEndpoint} with branch ${branch} only. No dedicated work status is enabled; keep the current status until you refresh workflow context and the project owner identifies the intended enabled transition.`;
   const reviewInstruction = readOnlyMode
     ? `- ${mode === "RE_REVIEW" ? "Re-review" : "Review"} mode does not implement or merge changes. Record findings and evidence; if clean, move the task to ${approved}, otherwise use ${fixNeeded} for the requested fixes.`
