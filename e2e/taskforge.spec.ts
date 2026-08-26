@@ -60,6 +60,18 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: "Enable default agent workflow" }).click();
     await expect(page.getByText("Agent workflow enabled")).toBeVisible();
 
+    await page.getByRole("button", { name: "Automations", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Automations" })).toBeVisible();
+    await page.getByLabel("Rule name").fill("Route implementation agent");
+    const automationRows = page.locator(".automation-rule-row");
+    await automationRows.nth(0).locator("select").nth(1).selectOption("changed_to");
+    await automationRows.nth(0).locator("select").nth(2).selectOption("TODO");
+    await automationRows.nth(1).locator("select").nth(0).selectOption("assigneeId");
+    await automationRows.nth(1).locator("select").nth(1).selectOption("actor");
+    await page.getByRole("button", { name: "Create rule" }).click();
+    await expect(page.getByText("Route implementation agent", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+
     await page.getByRole("button", { name: "Create task" }).first().click();
     await page.getByLabel("Task name").fill("Browser regression task");
     await page.getByLabel("Description").fill("Created through the browser smoke suite");
@@ -79,10 +91,17 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByText("Task updated")).toBeVisible();
 
+    for (const status of ["READY_FOR_REVIEW", "IN_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW", "APPROVED"]) {
+      await page.getByRole("button", { name: /E\d+-\d+: Edited browser regression task/ }).click();
+      await page.getByLabel("Task status").selectOption(status);
+      await page.getByRole("button", { name: "Save changes", exact: true }).click();
+      await expect(page.getByText("Task updated")).toBeVisible();
+    }
+
     await page.getByRole("button", { name: "List" }).click();
     await expect(page.getByRole("columnheader", { name: "Task" })).toBeVisible();
     await page.getByRole("button", { name: "Board", exact: true }).click();
-    await expect(page.getByRole("region", { name: "In progress tasks" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Approved tasks" })).toBeVisible();
   });
 
   test("permission-denied state is visible to a non-owner", async ({ page }) => {
