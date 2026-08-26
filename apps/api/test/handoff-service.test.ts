@@ -19,3 +19,14 @@ test("handoff checkpoints are idempotent and validate publication evidence", asy
   assert.equal(first.runId, second.runId);
   assert.equal((await service.validate(context, "run-1")).headSha, "a".repeat(40));
 });
+
+test("incomplete handoffs remain pending and redact diagnostic secrets", async () => {
+  let saved: any = null;
+  const repositories = { runs: { findById: async () => run }, projects: { findById: async () => project }, memberships: { isMember: async () => true }, handoffs: { findByRun: async () => saved, save: async (value: any) => (saved = value) } } as unknown as RepositorySet;
+  const unit: UnitOfWork = { run: async (work) => work(repositories) };
+  const service = new AgentHandoffApplicationService(unit);
+  const result = await service.save(context, "run-1", { branch: "agent/task", headSha: null, branchPublished: false, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, status: "FAILED", lastError: "Authorization: Bearer tf_secret-value" });
+  assert.equal(result.status, "FAILED");
+  assert.match(result.lastError ?? "", /\[REDACTED\]/);
+  assert.doesNotMatch(result.lastError ?? "", /tf_secret-value/);
+});

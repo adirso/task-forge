@@ -252,8 +252,9 @@ export class SmithyRunner {
       let headSha: string | null = null;
       try { headSha = (await readGit("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim() || null; } catch { /* provider may use a non-git checkout */ }
       const prTask = task as typeof task & { pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null };
-      const published = Boolean(task.branch && headSha && prTask.pullRequestUrl && prTask.pullRequestState);
-      await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: task.branch ?? null, headSha, branchPublished: Boolean(task.branch), pullRequestUrl: prTask.pullRequestUrl ?? null, pullRequestTitle: prTask.pullRequestTitle ?? null, pullRequestState: prTask.pullRequestState ?? null, status: published ? "PUBLISHED" : "PENDING", lastError: published ? null : "Provider completed without complete branch/head/PR publication evidence" }) });
+      // A local branch is not proof that it was pushed. Only an explicit
+      // provider callback may mark branchPublished/PUBLISHED.
+      await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: task.branch ?? null, headSha, branchPublished: false, pullRequestUrl: prTask.pullRequestUrl ?? null, pullRequestTitle: prTask.pullRequestTitle ?? null, pullRequestState: prTask.pullRequestState ?? null, status: "PENDING", lastError: "Provider completed without explicit branch publication evidence" }) });
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });
       await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }) });
       appendLog("system", "lifecycle", `Smithy ${kind.toLowerCase()} run completed successfully.`);
@@ -266,6 +267,7 @@ export class SmithyRunner {
       await logQueue;
       const message = wasCancelled ? "Smithy run cancelled by operator." : `Smithy run failed: ${redact(error instanceof Error ? error.message : "Runner failure")}`;
       await api.request(`/api/tasks/${event.task!.id}/updates`, { method: "POST", body: JSON.stringify({ body: message }) }).catch(() => undefined);
+      if (runId) await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: event.task?.branch ?? null, headSha: null, branchPublished: false, pullRequestUrl: event.task?.pullRequestUrl ?? null, pullRequestTitle: event.task?.pullRequestTitle ?? null, pullRequestState: event.task?.pullRequestState ?? null, status: "FAILED", lastError: redact(error instanceof Error ? error.message : "Runner failure") }) }).catch(() => undefined);
       if (runId) await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: wasCancelled ? "CANCELLED" : "FAILED", ...(wasCancelled ? {} : { error: redact(error instanceof Error ? error.message : "Runner failure") }) }) }).catch(() => undefined);
     } finally {
       this.controllers.delete(event.id);
