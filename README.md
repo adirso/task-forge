@@ -20,6 +20,22 @@ Contributor and agent workflow conventions are documented in [AGENTS.md](AGENTS.
 - SQLite or MySQL persistence, validation, project access checks, activity records, and cascade-safe nested tasks
 - Interactive API documentation at `http://127.0.0.1:4000/docs/`
 
+## Dashboard examples
+
+The following screenshots show the main project views available in TaskForge:
+
+### Home dashboard
+
+![TaskForge home dashboard example](docs/images/dashboard-example-home.png)
+
+### Board view
+
+![TaskForge board view example](docs/images/dashboard-example-board.png)
+
+### Send to AI
+
+![TaskForge send to AI example](docs/images/dashboard-example-send-to-ai.png)
+
 ## Quick start
 
 Requirements: Git, Node.js 22 or newer, and npm 10 or newer. CI uses Node.js 22 LTS. SQLite is bundled for the default development setup; Docker is only needed for local MySQL or browser-test services.
