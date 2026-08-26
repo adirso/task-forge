@@ -101,7 +101,7 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: "List" }).click();
     await expect(page.getByRole("columnheader", { name: "Task" })).toBeVisible();
     await page.getByRole("button", { name: "Board", exact: true }).click();
-    await expect(page.getByRole("region", { name: "In progress tasks" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Approved tasks" })).toBeVisible();
   });
 
   test("permission-denied state is visible to a non-owner", async ({ page }) => {
