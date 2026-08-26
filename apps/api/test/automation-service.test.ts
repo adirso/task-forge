@@ -22,6 +22,20 @@ function rule() {
   } as never;
 }
 
+test("automation can match an exact status transition", async () => {
+  const repositories = {
+    automations: { listForProject: async () => [{ ...rule(), conditions: [{ field: "status", operator: "changed_from_to", fromValue: "TODO", value: "IN_REVIEW" }], actions: [{ field: "status", valueType: "static", value: "DONE" }] }] },
+    tasks: { update: async (_id: string, patch: Record<string, unknown>) => ({ ...task, ...patch }) },
+    activity: { record: async () => undefined },
+  } as unknown as RepositorySet;
+
+  const engine = new AutomationEngine();
+  const result = await engine.apply(repositories, context, { ...task, status: "TODO" }, { ...task, status: "IN_REVIEW" }, "TASK_UPDATED");
+  assert.equal(result.status, "DONE");
+  const unchanged = await engine.apply(repositories, context, { ...task, status: "IN_PROGRESS" }, { ...task, status: "IN_REVIEW" }, "TASK_UPDATED");
+  assert.equal(unchanged.status, "IN_REVIEW");
+});
+
 test("automation side effects are auditable when a handoff succeeds", async () => {
   const events: Array<{ action: string; metadata: unknown }> = [];
   const repositories = {

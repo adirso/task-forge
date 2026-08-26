@@ -189,8 +189,8 @@ export const avatarUploadSchema = z.object({
 });
 
 export const automationFieldSchema = z.enum(["status", "priority", "type", "assigneeId", "pullRequestState", "phaseId", "branch", "estimatePoints"]);
-export const automationOperatorSchema = z.enum(["equals", "not_equals", "changed_to", "is_empty", "is_not_empty"]);
-export const automationConditionSchema = z.object({ field: automationFieldSchema, operator: automationOperatorSchema, value: z.string().nullable().default(null) });
+export const automationOperatorSchema = z.enum(["equals", "not_equals", "changed_to", "changed_from_to", "is_empty", "is_not_empty"]);
+export const automationConditionSchema = z.object({ field: automationFieldSchema, operator: automationOperatorSchema, value: z.string().nullable().default(null), fromValue: z.string().nullable().optional() });
 export const automationValueTypeSchema = z.enum(["static", "actor", "user", "service", "null"]);
 export const automationActionSchema = z.object({ field: automationFieldSchema, valueType: automationValueTypeSchema, value: z.string().nullable().default(null) });
 export const automationCreateSchema = z.object({ name: z.string().trim().min(2).max(120), enabled: z.boolean().default(true), trigger: z.enum(["TASK_CREATED", "TASK_UPDATED"]).default("TASK_UPDATED"), actorType: z.enum(["ANY", "USER", "SERVICE"]).default("ANY"), actorId: z.string().uuid().nullable().optional(), service: z.string().trim().max(80).nullable().optional(), conditions: z.array(automationConditionSchema).max(10).default([]), actions: z.array(automationActionSchema).min(1).max(10) });
@@ -334,7 +334,7 @@ export interface Task {
   updatesPage?: PageInfo;
 }
 
-export interface AutomationCondition { field: z.infer<typeof automationFieldSchema>; operator: z.infer<typeof automationOperatorSchema>; value: string | null; }
+export interface AutomationCondition { field: z.infer<typeof automationFieldSchema>; operator: z.infer<typeof automationOperatorSchema>; value: string | null; fromValue?: string | null; }
 export interface AutomationAction { field: z.infer<typeof automationFieldSchema>; valueType: z.infer<typeof automationValueTypeSchema>; value: string | null; }
 export interface Automation { id: string; projectId: string; name: string; enabled: boolean; trigger: "TASK_CREATED" | "TASK_UPDATED"; actorType: "ANY" | "USER" | "SERVICE"; actorId: string | null; service: string | null; conditions: AutomationCondition[]; actions: AutomationAction[]; createdAt: string; updatedAt: string; }
 
