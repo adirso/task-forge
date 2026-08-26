@@ -157,6 +157,7 @@ export interface ProjectEntity {
   availableStatuses: TaskStatus[];
   defaultStatus: TaskStatus;
   agentWorkflow: AgentWorkflow | null;
+  hiddenEmptyStatuses: TaskStatus[];
   ownerId: string;
   createdAt: string;
   updatedAt: string;

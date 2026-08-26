@@ -9,8 +9,9 @@ export function BoardView({ tasks, project, onOpen, onCreate, onMove }: {
 }) {
   const columns = project.availableStatuses
     .map((status) => ({ status, statusTasks: tasks.filter((task) => task.status === status) }))
-    .filter((column) => column.statusTasks.length > 0);
-  const visible = columns.length > 0 ? columns : project.availableStatuses.map((status) => ({ status, statusTasks: [] as Task[] }));
+    .filter((column) => column.statusTasks.length > 0 || !(project.hiddenEmptyStatuses ?? project.availableStatuses).includes(column.status));
+  const hidden = project.hiddenEmptyStatuses ?? project.availableStatuses;
+  const visible = columns.length > 0 ? columns : project.availableStatuses.filter((status) => !hidden.includes(status)).map((status) => ({ status, statusTasks: [] as Task[] }));
 
   return (
     <div className="board" style={{ "--status-count": visible.length } as CSSProperties}>

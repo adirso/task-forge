@@ -58,6 +58,7 @@ let mockProjects: Project[] = [{
   color: "#6554c0",
   sortOrder: 0,
   availableStatuses: [...TASK_STATUSES],
+  hiddenEmptyStatuses: [...TASK_STATUSES],
   defaultStatus: "TODO",
   agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW },
   ownerId: MOCK_USER.id,
@@ -368,7 +369,7 @@ export const api = {
   deletePhase: (id: string, input?: { taskAction?: "move" | "delete"; targetPhaseId?: string }) => request<void>(`/phases/${id}`, { method: "DELETE", body: input ?? {} }),
   createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
-  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"] }) =>
+  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),
   enableAgentWorkflow: (id: string) => request<{ project: Project }>(`/projects/${id}/agent-workflow/enable`, { method: "POST" }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),

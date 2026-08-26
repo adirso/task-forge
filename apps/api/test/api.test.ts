@@ -130,11 +130,12 @@ test("deleting a phase with tasks requires move or delete disposition", async ()
 });
 
 test("project owners can update project details", async () => {
-  const updated = await app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Updated API project", repoUrl: "https://github.com/example/updated", color: "#123456" } });
+  const updated = await app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Updated API project", repoUrl: "https://github.com/example/updated", color: "#123456", hiddenEmptyStatuses: ["BACKLOG"] } });
   assert.equal(updated.statusCode, 200, updated.body);
   assert.equal(updated.json().project.name, "Updated API project");
   assert.equal(updated.json().project.repoUrl, "https://github.com/example/updated");
   assert.equal(updated.json().project.color, "#123456");
+  assert.deepEqual(updated.json().project.hiddenEmptyStatuses, ["BACKLOG"]);
   const persisted = await app.inject({ method: "GET", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(persisted.json().project.name, "Updated API project");
 });

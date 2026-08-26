@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, type AgentWorkflow, type Project, type TaskStatus } from "@taskforge/contracts";
 import { statusMeta } from "../lib/ui";
 
-type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus; agentWorkflow?: AgentWorkflow | null };
+type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus; agentWorkflow?: AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[] };
 
 export function ProjectModal({ project, projects = [], onClose, onSave, onEnableWorkflow }: { project?: Project | null; projects?: Project[]; onClose: () => void; onSave: (project: ProjectFormInput) => Promise<void>; onEnableWorkflow?: () => Promise<void> }) {
   const [name, setName] = useState(project?.name ?? "");
@@ -15,6 +15,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
   const [color, setColor] = useState(project?.color ?? "#6554C0");
   const [availableStatuses, setAvailableStatuses] = useState<TaskStatus[]>(project?.availableStatuses ?? [...TASK_STATUSES]);
   const [defaultStatus, setDefaultStatus] = useState<TaskStatus>(project?.defaultStatus ?? "TODO");
+  const [hiddenEmptyStatuses, setHiddenEmptyStatuses] = useState<TaskStatus[]>(project?.hiddenEmptyStatuses ?? project?.availableStatuses ?? [...TASK_STATUSES]);
   const [agentWorkflow, setAgentWorkflow] = useState<AgentWorkflow | null>(project?.agentWorkflow ?? null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -32,7 +33,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    try { await onSave({ name, key, description, repoUrl: repoUrl || null, localRepoPath: localRepoPath.trim() || null, color, ...(project ? { availableStatuses, defaultStatus, agentWorkflow } : {}) }); onClose(); }
+    try { await onSave({ name, key, description, repoUrl: repoUrl || null, localRepoPath: localRepoPath.trim() || null, color, ...(project ? { availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses } : {}) }); onClose(); }
     catch (err) { setError(err instanceof Error ? err.message : `Could not ${project ? "update" : "create"} project`); }
     finally { setSaving(false); }
   }
@@ -66,11 +67,13 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
                     if (checked && availableStatuses.length === 1) return;
                     const next = checked ? availableStatuses.filter((item) => item !== status) : TASK_STATUSES.filter((item) => item === status || availableStatuses.includes(item));
                     setAvailableStatuses(next);
+                    setHiddenEmptyStatuses((items) => items.filter((item) => next.includes(item)));
                     if (!next.includes(defaultStatus)) setDefaultStatus(next[0]!);
                     if (agentWorkflow && Object.values(agentWorkflow).some((workflowStatus) => !next.includes(workflowStatus))) setAgentWorkflow(null);
                   }} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>;
                 })}</div>
                 <label>Default status for API-created tasks<select value={defaultStatus} onChange={(event) => setDefaultStatus(event.target.value as TaskStatus)}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select><small>Used when an API request creates a task without a status.</small></label>
+                <label>Hide empty status columns</label><div className="project-status-options">{availableStatuses.map((status) => <label key={status} className={hiddenEmptyStatuses.includes(status) ? "is-selected" : ""}><input type="checkbox" checked={hiddenEmptyStatuses.includes(status)} onChange={() => setHiddenEmptyStatuses((items) => items.includes(status) ? items.filter((item) => item !== status) : [...items, status])} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>)}</div><small>Selected columns stay hidden while they have no tasks.</small>
               </section>
               <section className="project-status-settings">
                 <div><strong>Agent workflow</strong><span>Configure the statuses Smithy uses for implementation and review handoffs.</span></div>

@@ -27,6 +27,8 @@ export function toProject(row: Row): Project {
   if (row.agent_workflow) {
     try { const parsed = agentWorkflowSchema.safeParse(JSON.parse(String(row.agent_workflow))); if (parsed.success) agentWorkflow = parsed.data; } catch { /* Invalid legacy configuration remains disabled. */ }
   }
+  let hiddenEmptyStatuses = availableStatuses;
+  try { const parsed = JSON.parse(String(row.hidden_empty_statuses ?? "")); if (Array.isArray(parsed)) hiddenEmptyStatuses = availableStatuses.filter((status) => parsed.includes(status)); } catch { /* Legacy projects preserve the existing hide-empty behavior. */ }
   return {
     id: String(row.id),
     key: String(row.key),
@@ -39,6 +41,7 @@ export function toProject(row: Row): Project {
     availableStatuses,
     defaultStatus: availableStatuses.includes(configuredDefault) ? configuredDefault : availableStatuses[0]!,
     agentWorkflow,
+    hiddenEmptyStatuses,
     ownerId: String(row.owner_id),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),

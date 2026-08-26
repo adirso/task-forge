@@ -569,6 +569,21 @@ export const migrations: readonly Migration[] = [
         : "ALTER TABLE projects ADD COLUMN agent_workflow TEXT NULL", []);
     },
   },
+  {
+    version: "0018_project_hidden_empty_statuses",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE projects ADD COLUMN hidden_empty_statuses TEXT NULL"
+        : "ALTER TABLE projects ADD COLUMN hidden_empty_statuses TEXT NULL", []);
+      const projects = await executor.all<{ id: string; available_statuses: string }>("SELECT id, available_statuses FROM projects", []);
+      for (const project of projects) {
+        let statuses: string[] = [];
+        try { const parsed = JSON.parse(project.available_statuses); if (Array.isArray(parsed)) statuses = parsed.filter((status): status is string => typeof status === "string"); } catch { /* Use the shipped default below. */ }
+        if (!statuses.length) statuses = [...DEFAULT_PROJECT_STATUSES];
+        await executor.run("UPDATE projects SET hidden_empty_statuses = ? WHERE id = ?", [JSON.stringify(statuses), project.id]);
+      }
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {
