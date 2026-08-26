@@ -89,6 +89,7 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("tab", { name: /Updates & activity/ }).click();
     await page.getByPlaceholder("Share progress, a decision, or a blocker…").fill("Browser note survived the edit flow");
     await page.getByRole("button", { name: "Post update" }).click();
+    await page.getByRole("tab", { name: /Details & information/ }).click();
     await page.locator('input[type="file"]').setInputFiles({ name: "e2e.txt", mimeType: "text/plain", buffer: Buffer.from("attachment") });
     await expect(page.getByText("e2e.txt", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Save changes" }).click();
