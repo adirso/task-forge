@@ -2,7 +2,7 @@
 
 TaskForge is a local-first project and task manager for teams made of people and software agents. It combines a workflow board with a structured list, backed by a typed HTTP API.
 
-Autonomous delivery orchestration research and the Phase 5 implementation plan are documented in [docs/AUTONOMOUS_AGENT_ORCHESTRATION.md](docs/AUTONOMOUS_AGENT_ORCHESTRATION.md).
+Contributor and agent workflow conventions are documented in [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md).
 
 ## What is included
 
@@ -19,6 +19,22 @@ Autonomous delivery orchestration research and the Phase 5 implementation plan a
 - Shareable `?project=KEY&task=KEY-N` deep links for people and agents
 - SQLite or MySQL persistence, validation, project access checks, activity records, and cascade-safe nested tasks
 - Interactive API documentation at `http://127.0.0.1:4000/docs/`
+
+## Dashboard examples
+
+The following screenshots show the main project views available in TaskForge:
+
+### Home dashboard
+
+![TaskForge home dashboard example](docs/images/dashboard-example-home.png)
+
+### Board view
+
+![TaskForge board view example](docs/images/dashboard-example-board.png)
+
+### Send to AI
+
+![TaskForge send to AI example](docs/images/dashboard-example-send-to-ai.png)
 
 ## Quick start
 
@@ -42,9 +58,9 @@ Password: demo1234
 
 SQLite is the default for local development and is created at `data/taskforge.db`. Seeding is idempotent and adds a sample project, people, an agent identity, and ten representative tasks.
 
-The Smithy runner is intentionally excluded from `npm run dev`; configure it separately as described in [docs/SMITHY.md](docs/SMITHY.md).
+The Smithy runner is intentionally excluded from `npm run dev`; configure it separately with the Smithy workspace commands.
 
-Recommended project-owned handoff automations for implementation, review, fixes, and re-review are documented in [docs/SMITHY_AUTOMATIONS.md](docs/SMITHY_AUTOMATIONS.md). They are opt-in; no migration creates them.
+Recommended project-owned handoff automations are opt-in; no migration creates them.
 
 ## Configuration
 
@@ -66,7 +82,7 @@ Important variables:
 | `CORS_ORIGIN` | localhost and loopback web origins | Allowed browser origins |
 | `TRUST_PROXY` | unset | Trusted proxy addresses, never arbitrary client input |
 
-Never commit `.env`, database files, agent tokens, webhook secrets, or production credentials. See [docs/SECURITY.md](docs/SECURITY.md) before exposing the API beyond localhost.
+Never commit `.env`, database files, agent tokens, webhook secrets, or production credentials. Put the API behind TLS before exposing it beyond localhost.
 
 ### MySQL development
 
@@ -82,7 +98,8 @@ apps/
 packages/
   contracts/  Shared Zod validation and TypeScript domain types
 e2e/          Playwright browser regression tests
-docs/         API, security, CI, migration, backup, and runner guides
+AGENTS.md     Contributor and agent development guidance
+CLAUDE.md     Claude Code workflow guidance
 .github/      GitHub Actions CI workflow
 ```
 
@@ -107,7 +124,7 @@ Workspace-specific commands use npm's workspace flag, for example `npm test -w @
 2. Run `npm ci` after changing branches or the lockfile.
 3. Use `npm run dev` for the API and web app; use `npm run dev:agents` only when testing the optional Smithy Beta runner.
 4. Add or update focused tests with code changes. Run `npm run typecheck`, `npm run build`, and `npm test` before opening a pull request.
-5. For schema changes, use the versioned migration registry and add SQLite/MySQL upgrade coverage; read [docs/DATABASE_MIGRATIONS.md](docs/DATABASE_MIGRATIONS.md).
+5. For schema changes, use the versioned migration registry and add SQLite/MySQL upgrade coverage.
 6. Do not edit generated data, local env files, or unrelated migrations. Describe behavior changes, test commands, and known limitations in the pull request.
 
 ## Architecture at a glance
@@ -118,25 +135,11 @@ Workspace-specific commands use npm's workspace flag, for example `npm test -w @
 - `apps/smithy` is an optional loopback runner. It receives signed webhooks and executes operator-configured commands; the API never launches provider processes.
 - `apps/api/src/db/database.ts` applies ordered, ledgered migrations at startup.
 
-Keep SQL and driver-specific behavior in repositories, authorization and orchestration in application services, and request parsing/response presentation in routes. See [docs/API_ARCHITECTURE.md](docs/API_ARCHITECTURE.md).
+Keep SQL and driver-specific behavior in repositories, authorization and orchestration in application services, and request parsing/response presentation in routes.
 
 ## Continuous integration
 
-Every pull request and push to `main` runs the required **Quality and SQLite**, **API on MySQL 8**, and **Browser E2E** checks. See the [CI guide](docs/CI.md) for their exact scope, local equivalents, and failure diagnostics. Browser E2E can be run locally with `npm run test:e2e` after `npm run test:e2e:install`.
-
-## Dashboard examples
-
-Home dashboard:
-
-![TaskForge home dashboard example](docs/images/dashboard-example-home.png)
-
-Board view:
-
-![TaskForge board view example](docs/images/dashboard-example-board.png)
-
-Send-to-AI dialog:
-
-![TaskForge send to AI example](docs/images/dashboard-example-send-to-ai.png)
+Every pull request and push to `main` runs the required **Quality and SQLite**, **API on MySQL 8**, and **Browser E2E** checks. Browser E2E can be run locally with `npm run test:e2e` after `npm run test:e2e:install`.
 
 ## API overview
 
@@ -169,19 +172,6 @@ All application endpoints are under `/api`. Send either a human JWT or agent tok
 | `GET` | `/api/search?q=...` | Search accessible tasks across projects |
 | `GET` | `/api/context?project=TF&task=TF-4` | Resolve a shared project/task link without UUIDs |
 
-See [Agent API guide](docs/AGENT_API.md) for copy-paste examples.
-
-## Documentation map
-
-- [Agent API](docs/AGENT_API.md) — authentication, task operations, workflow-aware handoffs, and run endpoints
-- [CI guide](docs/CI.md) — required GitHub checks and local equivalents
-- [Browser E2E guide](docs/E2E_TESTING.md) — seeded browser test setup and troubleshooting
-- [Security guide](docs/SECURITY.md) — credentials, proxy trust, throttling, and deployment boundaries
-- [Database migrations](docs/DATABASE_MIGRATIONS.md) — upgrade, backup, failure, and recovery procedures
-- [Backup and restore](docs/BACKUP_RESTORE.md) — verified workspace backups and disaster recovery
-- [Smithy guide](docs/SMITHY.md) — optional signed runner configuration and Beta limitations
-- [Autonomous orchestration research](docs/AUTONOMOUS_AGENT_ORCHESTRATION.md) — state machine, ownership, and delivery-gate design
-
 ## Contributing
 
 TaskForge is an open-source project and welcomes issues, documentation improvements, tests, and code contributions. Before contributing:
@@ -192,13 +182,13 @@ TaskForge is an open-source project and welcomes issues, documentation improveme
 - Never include secrets, real credentials, private repository paths, or generated database files in commits.
 - Keep Smithy changes provider-agnostic: provider names are routing labels and commands remain operator configuration.
 
-Pull requests should explain the change, list validation commands, call out skipped checks (for example a local native-module limitation), and identify any migration or rollout considerations. Automated checks are required before merge; see [docs/CI.md](docs/CI.md).
+Pull requests should explain the change, list validation commands, call out skipped checks (for example a local native-module limitation), and identify any migration or rollout considerations. Automated checks are required before merge.
 
 ## Troubleshooting
 
 - **The web app cannot reach the API:** confirm the API is listening on `http://127.0.0.1:4000` and the web app on `http://127.0.0.1:5173`; restart `npm run dev` after changing `.env`.
 - **`better-sqlite3` reports a `NODE_MODULE_VERSION` mismatch:** use Node.js 22, then run `npm ci` (or rebuild the dependency with `npm rebuild better-sqlite3`) before rerunning tests.
-- **A migration fails at startup:** stop the API, back up the database, read the row-level diagnostics, and follow [docs/DATABASE_MIGRATIONS.md](docs/DATABASE_MIGRATIONS.md). Do not edit the migration ledger manually.
+- **A migration fails at startup:** stop the API, back up the database, and read the row-level diagnostics. Do not edit the migration ledger manually.
 - **MySQL tests fail:** ensure `TEST_DATABASE_URL` points to a disposable MySQL 8 database that is ready to accept connections; never use a production database.
 - **Browser tests fail:** install Chromium with `npm run test:e2e:install`, then rerun `npm run test:e2e`; inspect Playwright traces and screenshots from `test-results/`.
 
@@ -216,8 +206,8 @@ Pull requests should explain the change, list validation commands, call out skip
 
 - On the first deployment, temporarily set `ADMIN_EMAIL`, `ADMIN_PASSWORD` (at least 12 characters), and optionally `ADMIN_NAME`, then run `npm run admin:bootstrap`. Remove those bootstrap values after the command succeeds. Running it again safely rotates the matching human administrator's password.
 - SQLite remains available for local development. Set `DATABASE_DRIVER=sqlite` and `DATABASE_PATH=./data/taskforge.db`; no MySQL service is needed.
-- Database upgrades run as ordered, ledgered startup migrations. Read the [database migration runbook](docs/DATABASE_MIGRATIONS.md) before production upgrades; it covers backups, staged rollout, failure diagnostics, and recovery.
-- Create and verify a workspace backup with `npm run backup:create -w @taskforge/api -- --output ./backups/taskforge-$(date +%Y%m%d-%H%M%S).tar.gz`; restore only to a stopped, disposable or explicitly approved target with `npm run backup:restore -w @taskforge/api -- --input ./backups/taskforge-YYYYMMDD-HHMMSS.tar.gz --force`. See the [backup and restore runbook](docs/BACKUP_RESTORE.md).
+- Database upgrades run as ordered, ledgered startup migrations. Back up production before upgrades and read row-level diagnostics before retrying a failed startup.
+- Create and verify a workspace backup with `npm run backup:create -w @taskforge/api -- --output ./backups/taskforge-$(date +%Y%m%d-%H%M%S).tar.gz`; restore only to a stopped, disposable or explicitly approved target with `npm run backup:restore -w @taskforge/api -- --input ./backups/taskforge-YYYYMMDD-HHMMSS.tar.gz --force`.
 - To exercise the same API suite against a dedicated empty MySQL database, run `TEST_DATABASE_URL=mysql://... npm run test:mysql -w @taskforge/api`. The test database is modified and must never point at production.
 - Put the API behind TLS before issuing real credentials.
 

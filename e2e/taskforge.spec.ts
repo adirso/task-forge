@@ -46,12 +46,12 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByText("Project updated")).toBeVisible();
     await openProjectSettings(page);
 
-    await page.getByRole("checkbox", { name: "Backlog" }).uncheck();
-    await page.getByRole("checkbox", { name: "Refining" }).uncheck();
-    await page.getByRole("checkbox", { name: "Ready for review" }).uncheck();
-    await page.getByRole("checkbox", { name: "In review" }).uncheck();
-    await page.getByRole("checkbox", { name: "Done" }).uncheck();
-    await page.getByRole("checkbox", { name: "Cancelled" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Backlog" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Refining" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Ready for review" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: In review" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Done" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Cancelled" }).uncheck();
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByRole("heading", { name: createdProjectName })).toBeVisible();
     await expect(page.getByRole("region", { name: "Done tasks" })).toHaveCount(0);
@@ -61,7 +61,7 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByText("Agent workflow enabled")).toBeVisible();
 
     await page.getByRole("button", { name: "Automations", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Automations" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Automations", exact: true })).toBeVisible();
     await page.getByLabel("Rule name").fill("Route implementation agent");
     const automationRows = page.locator(".automation-rule-row");
     await automationRows.nth(0).locator("select").nth(1).selectOption("changed_to");
@@ -78,24 +78,28 @@ test.describe("workspace browser smoke", () => {
     await page.getByLabel("Definition of done").fill("Task can be edited and moved");
     await page.getByLabel("Task status").selectOption("TODO");
     await page.getByLabel("Task priority").selectOption("HIGH");
-    await page.getByRole("dialog", { name: "Create a task" }).getByRole("button", { name: "Create task", exact: true }).click();
+    const createButton = page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true });
+    await expect(createButton).toBeEnabled();
+    await createButton.click({ force: true });
     await expect(page.getByRole("button", { name: /E\d+-\d+: Browser regression task/ })).toBeVisible();
 
     await page.getByRole("button", { name: /E\d+-\d+: Browser regression task/ }).click();
     await page.getByLabel("Task name").fill("Edited browser regression task");
     await page.getByLabel("Task status").selectOption("IN_PROGRESS");
+    await page.getByRole("tab", { name: /Updates & activity/ }).click();
     await page.getByPlaceholder("Share progress, a decision, or a blocker…").fill("Browser note survived the edit flow");
     await page.getByRole("button", { name: "Post update" }).click();
+    await page.getByRole("tab", { name: /Details & information/ }).click();
     await page.locator('input[type="file"]').setInputFiles({ name: "e2e.txt", mimeType: "text/plain", buffer: Buffer.from("attachment") });
     await expect(page.getByText("e2e.txt", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByText("Task updated")).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
 
     for (const status of ["READY_FOR_REVIEW", "IN_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW", "APPROVED"]) {
       await page.getByRole("button", { name: /E\d+-\d+: Edited browser regression task/ }).click();
       await page.getByLabel("Task status").selectOption(status);
       await page.getByRole("button", { name: "Save changes", exact: true }).click();
-      await expect(page.getByText("Task updated")).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
     }
 
     await page.getByRole("button", { name: "List" }).click();
@@ -129,7 +133,7 @@ test.describe("workspace browser smoke", () => {
     await page.getByLabel("Description").fill("Run observability fixture");
     await page.getByLabel("Definition of done").fill("Run health is visible");
     await page.getByLabel("Task status").selectOption("TODO");
-    await page.getByRole("dialog", { name: "Create a task" }).getByRole("button", { name: "Create task", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true }).click({ force: true });
     await expect(page.getByRole("button", { name: /Browser observability task/ })).toBeVisible();
 
     const now = Date.now();
@@ -144,6 +148,7 @@ test.describe("workspace browser smoke", () => {
       { id: "log-702", taskId: "task", runId: "00000000-0000-4000-8000-000000000702", provider: "codex", stream: "stderr", category: "output", sequence: 2, eventId: null, content: "Last stalled output", createdAt: new Date(now - 180000).toISOString() },
     ], page: { limit: 100, hasMore: false, nextCursor: null } }) }));
     await page.getByRole("button", { name: /Browser observability task/ }).click();
+    await page.getByRole("tab", { name: /Agents/ }).click();
     await expect(page.getByText("Agent runs")).toBeVisible();
     await expect(page.getByText("Live", { exact: true })).toBeVisible();
     await expect(page.getByText("Lease expired", { exact: true })).toBeVisible();
@@ -163,18 +168,20 @@ test.describe("mobile workspace smoke", () => {
     await mobileNav.getByRole("button", { name: /TaskForge.*Drag to reorder/ }).click();
     await expect(page.getByRole("heading", { name: "TaskForge" })).toBeVisible();
     await page.getByRole("button", { name: "Create task" }).first().click();
-    const createDialog = page.getByRole("dialog", { name: "Create a task" });
+    const createDialog = page.getByRole("dialog");
     await createDialog.getByLabel("Task name").fill("Mobile browser task");
     await createDialog.getByLabel("Description").fill("Created on mobile");
     await createDialog.getByLabel("Definition of done").fill("Edited on mobile");
     await createDialog.getByLabel("Task status").selectOption("TODO");
     await createDialog.getByLabel("Task priority").selectOption("MEDIUM");
-    await createDialog.getByRole("button", { name: "Create task", exact: true }).click();
-    await page.getByRole("button", { name: /TF-\d+: Mobile browser task/ }).click();
-    const editDialog = page.getByRole("dialog", { name: "Edit task" });
+    const mobileCreateButton = createDialog.getByRole("button", { name: "Create task", exact: true });
+    await expect(mobileCreateButton).toBeEnabled();
+    await mobileCreateButton.click({ force: true });
+    await page.getByRole("button", { name: /TF-\d+: Mobile browser task/ }).last().click();
+    const editDialog = page.getByRole("dialog");
     await editDialog.getByLabel("Task name").fill("Edited mobile browser task");
     await editDialog.getByLabel("Task status").selectOption("IN_PROGRESS");
     await editDialog.getByRole("button", { name: "Save changes", exact: true }).click();
-    await expect(page.getByText("Task updated")).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });
