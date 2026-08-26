@@ -197,6 +197,23 @@ test("runner rejects unknown providers, bad signatures, and missing local comman
   assert.doesNotMatch(failed?.body ?? "", /tf_private/);
 });
 
+test("runner reports redacted publication authentication failures", async () => {
+  let update = "";
+  const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task };
+    if (path.endsWith("/runs")) return { run: { id: "run-publish-auth" } };
+    if (path.endsWith("/updates")) update = String(init?.body ?? "");
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 1, stdout: "", stderr: "git push failed: authentication required token=tf_private" }), () => 1_700_000_000_000);
+  const body = JSON.stringify({ ...event, id: "event-publish-auth" });
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(update, /publication or authentication failed/);
+  assert.doesNotMatch(update, /tf_private/);
+});
+
 test("runner ignores an out-of-order status event after the task has moved on", async () => {
   const calls: string[] = [];
   const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["IN_PROGRESS", "IN_REVIEW"] }, task: { ...event.task, status: "IN_REVIEW" } }; return {}; } };
@@ -257,6 +274,8 @@ test("runner leaves task transitions to the assigned agent and explains the work
   assert.match(prompt, /Enabled workflow statuses: BACKLOG, TODO, IN_PROGRESS, READY_FOR_REVIEW/);
   assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"IN_PROGRESS","runId":"run-backlog"\}/);
   assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"READY_FOR_REVIEW","runId":"run-backlog"\}/);
+  assert.match(prompt, /commit all changes, push the existing task branch/);
+  assert.match(prompt, /PUT \/api\/runs\/run-backlog\/handoff/);
 });
 
 test("runner gives fix and re-review jobs focused, status-aware prompts", async () => {
@@ -276,7 +295,29 @@ test("runner gives fix and re-review jobs focused, status-aware prompts", async 
     assert.match(prompt, /\/api\/tasks\/00000000-0000-4000-8000-000000000064\/updates/);
     assert.match(prompt, /\/api\/tasks\/00000000-0000-4000-8000-000000000064\/agent-logs/);
     assert.match(prompt, /Enabled workflow statuses/);
+    if (status === "FIX_NEEDED") {
+      assert.match(prompt, /commit the fixes, push this same branch/);
+      assert.match(prompt, /PUT \/api\/runs\/run-fix_needed\/handoff/);
+    }
   }
+});
+
+test("review prompts include verified publication handoff context", async () => {
+  let prompt = "";
+  const api = { request: async (path: string) => {
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["READY_FOR_REVIEW", "IN_REVIEW", "APPROVED"] }, task: { ...event.task, status: "READY_FOR_REVIEW", branch: "agent/published" } };
+    if (path.endsWith("/runs")) return path.includes("/tasks/") ? { runs: [{ id: "run-review-published" }, { id: "run-publisher" }] } : { run: { id: "run-review-published" } };
+    if (path.endsWith("/handoff")) return path.includes("run-publisher") ? { handoff: { status: "PUBLISHED", branch: "agent/published", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/9", pullRequestState: "OPEN" } } : { handoff: null };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, value) => { prompt = value; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const review = { ...event, id: "event-review-published", event: "task.status_changed", runId: "run-review-published", previousStatus: "IN_PROGRESS", task: { ...event.task, status: "READY_FOR_REVIEW", branch: "agent/published" } };
+  const body = JSON.stringify(review);
+  await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` }, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(prompt, /Canonical publication \(verified\)/);
+  assert.match(prompt, new RegExp(`head SHA ${"a".repeat(40)}`));
+  assert.match(prompt, /pull request https:\/\/github.com\/example\/repo\/pull\/9/);
 });
 
 test("runner uses the project workflow mapping and ignores ordinary updates", async () => {
@@ -314,7 +355,7 @@ test("runner uses the project workflow mapping and ignores ordinary updates", as
   const updateBody = JSON.stringify(update);
   await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, updateBody)}` }, updateBody);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 2);
+  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 3);
 });
 
 test("runner executes the configured implementation-review-fix-re-review loop with correlated runs", async () => {
@@ -349,7 +390,7 @@ test("runner executes the configured implementation-review-fix-re-review loop wi
   assert.match(prompts[2]!, /fix start/);
   assert.match(prompts[3]!, /re-review start/);
   assert.deepEqual(calls.filter((call) => call.path.endsWith("/claim")).map((call) => call.path.split("/").at(-2)), ["run-implementation", "run-review", "run-fix", "run-rereview"]);
-  assert.equal(calls.filter((call) => call.path.endsWith("/runs")).length, 0, "webhook run IDs are reused rather than creating duplicate runs");
+  assert.equal(calls.filter((call) => call.path.endsWith("/runs") && call.body?.includes("kind")).length, 0, "webhook run IDs are reused rather than creating duplicate runs");
 });
 
 test("runner includes redacted findings in fix prompts and rejects invalid mappings visibly", async () => {
