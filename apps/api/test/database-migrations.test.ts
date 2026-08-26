@@ -106,10 +106,11 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
   for (const migration of migrations) assert.ok(applied.some((row) => row.version === migration.version), `${migration.version} was not recorded`);
   if (expectsLegacyTask) {
     assert.equal((await adapter.get<{ title: string }>("SELECT title FROM tasks WHERE id = ?", ["task-1"]))?.title, "Legacy task");
-    const project = await adapter.get<{ available_statuses: string; default_status: string; agent_workflow: string | null }>("SELECT available_statuses, default_status, agent_workflow FROM projects WHERE id = ?", ["project-1"]);
+    const project = await adapter.get<{ available_statuses: string; default_status: string; agent_workflow: string | null; hidden_empty_statuses: string | null }>("SELECT available_statuses, default_status, agent_workflow, hidden_empty_statuses FROM projects WHERE id = ?", ["project-1"]);
     assert.deepEqual(JSON.parse(project!.available_statuses), currentStatuses);
     assert.equal(project!.default_status, "TODO");
     assert.equal(project!.agent_workflow, null, "legacy projects stay opt-in until an administrator enables the workflow");
+    assert.deepEqual(JSON.parse(project!.hidden_empty_statuses!), currentStatuses);
     const migratedReady = await adapter.get<{ status: string }>("SELECT status FROM tasks WHERE id = ?", ["task-ready-for-dev"]);
     if (migratedReady) assert.equal(migratedReady.status, "TODO");
     await adapter.run("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ["task-2", "project-1", 2, "Post-migration task", "", "", "READY_FOR_REVIEW", "user-1", "2026-01-02T00:00:00.000Z", "2026-01-02T00:00:00.000Z"]);
@@ -118,6 +119,10 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
     ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'agent_workflow'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'agent_workflow'", []));
   assert.equal(hasAgentWorkflowColumn, true);
+  const hasHiddenEmptyStatusesColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'hidden_empty_statuses'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'hidden_empty_statuses'", []));
+  assert.equal(hasHiddenEmptyStatusesColumn, true);
   const hasWebhookTable = driver === "sqlite"
     ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'webhook_deliveries'", []));

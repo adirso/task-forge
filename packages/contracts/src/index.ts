@@ -68,6 +68,7 @@ export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).parti
   availableStatuses: projectAvailableStatusesSchema.optional(),
   defaultStatus: taskStatusSchema.optional(),
   agentWorkflow: agentWorkflowSchema.nullable().optional(),
+  hiddenEmptyStatuses: projectAvailableStatusesSchema.optional(),
 });
 export const projectOrderSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(500) });
 
@@ -259,6 +260,7 @@ export interface Project {
   availableStatuses: TaskStatus[];
   defaultStatus: TaskStatus;
   agentWorkflow: AgentWorkflow | null;
+  hiddenEmptyStatuses: TaskStatus[];
   ownerId: string;
   createdAt: string;
   updatedAt: string;
