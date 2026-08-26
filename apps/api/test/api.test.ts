@@ -709,6 +709,48 @@ test("automations can assign the actor and merge open pull requests", async () =
   const rules = await app.inject({ method: "GET", url: `/api/projects/${projectId}/automations`, headers: { authorization: `Bearer ${jwtToken}` } }); assert.equal(rules.json().automations.length, 2);
 });
 
+test("configured autonomous workflow routes implementation, review, fix, and re-review ownership", async () => {
+  const reviewerId = randomUUID();
+  const now = new Date().toISOString();
+  await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)")
+    .run(reviewerId, `reviewer-${reviewerId}@example.com`, "Review Agent", now);
+  const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `LOOP${randomUUID().slice(0, 4)}`, name: "Autonomous loop", description: "End-to-end workflow routing", color: "#0052CC" } });
+  assert.equal(created.statusCode, 201, created.body);
+  const loopProjectId = created.json().project.id as string;
+  for (const userId of [agentId, reviewerId]) {
+    const membership = await app.inject({ method: "POST", url: `/api/projects/${loopProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId, role: "MEMBER" } });
+    assert.equal(membership.statusCode, 204, membership.body);
+  }
+  const workflowStatuses = ["TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "APPROVED", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW"];
+  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: workflowStatuses, defaultStatus: "TODO" } });
+  assert.equal(configured.statusCode, 200, configured.body);
+  const rule = async (name: string, status: string, assignee: string) => {
+    const response = await app.inject({ method: "POST", url: `/api/projects/${loopProjectId}/automations`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name, conditions: [{ field: "status", operator: "changed_to", value: status }], actions: [{ field: "assigneeId", valueType: "user", value: assignee }] } });
+    assert.equal(response.statusCode, 201, response.body);
+  };
+  await rule("Route review", "READY_FOR_REVIEW", reviewerId);
+  await rule("Route fixes", "FIX_NEEDED", agentId);
+  await rule("Route re-review", "RE_REVIEW", reviewerId);
+  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${loopProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Autonomous loop task", status: "TODO", assigneeId: agentId, branch: "agent/autonomous-loop" } });
+  assert.equal(createdTask.statusCode, 201, createdTask.body);
+  const loopTaskId = createdTask.json().task.id as string;
+  const move = async (status: string, assignee: string) => {
+    const response = await app.inject({ method: "PATCH", url: `/api/tasks/${loopTaskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status } });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().task.status, status);
+    assert.equal(response.json().task.assigneeId, assignee);
+  };
+  await move("IN_PROGRESS", agentId);
+  await move("READY_FOR_REVIEW", reviewerId);
+  await move("IN_REVIEW", reviewerId);
+  await move("FIX_NEEDED", agentId);
+  await move("FIX_IN_PROGRESS", agentId);
+  await move("RE_REVIEW", reviewerId);
+  await move("APPROVED", reviewerId);
+  const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deleted.statusCode, 204, deleted.body);
+});
+
 test("task types default to FEATURE and are settable, filterable, and validated", async () => {
   const project = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "TYP", name: "Task types", description: "Task type coverage", color: "#0747A6" } });
   assert.equal(project.statusCode, 201, project.body);
