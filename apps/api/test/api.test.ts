@@ -722,8 +722,10 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
     assert.equal(membership.statusCode, 204, membership.body);
   }
   const workflowStatuses = ["TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "APPROVED", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW"];
-  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: workflowStatuses, defaultStatus: "TODO" } });
+  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: workflowStatuses, defaultStatus: "TODO", agentWorkflow: { implementationQueue: "TODO", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "FIX_IN_PROGRESS", reReview: "RE_REVIEW" } } });
   assert.equal(configured.statusCode, 200, configured.body);
+  const reviewerWebhook = await app.inject({ method: "PATCH", url: `/api/users/${reviewerId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "http://127.0.0.1:4500/agents/reviewer" } });
+  assert.equal(reviewerWebhook.statusCode, 200, reviewerWebhook.body);
   const rule = async (name: string, status: string, assignee: string) => {
     const response = await app.inject({ method: "POST", url: `/api/projects/${loopProjectId}/automations`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name, conditions: [{ field: "status", operator: "changed_to", value: status }], actions: [{ field: "assigneeId", valueType: "user", value: assignee }] } });
     assert.equal(response.statusCode, 201, response.body);
@@ -734,8 +736,13 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
   const createdTask = await app.inject({ method: "POST", url: `/api/projects/${loopProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Autonomous loop task", status: "TODO", assigneeId: agentId, branch: "agent/autonomous-loop" } });
   assert.equal(createdTask.statusCode, 201, createdTask.body);
   const loopTaskId = createdTask.json().task.id as string;
+  const runResponse = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  assert.equal(runResponse.statusCode, 201, runResponse.body);
+  const runId = runResponse.json().run.id as string;
+  const claimedRun = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { leaseMs: 60_000 } });
+  assert.equal(claimedRun.statusCode, 200, claimedRun.body);
   const move = async (status: string, assignee: string) => {
-    const response = await app.inject({ method: "PATCH", url: `/api/tasks/${loopTaskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status } });
+    const response = await app.inject({ method: "PATCH", url: `/api/tasks/${loopTaskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status, runId } });
     assert.equal(response.statusCode, 200, response.body);
     assert.equal(response.json().task.status, status);
     assert.equal(response.json().task.assigneeId, assignee);
@@ -747,6 +754,22 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
   await move("FIX_IN_PROGRESS", agentId);
   await move("RE_REVIEW", reviewerId);
   await move("APPROVED", reviewerId);
+  const deliveries = await db.prepare("SELECT event_type, agent_id, payload FROM webhook_deliveries WHERE task_id = ? ORDER BY created_at ASC").all(loopTaskId) as Array<{ event_type: string; agent_id: string; payload: string }>;
+  assert.ok(deliveries.some((delivery) => delivery.event_type === "task.status_changed" && delivery.agent_id === reviewerId));
+  assert.ok(deliveries.some((delivery) => JSON.parse(delivery.payload).runId === runId));
+  const evidence = await app.inject({ method: "PUT", url: `/api/tasks/${loopTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }] } });
+  assert.equal(evidence.statusCode, 200, evidence.body);
+  const scoped = await app.inject({ method: "POST", url: `/api/users/${reviewerId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Gate reviewer", permissions: ["task:gate:approve"] } });
+  assert.equal(scoped.statusCode, 201, scoped.body);
+  const scopedToken = scoped.json().token as string;
+  const agentMerge = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/merge`, headers: { authorization: `Bearer ${scopedToken}` }, payload: { headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } });
+  assert.equal(agentMerge.statusCode, 403, agentMerge.body);
+  const approval = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/approve`, headers: { authorization: `Bearer ${scopedToken}` }, payload: { headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } });
+  assert.equal(approval.statusCode, 200, approval.body);
+  const merge = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/merge`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } });
+  assert.equal(merge.statusCode, 200, merge.body);
+  const completedRun = await app.inject({ method: "POST", url: `/api/runs/${runId}/complete`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "SUCCEEDED" } });
+  assert.equal(completedRun.statusCode, 200, completedRun.body);
   const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(deleted.statusCode, 204, deleted.body);
 });

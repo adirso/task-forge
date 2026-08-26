@@ -317,6 +317,41 @@ test("runner uses the project workflow mapping and ignores ordinary updates", as
   assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 2);
 });
 
+test("runner executes the configured implementation-review-fix-re-review loop with correlated runs", async () => {
+  const workflow = { implementationQueue: "TODO", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "FIX_IN_PROGRESS", reReview: "RE_REVIEW" };
+  const calls: Array<{ path: string; body?: string }> = [];
+  const prompts: string[] = [];
+  const api = { request: async (path: string, init?: RequestInit) => {
+    calls.push({ path, body: String(init?.body ?? "") });
+    if (path.includes("/api/context")) {
+      return { project: { key: "TAS", availableStatuses: Object.values(workflow), agentWorkflow: workflow }, task: { ...event.task, status: currentStatus, branch: "agent/tas-83-loop" } };
+    }
+    return {};
+  } };
+  let currentStatus = "TODO";
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, prompt) => { prompts.push(prompt); return { code: 0, stdout: "fake provider ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const events = [
+    { id: "loop-implementation", event: "task.assigned", status: "TODO", previousStatus: undefined, runId: "run-implementation" },
+    { id: "loop-review", event: "task.status_changed", status: "READY_FOR_REVIEW", previousStatus: "IN_PROGRESS", runId: "run-review" },
+    { id: "loop-fix", event: "task.status_changed", status: "FIX_NEEDED", previousStatus: "IN_REVIEW", runId: "run-fix" },
+    { id: "loop-rereview", event: "task.status_changed", status: "RE_REVIEW", previousStatus: "FIX_IN_PROGRESS", runId: "run-rereview" },
+  ];
+  for (const item of events) {
+    currentStatus = item.status;
+    const body = JSON.stringify({ ...event, id: item.id, event: item.event, runId: item.runId, previousStatus: item.previousStatus, task: { ...event.task, status: item.status, branch: "agent/tas-83-loop" } });
+    const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+    assert.equal((await runner.handle("claude", headers, body)).status, 202);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(prompts.length, 4);
+  assert.match(prompts[0]!, /implementation start/);
+  assert.match(prompts[1]!, /review start/);
+  assert.match(prompts[2]!, /fix start/);
+  assert.match(prompts[3]!, /re-review start/);
+  assert.deepEqual(calls.filter((call) => call.path.endsWith("/claim")).map((call) => call.path.split("/").at(-2)), ["run-implementation", "run-review", "run-fix", "run-rereview"]);
+  assert.equal(calls.filter((call) => call.path.endsWith("/runs")).length, 0, "webhook run IDs are reused rather than creating duplicate runs");
+});
+
 test("runner includes redacted findings in fix prompts and rejects invalid mappings visibly", async () => {
   let prompt = "";
   const workflow = { implementationQueue: "QUEUE", implementationStart: "BUILDING", reviewHandoff: "HANDOFF", reviewStart: "REVIEWING", approved: "APPROVED", fixNeeded: "CHANGES", fixStart: "FIXING", reReview: "RECHECK" };

@@ -60,6 +60,17 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: "Enable default agent workflow" }).click();
     await expect(page.getByText("Agent workflow enabled")).toBeVisible();
 
+    await page.getByRole("button", { name: "Automations", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Automations" })).toBeVisible();
+    await page.getByLabel("Rule name").fill("Route implementation agent");
+    const automationRows = page.locator(".automation-rule-row");
+    await automationRows.nth(0).locator("select").nth(1).selectOption("changed_to");
+    await automationRows.nth(0).locator("select").nth(2).selectOption("TODO");
+    await automationRows.nth(1).locator("select").nth(0).selectOption("assigneeId");
+    await automationRows.nth(1).locator("select").nth(1).selectOption("actor");
+    await page.getByRole("button", { name: "Create rule" }).click();
+    await expect(page.getByText("Route implementation agent", { exact: true })).toBeVisible();
+
     await page.getByRole("button", { name: "Create task" }).first().click();
     await page.getByLabel("Task name").fill("Browser regression task");
     await page.getByLabel("Description").fill("Created through the browser smoke suite");
