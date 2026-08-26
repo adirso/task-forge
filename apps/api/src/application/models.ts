@@ -54,6 +54,13 @@ export interface AgentRunEntity {
   updatedAt: string;
   completedAt: string | null;
 }
+export type AgentHandoffStatus = "PENDING" | "PUBLISHED" | "FAILED";
+export interface AgentHandoffEntity {
+  runId: string; taskId: string; branch: string | null; headSha: string | null;
+  branchPublished: boolean; pullRequestUrl: string | null; pullRequestTitle: string | null;
+  pullRequestState: PullRequestState | null; status: AgentHandoffStatus; lastError: string | null;
+  createdAt: string; updatedAt: string;
+}
 
 export type GateCheckStatus = "PASS" | "FAIL" | "PENDING";
 export interface TaskGateEntity {

@@ -584,6 +584,14 @@ export const migrations: readonly Migration[] = [
       }
     },
   },
+  {
+    version: "0019_agent_run_handoffs",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS agent_run_handoffs (run_id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, branch VARCHAR(2048), head_sha CHAR(64), branch_published BOOLEAN NOT NULL DEFAULT FALSE, pull_request_url VARCHAR(2048), pull_request_title VARCHAR(255), pull_request_state VARCHAR(16), status VARCHAR(16) NOT NULL CHECK (status IN ('PENDING','PUBLISHED','FAILED')), last_error TEXT, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS agent_run_handoffs (run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, branch TEXT, head_sha TEXT, branch_published INTEGER NOT NULL DEFAULT 0, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, status TEXT NOT NULL CHECK (status IN ('PENDING','PUBLISHED','FAILED')), last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

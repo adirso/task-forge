@@ -61,6 +61,12 @@ export class TaskApplicationService implements TaskService {
         const project = await repositories.projects.findById(existing.projectId);
         if (!project) throw new NotFoundError("Project");
         this.assertStatusAvailable(project.availableStatuses, input.status);
+        const reviewHandoff = project.agentWorkflow?.reviewHandoff ?? "READY_FOR_REVIEW";
+        if (input.status === reviewHandoff && context.actor.kind === "AGENT") {
+          if (!input.runId) throw new ValidationError("Agent review handoff requires runId");
+          const handoff = await repositories.handoffs.findByRun(input.runId);
+          if (!handoff || handoff.taskId !== existing.id || handoff.status !== "PUBLISHED" || !handoff.branch || !handoff.headSha || !handoff.branchPublished || !handoff.pullRequestUrl || !handoff.pullRequestState) throw new ValidationError("Review handoff requires published branch, head SHA, and pull request evidence");
+        }
       }
       await this.validateRelations(repositories, existing.projectId, taskId, input);
       const { tags, dependencyIds, runId, ...fields } = input;

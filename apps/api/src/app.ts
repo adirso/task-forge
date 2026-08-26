@@ -26,6 +26,7 @@ import { expireAgentRuns, runRoutes } from "./routes/runs.js";
 import { gateRoutes } from "./routes/gates.js";
 import { findingRoutes } from "./routes/findings.js";
 import { agentLogRoutes } from "./routes/agent-logs.js";
+import { handoffRoutes } from "./routes/handoffs.js";
 import { RateLimiter } from "./lib/rate-limit.js";
 
 export async function buildApp(options: { startWebhookDispatcher?: boolean } = {}) {
@@ -94,6 +95,7 @@ export async function buildApp(options: { startWebhookDispatcher?: boolean } = {
   await app.register(gateRoutes, { prefix: "/api" });
   await app.register(findingRoutes, { prefix: "/api" });
   await app.register(agentLogRoutes, { prefix: "/api" });
+  await app.register(handoffRoutes, { prefix: "/api" });
 
   return app;
 }
