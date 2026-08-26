@@ -37,16 +37,49 @@ export function SendToAI({ project, task, phaseNumber, initialMode, onClose }: {
   }
 
   return (
-    <div className="ai-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="modal-backdrop send-to-ai-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="send-to-ai-dialog" role="dialog" aria-modal="true" aria-labelledby="send-to-ai-title">
-        <header><div><span className="ai-dialog-kicker"><Sparkles /> Agent handoff</span><h2 id="send-to-ai-title">{selectedMode.label} {project.key}-{task.number} with AI</h2><p>{selectedMode.description}</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close AI handoff"><X /></button></header>
-        <div className="ai-mode-tabs" role="tablist" aria-label="AI task mode">{(Object.keys(modeMeta) as AIPromptMode[]).map((candidate) => <button type="button" key={candidate} role="tab" aria-selected={mode === candidate} className={mode === candidate ? "selected" : ""} onClick={() => { setMode(candidate); setCopied(null); }}>{modeMeta[candidate].label}</button>)}</div>
-        <div className="ai-provider-grid">{aiProviders.map((item) => <button type="button" key={item.id} className={provider === item.id ? "selected" : ""} aria-pressed={provider === item.id} onClick={() => { setProvider(item.id); setCopied(null); }}><span>{item.badge}</span><strong>{item.name}</strong><small>{item.description}</small>{provider === item.id && <Check />}</button>)}</div>
-        <div className="ai-handoff-note"><ExternalLink /><span><strong>{selectedProvider.name} handoff</strong><small>{selectedProvider.handoff}</small></span></div>
-        <label className="ai-prompt-preview">Generated prompt<textarea readOnly value={prompt} rows={15} onFocus={(event) => event.currentTarget.select()} /></label>
-        <div className="ai-security-note"><ShieldCheck /><span>No TaskForge token or JWT is included. The agent is instructed to use its own configured credential and redact secrets.</span></div>
-        {error && <div className="form-error">{error}</div>}
-        <footer><button type="button" className="button button-secondary" onClick={() => copy(contextUrl, "link")}><ExternalLink /> {copied === "link" ? "Link copied" : "Copy task link"}</button><div><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button type="button" className="button button-primary ai-copy-button" onClick={() => copy(prompt, "prompt")}>{copied === "prompt" ? <Check /> : <Clipboard />}{copied === "prompt" ? "Prompt copied" : `Copy ${selectedMode.label.toLowerCase()} prompt`}</button></div></footer>
+        <header>
+          <div className="modal-header-copy">
+            <span className="modal-kicker"><Sparkles /> Agent handoff</span>
+            <h2 id="send-to-ai-title">{selectedMode.label} {project.key}-{task.number} with AI</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close AI handoff"><X /></button>
+        </header>
+        <div className="modal-body">
+          <p className="send-to-ai-description">{selectedMode.description}</p>
+          <div className="ai-mode-tabs" role="tablist" aria-label="AI task mode">
+            {(Object.keys(modeMeta) as AIPromptMode[]).map((candidate) => (
+              <button type="button" key={candidate} role="tab" aria-selected={mode === candidate} className={mode === candidate ? "selected" : ""} onClick={() => { setMode(candidate); setCopied(null); }}>
+                {modeMeta[candidate].label}
+              </button>
+            ))}
+          </div>
+          <div className="ai-provider-grid">
+            {aiProviders.map((item) => (
+              <button type="button" key={item.id} className={provider === item.id ? "selected" : ""} aria-pressed={provider === item.id} onClick={() => { setProvider(item.id); setCopied(null); }}>
+                <span>{item.badge}</span>
+                <strong>{item.name}</strong>
+                <small>{item.description}</small>
+                {provider === item.id && <Check />}
+              </button>
+            ))}
+          </div>
+          <div className="ai-handoff-note"><ExternalLink /><span><strong>{selectedProvider.name} handoff</strong><small>{selectedProvider.handoff}</small></span></div>
+          <label className="ai-prompt-preview">Generated prompt<textarea readOnly value={prompt} rows={15} onFocus={(event) => event.currentTarget.select()} /></label>
+          <div className="ai-security-note"><ShieldCheck /><span>No TaskForge token or JWT is included. The agent is instructed to use its own configured credential and redact secrets.</span></div>
+          {error && <div className="form-error">{error}</div>}
+        </div>
+        <footer>
+          <button type="button" className="button button-secondary" onClick={() => copy(contextUrl, "link")}><ExternalLink /> {copied === "link" ? "Link copied" : "Copy task link"}</button>
+          <div>
+            <button type="button" className="button button-secondary" onClick={onClose}>Cancel</button>
+            <button type="button" className="button button-primary ai-copy-button" onClick={() => copy(prompt, "prompt")}>
+              {copied === "prompt" ? <Check /> : <Clipboard />}
+              {copied === "prompt" ? "Prompt copied" : `Copy ${selectedMode.label.toLowerCase()} prompt`}
+            </button>
+          </div>
+        </footer>
       </section>
     </div>
   );
