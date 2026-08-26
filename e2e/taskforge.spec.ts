@@ -46,12 +46,12 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByText("Project updated")).toBeVisible();
     await openProjectSettings(page);
 
-    await page.getByRole("checkbox", { name: "Backlog" }).uncheck();
-    await page.getByRole("checkbox", { name: "Refining" }).uncheck();
-    await page.getByRole("checkbox", { name: "Ready for review" }).uncheck();
-    await page.getByRole("checkbox", { name: "In review" }).uncheck();
-    await page.getByRole("checkbox", { name: "Done" }).uncheck();
-    await page.getByRole("checkbox", { name: "Cancelled" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Backlog" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Refining" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Ready for review" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: In review" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Done" }).uncheck();
+    await page.getByRole("checkbox", { name: "Available status: Cancelled" }).uncheck();
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByRole("heading", { name: createdProjectName })).toBeVisible();
     await expect(page.getByRole("region", { name: "Done tasks" })).toHaveCount(0);

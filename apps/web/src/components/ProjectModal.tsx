@@ -63,7 +63,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
                 <div><strong>Task statuses</strong><span>Choose the statuses available on this project.</span></div>
                 <div className="project-status-options">{TASK_STATUSES.map((status) => {
                   const checked = availableStatuses.includes(status);
-                  return <label key={status} className={checked ? "is-selected" : ""}><input type="checkbox" checked={checked} onChange={() => {
+                  return <label key={status} className={checked ? "is-selected" : ""}><input aria-label={`Available status: ${statusMeta[status].label}`} type="checkbox" checked={checked} onChange={() => {
                     if (checked && availableStatuses.length === 1) return;
                     const next = checked ? availableStatuses.filter((item) => item !== status) : TASK_STATUSES.filter((item) => item === status || availableStatuses.includes(item));
                     setAvailableStatuses(next);
@@ -73,7 +73,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
                   }} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>;
                 })}</div>
                 <label>Default status for API-created tasks<select value={defaultStatus} onChange={(event) => setDefaultStatus(event.target.value as TaskStatus)}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select><small>Used when an API request creates a task without a status.</small></label>
-                <label>Hide empty status columns</label><div className="project-status-options">{availableStatuses.map((status) => <label key={status} className={hiddenEmptyStatuses.includes(status) ? "is-selected" : ""}><input type="checkbox" checked={hiddenEmptyStatuses.includes(status)} onChange={() => setHiddenEmptyStatuses((items) => items.includes(status) ? items.filter((item) => item !== status) : [...items, status])} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>)}</div><small>Selected columns stay hidden while they have no tasks.</small>
+                <label>Hide empty status columns</label><div className="project-status-options">{availableStatuses.map((status) => <label key={status} className={hiddenEmptyStatuses.includes(status) ? "is-selected" : ""}><input aria-label={`Hide empty ${statusMeta[status].label}`} type="checkbox" checked={hiddenEmptyStatuses.includes(status)} onChange={() => setHiddenEmptyStatuses((items) => items.includes(status) ? items.filter((item) => item !== status) : [...items, status])} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>)}</div><small>Selected columns stay hidden while they have no tasks.</small>
               </section>
               <section className="project-status-settings">
                 <div><strong>Agent workflow</strong><span>Configure the statuses Smithy uses for implementation and review handoffs.</span></div>

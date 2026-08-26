@@ -6,6 +6,9 @@ apps/smithy/data/
 apps/smithy/.env.smithy
 data/*.db
 data/*.db-*
+data/attachments/
+.idea/
+docs/
 .e2e-data/
 playwright-report/
 test-results/
