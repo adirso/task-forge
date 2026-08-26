@@ -888,6 +888,8 @@ test("agent observability API exposes run health fields alongside logs", async (
 });
 
 test("handoff checkpoints survive repeated API access and gate agent review readiness", async () => {
+  const membership = await app.inject({ method: "POST", url: `/api/projects/${projectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: agentId, role: "MEMBER" } });
+  assert.ok([204, 409].includes(membership.statusCode), membership.body);
   const created = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Handoff persistence", status: "TODO", assigneeId: agentId, branch: "agent/handoff" } });
   assert.equal(created.statusCode, 201, created.body);
   const id = created.json().task.id as string;
