@@ -178,7 +178,7 @@ test.describe("mobile workspace smoke", () => {
     await expect(mobileCreateButton).toBeEnabled();
     await mobileCreateButton.click({ force: true });
     await page.getByRole("button", { name: /TF-\d+: Mobile browser task/ }).last().click();
-    const editDialog = page.getByRole("dialog", { name: "Edit task" });
+    const editDialog = page.getByRole("dialog");
     await editDialog.getByLabel("Task name").fill("Edited mobile browser task");
     await editDialog.getByLabel("Task status").selectOption("IN_PROGRESS");
     await editDialog.getByRole("button", { name: "Save changes", exact: true }).click();
