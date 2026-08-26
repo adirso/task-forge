@@ -93,13 +93,13 @@ test.describe("workspace browser smoke", () => {
     await page.locator('input[type="file"]').setInputFiles({ name: "e2e.txt", mimeType: "text/plain", buffer: Buffer.from("attachment") });
     await expect(page.getByText("e2e.txt", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByText("Task updated")).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
 
     for (const status of ["READY_FOR_REVIEW", "IN_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW", "APPROVED"]) {
       await page.getByRole("button", { name: /E\d+-\d+: Edited browser regression task/ }).click();
       await page.getByLabel("Task status").selectOption(status);
       await page.getByRole("button", { name: "Save changes", exact: true }).click();
-      await expect(page.getByText("Task updated")).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
     }
 
     await page.getByRole("button", { name: "List" }).click();
@@ -177,11 +177,11 @@ test.describe("mobile workspace smoke", () => {
     const mobileCreateButton = createDialog.getByRole("button", { name: "Create task", exact: true });
     await expect(mobileCreateButton).toBeEnabled();
     await mobileCreateButton.click({ force: true });
-    await page.getByRole("button", { name: /TF-\d+: Mobile browser task/ }).click();
+    await page.getByRole("button", { name: /TF-\d+: Mobile browser task/ }).last().click();
     const editDialog = page.getByRole("dialog", { name: "Edit task" });
     await editDialog.getByLabel("Task name").fill("Edited mobile browser task");
     await editDialog.getByLabel("Task status").selectOption("IN_PROGRESS");
     await editDialog.getByRole("button", { name: "Save changes", exact: true }).click();
-    await expect(page.getByText("Task updated")).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });
