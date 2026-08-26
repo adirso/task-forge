@@ -1,6 +1,6 @@
 import type { AgentOpsEntry, DashboardSummary, WebhookDelivery, WebhookDeliveryStatus } from "@taskforge/contracts";
 import type { ProjectContext, RequestContext } from "./context.js";
-import type { ActivityEntity, AgentLogEntity, ApiTokenEntity, AttachmentEntity, FindingDisposition, FindingSeverity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskUpdateEntity, UserEntity } from "./models.js";
+import type { ActivityEntity, AgentHandoffEntity, AgentLogEntity, ApiTokenEntity, AttachmentEntity, FindingDisposition, FindingSeverity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
 export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
@@ -61,6 +61,7 @@ export interface AgentLogService {
   list(context: RequestContext, taskId: string, page: PageRequest): Promise<Page<AgentLogEntity>>;
   append(context: RequestContext, taskId: string, input: Omit<AgentLogEntity, "id" | "taskId" | "createdAt">): Promise<AgentLogEntity | null>;
 }
+export interface AgentHandoffService { get(context: RequestContext, runId: string): Promise<AgentHandoffEntity | null>; save(context: RequestContext, runId: string, input: Omit<AgentHandoffEntity, "runId" | "taskId" | "createdAt" | "updatedAt">): Promise<AgentHandoffEntity>; validate(context: RequestContext, runId: string): Promise<AgentHandoffEntity>; }
 export interface TaskGateService {
   get(context: RequestContext, taskId: string): Promise<TaskGateEntity | null>;
   record(context: RequestContext, taskId: string, input: Pick<TaskGateEntity, "headSha" | "requiredChecks" | "checks">): Promise<TaskGateEntity>;

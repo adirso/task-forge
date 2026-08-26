@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { ProviderConfig, ProviderLabel } from "./config.js";
 import { ApiClient } from "./api.js";
 import { executeCommand } from "./command.js";
@@ -5,7 +7,7 @@ import { redact, verifySignature } from "./security.js";
 import type { JobStore } from "./store.js";
 import { MemoryJobStore } from "./store.js";
 
-export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string }; runId?: string | null; }
+export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string; pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null }; runId?: string | null; }
 export type RunnerResult = { status: number; body: string };
 type AgentWorkflow = { implementationQueue: string; implementationStart: string; reviewHandoff: string; reviewStart: string; approved: string; fixNeeded: string; fixStart: string; reReview: string };
 type TaskFinding = { severity?: string; title?: string; body?: string; disposition?: string; filePath?: string | null; lineNumber?: number | null };
@@ -26,6 +28,7 @@ const LEGACY_AGENT_WORKFLOW: AgentWorkflow = {
 };
 
 const noopWorktree: WorktreeFactory = async (repo) => repo;
+const readGit = promisify(execFile);
 
 export class SmithyRunner {
   private readonly store: JobStore;
@@ -137,7 +140,7 @@ export class SmithyRunner {
       "- Run completion is separate from task status: Smithy records the run result, but a successful run does not authorize or perform a task transition.",
     ];
     const configured = workflow ?? LEGACY_AGENT_WORKFLOW;
-    if (kind === "IMPLEMENTATION") lines.push(transition(configured.implementationStart, "implementation start"), transition(configured.reviewHandoff, "implementation handoff for review"));
+    if (kind === "IMPLEMENTATION") lines.push(transition(configured.implementationStart, "implementation start"), `- Before requesting ${configured.reviewHandoff}, persist handoff evidence with PUT /api/runs/${runId}/handoff: include the published branch, current commit headSha, branchPublished=true, and pull-request URL/title/state. Retry idempotently if the callback fails; do not request review until it is accepted.`, transition(configured.reviewHandoff, "implementation handoff for review"));
     else if (kind === "FIX") lines.push(task.branch ? `- Fix needed mode: remain on the existing branch ${task.branch}; do not create or switch branches.` : "- Fix needed mode requires a configured existing task branch; stop before editing and ask the operator to set it. Never invent a branch.", `- Read the latest review findings from ${findings}, resolve and test each finding, then request re-review.`, transition(configured.fixStart, "fix start"), transition(configured.reReview, "fix handoff for re-review"));
     else if (kind === "RE_REVIEW") lines.push(`- Re-review mode: this task was previously reviewed. Read the latest findings from ${findings}, compare the current head against each finding and the Definition of done, and report remaining issues.`, transition(configured.reReview, "re-review start"), transition(configured.approved, "clean re-review approval"), transition(configured.fixNeeded, "remaining-finding fix request"), "- Do not assume approval or merge; report findings and evidence for the human/operator decision.");
     else lines.push(transition(configured.reviewStart, "review start"), `- After review, record structured findings and evidence. If clean, PATCH the task to ${configured.approved}; if changes are required, dispose findings as ${configured.fixNeeded}. Do not implement or merge changes in review mode.`);
@@ -244,6 +247,13 @@ export class SmithyRunner {
         appendLog("system", "lifecycle", reason);
         throw new Error(redact(reason));
       }
+      // Persist a durable checkpoint even when the provider forgot to call the API.
+      // PR fields are sourced from the canonical task context and never guessed.
+      let headSha: string | null = null;
+      try { headSha = (await readGit("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim() || null; } catch { /* provider may use a non-git checkout */ }
+      const prTask = task as typeof task & { pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null };
+      const published = Boolean(task.branch && headSha && prTask.pullRequestUrl && prTask.pullRequestState);
+      await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: task.branch ?? null, headSha, branchPublished: Boolean(task.branch), pullRequestUrl: prTask.pullRequestUrl ?? null, pullRequestTitle: prTask.pullRequestTitle ?? null, pullRequestState: prTask.pullRequestState ?? null, status: published ? "PUBLISHED" : "PENDING", lastError: published ? null : "Provider completed without complete branch/head/PR publication evidence" }) });
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });
       await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }) });
       appendLog("system", "lifecycle", `Smithy ${kind.toLowerCase()} run completed successfully.`);
