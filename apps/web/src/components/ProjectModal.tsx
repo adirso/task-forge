@@ -39,7 +39,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <form className="project-modal" role="dialog" aria-modal="true" aria-labelledby="project-modal-title" onSubmit={submit}>
+      <form className={`project-modal${project ? " project-modal-wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="project-modal-title" onSubmit={submit}>
         <header>
           <div className="modal-header-copy">
             <span className="modal-kicker">{project ? "Project settings" : "New workspace"}</span>
@@ -49,37 +49,43 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
         </header>
         <div className="modal-body">
           <p>{project ? "Update the project details shown to your team." : "Use a short key to create readable task IDs, such as WEB-42."}</p>
-          <div className="project-form-row"><label>Project name<input autoFocus value={name} onChange={(e) => { const nextName = e.target.value; setName(nextName); if (!keyEdited && !project) setKey(suggestedKey(nextName)); }} placeholder="Website launch" required /></label><label>Key<input value={key} onChange={(e) => { setKeyEdited(true); setKey(e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase()); }} placeholder="WEB" minLength={2} maxLength={8} required disabled={Boolean(project)} /></label></div>
-          <label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="What is this project trying to achieve?" /></label>
-          <label>Repository URL <span className="optional">Optional</span><input type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/your-org/repo" /></label>
-          <label>Local Smithy repository path <span className="optional">Optional</span><input value={localRepoPath} onChange={(e) => setLocalRepoPath(e.target.value)} placeholder="/Users/me/Development/task-forge" /><small>Used by the optional Smithy runner on the machine where it runs. This does not replace the repository URL.</small></label>
-          <label>Project color<input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
-          {project && <section className="project-status-settings">
-            <div><strong>Task statuses</strong><span>Choose the statuses available on this project.</span></div>
-            <div className="project-status-options">{TASK_STATUSES.map((status) => {
-              const checked = availableStatuses.includes(status);
-              return <label key={status} className={checked ? "is-selected" : ""}><input type="checkbox" checked={checked} onChange={() => {
-                if (checked && availableStatuses.length === 1) return;
-                const next = checked ? availableStatuses.filter((item) => item !== status) : TASK_STATUSES.filter((item) => item === status || availableStatuses.includes(item));
-                setAvailableStatuses(next);
-                if (!next.includes(defaultStatus)) setDefaultStatus(next[0]!);
-                if (agentWorkflow && Object.values(agentWorkflow).some((workflowStatus) => !next.includes(workflowStatus))) setAgentWorkflow(null);
-              }} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>;
-            })}</div>
-            <label>Default status for API-created tasks<select value={defaultStatus} onChange={(event) => setDefaultStatus(event.target.value as TaskStatus)}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select><small>Used when an API request creates a task without a status.</small></label>
-          </section>}
-          {project && <section className="project-status-settings">
-            <div><strong>Agent workflow</strong><span>Configure the statuses Smithy uses for implementation and review handoffs.</span></div>
-            {!agentWorkflow ? <button type="button" className="button button-secondary" disabled={enabling} onClick={async () => {
-              if (!onEnableWorkflow) { setAvailableStatuses([...TASK_STATUSES]); setDefaultStatus("TODO"); setAgentWorkflow({ ...DEFAULT_AGENT_WORKFLOW }); return; }
-              setEnabling(true);
-              try { await onEnableWorkflow(); onClose(); }
-              catch (err) { setError(err instanceof Error ? err.message : "Could not enable agent workflow"); }
-              finally { setEnabling(false); }
-            }}>{enabling ? "Enabling…" : "Enable default agent workflow"}</button> : <div className="agent-workflow-options">
-              {(Object.keys(DEFAULT_AGENT_WORKFLOW) as Array<keyof AgentWorkflow>).map((role) => <label key={role}>{role.replace(/[A-Z]/g, (letter) => ` ${letter}`).replace(/^./, (letter) => letter.toUpperCase())}<select value={agentWorkflow[role]} onChange={(event) => setAgentWorkflow({ ...agentWorkflow, [role]: event.target.value as TaskStatus })}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select></label>)}
-            </div>}
-          </section>}
+          <div className={`project-modal-grid${project ? " has-side" : ""}`}>
+            <div className="project-modal-main">
+              <div className="project-form-row"><label>Project name<input autoFocus value={name} onChange={(e) => { const nextName = e.target.value; setName(nextName); if (!keyEdited && !project) setKey(suggestedKey(nextName)); }} placeholder="Website launch" required /></label><label>Key<input value={key} onChange={(e) => { setKeyEdited(true); setKey(e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase()); }} placeholder="WEB" minLength={2} maxLength={8} required disabled={Boolean(project)} /></label></div>
+              <label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="What is this project trying to achieve?" /></label>
+              <label>Repository URL <span className="optional">Optional</span><input type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/your-org/repo" /></label>
+              <label>Local Smithy repository path <span className="optional">Optional</span><input value={localRepoPath} onChange={(e) => setLocalRepoPath(e.target.value)} placeholder="/Users/me/Development/task-forge" /><small>Used by the optional Smithy runner on the machine where it runs. This does not replace the repository URL.</small></label>
+              <label>Project color<input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
+            </div>
+            {project && <aside className="project-modal-side">
+              <section className="project-status-settings">
+                <div><strong>Task statuses</strong><span>Choose the statuses available on this project.</span></div>
+                <div className="project-status-options">{TASK_STATUSES.map((status) => {
+                  const checked = availableStatuses.includes(status);
+                  return <label key={status} className={checked ? "is-selected" : ""}><input type="checkbox" checked={checked} onChange={() => {
+                    if (checked && availableStatuses.length === 1) return;
+                    const next = checked ? availableStatuses.filter((item) => item !== status) : TASK_STATUSES.filter((item) => item === status || availableStatuses.includes(item));
+                    setAvailableStatuses(next);
+                    if (!next.includes(defaultStatus)) setDefaultStatus(next[0]!);
+                    if (agentWorkflow && Object.values(agentWorkflow).some((workflowStatus) => !next.includes(workflowStatus))) setAgentWorkflow(null);
+                  }} /><span className={`status-dot ${statusMeta[status].tone}`} />{statusMeta[status].label}</label>;
+                })}</div>
+                <label>Default status for API-created tasks<select value={defaultStatus} onChange={(event) => setDefaultStatus(event.target.value as TaskStatus)}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select><small>Used when an API request creates a task without a status.</small></label>
+              </section>
+              <section className="project-status-settings">
+                <div><strong>Agent workflow</strong><span>Configure the statuses Smithy uses for implementation and review handoffs.</span></div>
+                {!agentWorkflow ? <button type="button" className="button button-secondary" disabled={enabling} onClick={async () => {
+                  if (!onEnableWorkflow) { setAvailableStatuses([...TASK_STATUSES]); setDefaultStatus("TODO"); setAgentWorkflow({ ...DEFAULT_AGENT_WORKFLOW }); return; }
+                  setEnabling(true);
+                  try { await onEnableWorkflow(); onClose(); }
+                  catch (err) { setError(err instanceof Error ? err.message : "Could not enable agent workflow"); }
+                  finally { setEnabling(false); }
+                }}>{enabling ? "Enabling…" : "Enable default agent workflow"}</button> : <div className="agent-workflow-options">
+                  {(Object.keys(DEFAULT_AGENT_WORKFLOW) as Array<keyof AgentWorkflow>).map((role) => <label key={role}>{role.replace(/[A-Z]/g, (letter) => ` ${letter}`).replace(/^./, (letter) => letter.toUpperCase())}<select value={agentWorkflow[role]} onChange={(event) => setAgentWorkflow({ ...agentWorkflow, [role]: event.target.value as TaskStatus })}>{availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select></label>)}
+                </div>}
+              </section>
+            </aside>}
+          </div>
           {error && <div className="form-error">{error}</div>}
         </div>
         <footer>
