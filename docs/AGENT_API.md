@@ -126,7 +126,7 @@ Task creation and update fields include:
 | --- | --- |
 | `title` | Required string |
 | `description`, `definitionOfDone` | Optional text |
-| `status` | `BACKLOG`, `REFINING`, `TODO`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `DONE`, `CANCELLED`, `APPROVED`, `RE_REVIEW`, `FIX_NEEDED`, `FIX_IN_PROGRESS`, `PENDING_DECISION`, `FAILED`; must be enabled for the project. If omitted during creation, the project's `defaultStatus` is used. New orchestration statuses are opt-in and are not enabled on existing or new projects by default. |
+| `status` | `BACKLOG`, `REFINING`, `TODO`, `IN_PROGRESS`, `READY_FOR_REVIEW`, `IN_REVIEW`, `FIX_NEEDED`, `FIX_IN_PROGRESS`, `RE_REVIEW`, `APPROVED`, `PENDING_DECISION`, `CANCELLED`, `FAILED`, `DONE` (canonical workflow order); must be enabled for the project. If omitted during creation, the project's `defaultStatus` is used. New orchestration statuses are opt-in and are not enabled on existing or new projects by default. |
 | `priority` | `LOW`, `MEDIUM`, `HIGH`, `URGENT` |
 | `type` | `FEATURE`, `BUG`, `INFRA`, `UPDATE`, `SECURITY`, `DOCS`, `CHORE` |
 | `assigneeId` | Project-member UUID or `null` |

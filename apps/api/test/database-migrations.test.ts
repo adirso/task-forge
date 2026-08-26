@@ -67,7 +67,7 @@ async function withFixture(driver: DatabaseDriver, callback: (adapter: Adapter) 
 }
 
 const legacyStatuses = ["BACKLOG", "TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"];
-const currentStatuses = ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"];
+const currentStatuses = ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "CANCELLED", "DONE"];
 const preRemovalStatuses = [...currentStatuses.slice(0, 3), "READY_FOR_DEV", ...currentStatuses.slice(3)];
 
 async function createLegacyFixture(adapter: Adapter, driver: DatabaseDriver, markerEra = false, invalidStatus = false) {

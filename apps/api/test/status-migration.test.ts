@@ -36,7 +36,7 @@ after(async () => {
 
 test("legacy SQLite status checks migrate without losing tasks", async () => {
   const project = await db.prepare("SELECT available_statuses, default_status FROM projects WHERE id = ?").get("project-1");
-  assert.deepEqual(JSON.parse(String(project?.available_statuses)), ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"]);
+  assert.deepEqual(JSON.parse(String(project?.available_statuses)), ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "CANCELLED", "DONE"]);
   assert.equal(project?.default_status, "TODO");
   assert.equal((await db.prepare("SELECT title FROM tasks WHERE id = ?").get("task-1"))?.title, "Legacy task");
   assert.equal((await db.prepare("SELECT body FROM task_updates WHERE task_id = ?").get("task-1"))?.body, "Keep this note");
