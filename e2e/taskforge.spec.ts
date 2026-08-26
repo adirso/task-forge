@@ -90,6 +90,13 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByText("Task updated")).toBeVisible();
 
+    for (const status of ["READY_FOR_REVIEW", "IN_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW", "APPROVED"]) {
+      await page.getByRole("button", { name: /E\d+-\d+: Edited browser regression task/ }).click();
+      await page.getByLabel("Task status").selectOption(status);
+      await page.getByRole("button", { name: "Save changes", exact: true }).click();
+      await expect(page.getByText("Task updated")).toBeVisible();
+    }
+
     await page.getByRole("button", { name: "List" }).click();
     await expect(page.getByRole("columnheader", { name: "Task" })).toBeVisible();
     await page.getByRole("button", { name: "Board", exact: true }).click();
