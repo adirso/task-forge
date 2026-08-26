@@ -44,6 +44,8 @@ SQLite is the default for local development and is created at `data/taskforge.db
 
 The Smithy runner is intentionally excluded from `npm run dev`; configure it separately as described in [docs/SMITHY.md](docs/SMITHY.md).
 
+Recommended project-owned handoff automations for implementation, review, fixes, and re-review are documented in [docs/SMITHY_AUTOMATIONS.md](docs/SMITHY_AUTOMATIONS.md). They are opt-in; no migration creates them.
+
 ## Configuration
 
 The root `.env.example` is the source of truth for local API settings:
