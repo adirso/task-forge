@@ -730,7 +730,7 @@ html[data-text-size="large"] body { zoom: 1.08; }
 /* Project progress widget */
 .widget-project-progress { display: flex; flex-direction: column; gap: 16px; }
 .dashboard-hidden { display: none; }
-.project-dashboard { display: grid; gap: 28px; padding: 24px 30px 40px; }
+.project-dashboard { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; display: grid; gap: 28px; padding: 24px 30px 40px; align-content: start; }
 .project-dashboard-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 26px 28px; border: 1px solid #d8d3f0; border-radius: 10px; background: linear-gradient(120deg, #f8f7ff, white); }
 .project-dashboard-heading h2 { margin: 8px 0; font-size: 22px; }
 .project-dashboard-heading p, .project-dashboard-card p { margin: 0; color: #6b778c; font-size: 11px; line-height: 1.5; }
