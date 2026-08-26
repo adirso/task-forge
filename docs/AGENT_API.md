@@ -287,6 +287,8 @@ Example: assign a task to the changer when it enters progress and has no assigne
 
 Rules execute as part of task create/update and can update any supported task field.
 
+For the recommended Smithy implementation/review/fix/re-review handoffs, use the copy/paste recipes in [docs/SMITHY_AUTOMATIONS.md](SMITHY_AUTOMATIONS.md). They are explicit project configuration: migrations do not create them, and every referenced status must be enabled in that project.
+
 ## Signed agent webhooks
 
 Administrators configure an agent receiver and inspect its delivery queue through:

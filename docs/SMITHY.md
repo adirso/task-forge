@@ -57,6 +57,8 @@ Run the complete Smithy suite with `npm test -w @taskforge/smithy`. The determin
 
 Projects may enable `agentWorkflow` from project settings. The default mapping is `TODO` → `IN_PROGRESS` → `READY_FOR_REVIEW` → `IN_REVIEW` → `APPROVED`, with fixes using `FIX_NEEDED` → `FIX_IN_PROGRESS` → `RE_REVIEW`. Assignment and status-change events route implementation, review, fix, and re-review prompts according to this mapping; ordinary task comments do not start a run. Agents own status PATCHes, reviewers may set `APPROVED`, and a human authorizes the merge and moves the task to `DONE`. Existing projects require explicit opt-in; migrations never silently enable the workflow.
 
+Use [SMITHY_AUTOMATIONS.md](SMITHY_AUTOMATIONS.md) for explicit, project-owned assignment recipes. Automations are never seeded by a migration.
+
 ### Troubleshooting provider integration locally
 
 - If a matrix test reports an unknown label, use one of `claude`, `codex`, `cursor`, or `custom`; custom providers must supply their own command template in the real environment.
