@@ -197,6 +197,23 @@ test("runner rejects unknown providers, bad signatures, and missing local comman
   assert.doesNotMatch(failed?.body ?? "", /tf_private/);
 });
 
+test("runner reports redacted publication authentication failures", async () => {
+  let update = "";
+  const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task };
+    if (path.endsWith("/runs")) return { run: { id: "run-publish-auth" } };
+    if (path.endsWith("/updates")) update = String(init?.body ?? "");
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 1, stdout: "", stderr: "git push failed: authentication required token=tf_private" }), () => 1_700_000_000_000);
+  const body = JSON.stringify({ ...event, id: "event-publish-auth" });
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(update, /publication or authentication failed/);
+  assert.doesNotMatch(update, /tf_private/);
+});
+
 test("runner ignores an out-of-order status event after the task has moved on", async () => {
   const calls: string[] = [];
   const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["IN_PROGRESS", "IN_REVIEW"] }, task: { ...event.task, status: "IN_REVIEW" } }; return {}; } };
