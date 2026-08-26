@@ -8,7 +8,7 @@ These recipes are examples, not a migration or a global default. Creating a proj
 
 1. Read `project.availableStatuses` and `project.agentWorkflow` from `GET /api/context?project=<KEY>`.
 2. Enable the statuses required by the mapping in Project settings. A rule that references a disabled status is rejected with a validation error.
-3. Find the implementation and review agent IDs with `GET /api/users`. Use IDs, not display names, in `actorId` or action values.
+3. Find the implementation and review agent IDs in the `members` returned by `GET /api/projects/<PROJECT_ID>` (or in the project Members UI). Administrators may alternatively use `GET /api/users` to discover workspace agents. Use IDs, not display names, in `actorId` or action values.
 4. Decide which agent owns each role. A common setup uses one implementation agent (Claude, Codex, or another configured provider) and a separate review agent.
 5. Create rules in the order shown below. Rules run on task updates and are evaluated in the project that owns the task.
 
@@ -55,7 +55,7 @@ The implementation prompt includes the task description, definition of done, rep
 }
 ```
 
-The reviewer receives a review prompt when the assignment is delivered. It must compare the current branch/head with every DoD item, tests, and code quality, record findings in the findings/logs APIs, and choose the configured approval or fix-needed status. The reviewer, not Smithy, performs that status PATCH.
+The reviewer receives a review prompt when the assignment is delivered. It should first move the task to the mapped review-start status (`agentWorkflow.reviewStart`, usually `IN_REVIEW`), then compare the current branch/head with every DoD item, tests, and code quality, record findings in the findings/logs APIs, and choose the configured approval or fix-needed status. The reviewer, not Smithy, performs those status PATCHes.
 
 ### 3. Route requested fixes
 
@@ -99,11 +99,12 @@ Re-review compares the new head SHA with the prior findings and DoD. A clean rev
 - Keep implementation and review agents distinct when independent review is required. If the same identity is used, record that decision explicitly in the task.
 - Disable or update a rule before disabling a status it references. The API rejects status references that are not enabled in the project.
 - If a handoff fails, the automation error is audited and remains visible to the caller; retry the assignment after correcting the rule or agent membership.
+- Multiple matching rules are evaluated newest-first (the API orders automations by creation time descending). Avoid overlapping rules for the same handoff unless that ordering is intentional.
 
 ## Troubleshooting
 
 - **“Status X is not available in this project”**: discover the current `availableStatuses`, enable the status in Project settings, or change the rule to the role's configured mapping. Do not guess a replacement key.
 - **No run starts**: confirm the task was assigned to the intended agent and that its webhook URL points to the running Smithy path. A status update without an assignment is intentionally inert.
-- **Wrong agent receives work**: inspect all enabled rules for the same `changed_to` status and verify each action's user ID. Rules are evaluated in project order and assignments are auditable.
+- **Wrong agent receives work**: inspect all enabled rules for the same `changed_to` status and verify each action's user ID. Rules are evaluated newest-first and assignments are auditable; disable overlapping rules when only one handoff should apply.
 - **Agent is missing**: create/configure the agent identity, add it to the project, and configure its Smithy webhook before enabling the recipe.
 - **Looping handoffs**: ensure a rule changes only `assigneeId` and does not re-trigger a status transition. Keep the workflow mapping complete and rely on run cycle limits for recovery.
