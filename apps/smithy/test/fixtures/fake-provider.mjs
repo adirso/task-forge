@@ -1,4 +1,4 @@
-const mode = process.env.FAKE_PROVIDER_MODE ?? "success";
+const mode = process.argv.find((arg) => arg.startsWith("--mode="))?.slice("--mode=".length) ?? process.env.FAKE_PROVIDER_MODE ?? "success";
 const args = process.argv.slice(2).join(" ");
 
 if (mode === "timeout") {
