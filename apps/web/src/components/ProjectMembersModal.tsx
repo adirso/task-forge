@@ -94,74 +94,79 @@ export function ProjectMembersModal({
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <div className="project-modal members-modal" role="dialog" aria-labelledby="members-modal-title">
+      <div className="project-modal members-modal" role="dialog" aria-modal="true" aria-labelledby="members-modal-title">
         <header>
-          <div>
+          <div className="modal-header-copy">
             <span className="modal-kicker">Project access</span>
             <h2 id="members-modal-title">Members & agents</h2>
           </div>
           <button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="Close"><X /></button>
         </header>
-        <p>Manage which people and agents can access {roster.name}.</p>
+        <div className="modal-body">
+          <p>Manage which people and agents can access {roster.name}.</p>
 
-        {loading ? (
-          <div className="members-loading">Loading project members…</div>
-        ) : (
-          <div className="project-member-manager members-modal-body">
-            {canManage ? (
-              <form className="add-member-form" onSubmit={addMember}>
-                <label>
-                  Add a person or agent
-                  <select value={selectedMemberId} onChange={(event) => setSelectedMemberId(event.target.value)} disabled={!availableUsers.length || busy}>
-                    {availableUsers.length
-                      ? availableUsers.map((candidate) => (
-                        <option key={candidate.id} value={candidate.id}>
-                          {candidate.name} · {candidate.kind === "AGENT" ? "Agent" : "Human"}
-                        </option>
-                      ))
-                      : <option value="">{users.length ? "Everyone is already a member" : "No people or agents available to add"}</option>}
-                  </select>
-                </label>
-                <button className="button button-primary" disabled={!selectedMemberId || busy}><UserPlus /> Add member</button>
-              </form>
-            ) : (
-              <div className="settings-notice">
-                <ShieldCheck />
-                <span>
-                  <strong>Project owner access required</strong>
-                  <small>You can view this roster, but only the owner or an administrator can change it.</small>
-                </span>
-              </div>
-            )}
-
-            <div className="project-member-list">
-              <div className="member-list-heading">
-                <h3>People with access</h3>
-                <span>{members.length} {members.length === 1 ? "member" : "members"}</span>
-              </div>
-              {members.length ? members.map((member) => (
-                <article key={member.id}>
-                  <Avatar user={member} size="md" />
+          {loading ? (
+            <div className="members-loading">Loading project members…</div>
+          ) : (
+            <div className="project-member-manager members-modal-body">
+              {canManage ? (
+                <form className="add-member-form" onSubmit={addMember}>
+                  <label>
+                    Add a person or agent
+                    <select value={selectedMemberId} onChange={(event) => setSelectedMemberId(event.target.value)} disabled={!availableUsers.length || busy}>
+                      {availableUsers.length
+                        ? availableUsers.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {candidate.name} · {candidate.kind === "AGENT" ? "Agent" : "Human"}
+                          </option>
+                        ))
+                        : <option value="">{users.length ? "Everyone is already a member" : "No people or agents available to add"}</option>}
+                    </select>
+                  </label>
+                  <button className="button button-primary" disabled={!selectedMemberId || busy}><UserPlus /> Add member</button>
+                </form>
+              ) : (
+                <div className="settings-notice">
+                  <ShieldCheck />
                   <span>
-                    <strong>{member.name}</strong>
-                    <small>{member.email} · {member.kind === "AGENT" ? "Agent" : "Human"}</small>
+                    <strong>Project owner access required</strong>
+                    <small>You can view this roster, but only the owner or an administrator can change it.</small>
                   </span>
-                  <em className={member.projectRole === "OWNER" ? "owner" : ""}>{member.projectRole === "OWNER" ? "Owner" : "Member"}</em>
-                  {canManage && member.id !== roster.ownerId
-                    ? <button type="button" className="remove-member" onClick={() => removeMember(member)} title={`Remove ${member.name}`} disabled={busy}><Trash2 /></button>
-                    : <span className="member-action-placeholder" />}
-                </article>
-              )) : (
-                <div className="select-agent-empty"><UsersRound /><span>No members on this project yet.</span></div>
+                </div>
               )}
-            </div>
-          </div>
-        )}
 
-        {error && <div className="form-error">{error}</div>}
-        {message && <div className="form-success">{message}</div>}
+              <div className="project-member-list">
+                <div className="member-list-heading">
+                  <h3>People with access</h3>
+                  <span>{members.length} {members.length === 1 ? "member" : "members"}</span>
+                </div>
+                {members.length ? members.map((member) => (
+                  <article key={member.id}>
+                    <Avatar user={member} size="md" />
+                    <span>
+                      <strong>{member.name}</strong>
+                      <small>{member.email} · {member.kind === "AGENT" ? "Agent" : "Human"}</small>
+                    </span>
+                    <em className={member.projectRole === "OWNER" ? "owner" : ""}>{member.projectRole === "OWNER" ? "Owner" : "Member"}</em>
+                    {canManage && member.id !== roster.ownerId
+                      ? <button type="button" className="remove-member" onClick={() => removeMember(member)} title={`Remove ${member.name}`} disabled={busy}><Trash2 /></button>
+                      : <span className="member-action-placeholder" />}
+                  </article>
+                )) : (
+                  <div className="select-agent-empty"><UsersRound /><span>No members on this project yet.</span></div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {error && <div className="form-error">{error}</div>}
+          {message && <div className="form-success">{message}</div>}
+        </div>
         <footer>
-          <button type="button" className="button button-secondary" onClick={onClose} disabled={busy}>Close</button>
+          <span />
+          <div>
+            <button type="button" className="button button-secondary" onClick={onClose} disabled={busy}>Close</button>
+          </div>
         </footer>
       </div>
     </div>

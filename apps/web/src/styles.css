@@ -266,11 +266,12 @@ svg { flex: 0 0 auto; }
 .avatar-empty { background: #ebecf0; color: #8993a4; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 100; background: rgba(9,30,66,.48); backdrop-filter: blur(2px); display: grid; place-items: center; padding: 24px; overflow: hidden; overscroll-behavior: none; }
-.task-modal, .project-modal { width: min(860px, 100%); max-height: calc(100vh - 48px); overflow: auto; border-radius: 12px; background: white; box-shadow: 0 24px 70px rgba(9,30,66,.3); padding: 23px 25px 18px; animation: modal-in .16s ease-out; }
+.task-modal, .project-modal { width: min(860px, 100%); max-height: calc(100vh - 48px); border-radius: 12px; background: white; box-shadow: 0 24px 70px rgba(9,30,66,.3); animation: modal-in .16s ease-out; }
 .task-modal { width: min(1040px, 100%); height: min(900px, calc(100vh - 32px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .task-modal > .modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 20px 25px 12px; }
-.project-modal { width: min(550px, 100%); }
-.members-modal { width: min(620px, 100%); padding-bottom: 16px; }
+.project-modal { width: min(560px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.project-modal.project-modal-wide { width: min(960px, 100%); }
+.members-modal { width: min(620px, 100%); }
 .members-modal-body { border: 1px solid #ebecf0; border-radius: 8px; overflow: hidden; background: #fafbfc; }
 .members-modal .add-member-form, .members-modal .settings-notice, .members-modal .project-member-list { margin: 0; }
 .members-modal .settings-notice { margin: 0; border-radius: 0; border-bottom: 1px solid #ebecf0; }
@@ -297,9 +298,10 @@ svg { flex: 0 0 auto; }
 .new-phase-form { margin-top: 20px; border-top: 1px solid #ebecf0; padding-top: 18px; display: grid; gap: 12px; }.new-phase-form h3 { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; }.new-phase-form h3 svg { width: 15px; color: #6554c0; }.new-phase-form > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 10px; }.new-phase-form label { display: grid; gap: 6px; color: #42526e; font-size: 11px; font-weight: 650; }.new-phase-form input { height: 40px; border: 1px solid #dfe1e6; border-radius: 6px; padding: 0 10px; outline: 0; font-size: 12px; }.new-phase-form input:focus { border-color: #8777d9; box-shadow: 0 0 0 3px rgba(101,84,192,.1); }.new-phase-form .checkbox-label { display: flex; grid-template-columns: none; align-items: center; gap: 7px; font-weight: 500; }.new-phase-form .checkbox-label input { width: 15px; height: 15px; }.new-phase-form .checkbox-label svg { width: 14px; color: #6554c0; }.new-phase-form footer { display: flex; justify-content: flex-end; }
 @keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(.985); } }
 .task-modal > header, .project-modal > header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
-.task-modal > header { flex: 0 0 auto; align-items: center; gap: 16px; margin: 0; padding: 18px 25px 14px; border-bottom: 0; background: #fff; }
-.task-modal .modal-header-copy { min-width: 0; flex: 1 1 auto; }
+.task-modal > header, .project-modal > header { flex: 0 0 auto; align-items: center; gap: 16px; margin: 0; padding: 18px 25px 14px; border-bottom: 0; background: #fff; }
+.task-modal .modal-header-copy, .project-modal .modal-header-copy { min-width: 0; flex: 1 1 auto; }
 .task-modal h2, .project-modal h2 { margin: 4px 0 0; font-size: 23px; letter-spacing: -.3px; }
+.project-modal > .modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 25px 12px; display: grid; gap: 15px; align-content: start; }
 .task-modal h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; color: #172b4d; }
 .modal-kicker { color: #6554c0; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
 .task-modal .modal-header-actions { flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
@@ -401,16 +403,20 @@ svg { flex: 0 0 auto; }
 .activity-body time { color: #a5adba; font-size: 9px; margin-left: auto; white-space: nowrap; }
 .attachments-section { border: 1px solid #dfe1e6; background: #fafbfc; border-radius: 8px; padding: 14px; display: grid; gap: 12px; }.attachments-section .section-heading b { background: #ebecf0; color: #6b778c; padding: 1px 6px; border-radius: 9px; font-size: 10px; }.attachment-dropzone { min-height: 132px; border: 1px dashed #b9b3dd; border-radius: 8px; background: #fff; color: #6b778c; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; transition: border-color .15s, background .15s; }.attachment-dropzone > svg { width: 24px; color: #6554c0; }.attachment-dropzone strong { color: #403294; font-size: 12px; }.attachment-dropzone > span { font-size: 10px; }.attachment-dropzone.is-dragging { border-color: #6554c0; background: #f4f1ff; box-shadow: inset 0 0 0 2px rgba(101,84,192,.12); }.attachment-browse { position: relative; margin-top: 2px; padding: 6px 10px; font-size: 10px; }.attachment-browse input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }.attachment-list { display: grid; gap: 5px; }.attachment-item { min-width: 0; display: grid; grid-template-columns: 27px minmax(0, 1fr) 25px 25px; gap: 7px; align-items: center; padding: 7px; border: 1px solid #ebecf0; border-radius: 6px; background: white; }.attachment-icon { width: 27px; height: 27px; border-radius: 5px; display: grid; place-items: center; color: #5243aa; background: #eae6ff; }.attachment-icon svg { width: 14px; }.attachment-item > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }.attachment-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #253858; font-size: 10px; }.attachment-item small { color: #8993a4; font-size: 9px; }.attachment-item button { width: 25px; height: 25px; border: 0; border-radius: 5px; background: transparent; color: #6554c0; display: grid; place-items: center; }.attachment-item button:hover { background: #efecff; }.attachment-item button:last-child { color: #de350b; }.attachment-item button svg { width: 13px; }
 .task-modal > footer, .project-modal > footer { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #ebecf0; margin-top: 23px; padding-top: 16px; }
-.task-modal > footer { flex: 0 0 auto; margin: 0; padding: 14px 25px 16px; background: #fff; }
-.task-modal > footer > div { display: flex; align-items: center; gap: 8px; }
+.task-modal > footer, .project-modal > footer { flex: 0 0 auto; margin: 0; padding: 14px 25px 16px; background: #fff; }
+.task-modal > footer > div, .project-modal > footer > div { display: flex; align-items: center; gap: 8px; }
 .task-modal > footer > div, .project-modal > footer { gap: 8px; }
 .form-error { color: #bf2600; background: #ffebe6; border-radius: 6px; padding: 9px 11px; font-size: 10px; margin-top: 13px; }
-.project-modal > p { color: #6b778c; font-size: 13px; margin: -12px 0 20px; }
-.project-modal { display: grid; gap: 15px; }
+.project-modal .modal-body > p { color: #6b778c; font-size: 13px; margin: 0 0 4px; }
 .project-modal > header, .project-modal > footer { margin-top: 0; margin-bottom: 0; }
+.project-modal-grid { display: grid; gap: 18px; }
+.project-modal-grid.has-side { grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr); gap: 24px; align-items: start; }
+.project-modal-main, .project-modal-side { min-width: 0; display: grid; gap: 15px; align-content: start; }
+.project-modal-side { background: #fafbfc; border: 1px solid #ebecf0; border-radius: 8px; padding: 14px; }
 .project-form-row { display: grid; grid-template-columns: 1fr 110px; gap: 12px; }
 .project-modal input[type="color"] { height: 38px; padding: 4px; }
-.project-status-settings { border-top: 1px solid #ebecf0; padding-top: 16px; display: grid; gap: 13px; }
+.project-status-settings { display: grid; gap: 13px; }
+.project-modal-side .project-status-settings + .project-status-settings { border-top: 1px solid #ebecf0; padding-top: 16px; }
 .project-status-settings > div:first-child { display: grid; gap: 3px; }.project-status-settings > div:first-child strong { color: #253858; font-size: 13px; }.project-status-settings > div:first-child span { color: #6b778c; font-size: 11px; }
 .project-status-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .project-status-options label { min-width: 0; display: flex; grid-template-columns: none; align-items: center; gap: 7px; border: 1px solid #dfe1e6; border-radius: 6px; padding: 8px; color: #505f79; font-size: 11px; font-weight: 550; cursor: pointer; }.project-status-options label.is-selected { border-color: #b3a8e8; background: #faf9ff; color: #253858; }.project-status-options input { width: 14px; height: 14px; margin: 0; padding: 0; }.project-status-settings label small { color: #7a869a; font-size: 10px; font-weight: 450; line-height: 1.4; }
@@ -637,7 +643,7 @@ html[data-text-size="large"] body { zoom: 1.08; }
   .toolbar-filters.open .multi-filter-trigger { width: 100%; max-width: none; }
   .toolbar-filters.open .clear-filters { justify-self: end; }
   .task-total { margin-left: auto; }
-  .content-area { padding: 14px 12px; }.project-dashboard { gap: 20px; padding: 16px 12px 32px; }.project-dashboard-heading { padding: 20px; }.project-dashboard-metrics { grid-template-columns: 1fr 1fr; gap: 12px; }.project-dashboard-grid { grid-template-columns: 1fr; gap: 16px; }.modal-backdrop { padding: 10px; }.modal-grid { grid-template-columns: 1fr; }.task-modal > header { padding: 14px 16px 10px; }.task-modal-tabs { padding: 0 8px; }.task-modal-tabs button { padding: 0 10px; font-size: 11px; }.task-modal > .modal-body { padding: 16px 16px 10px; }.task-modal > footer { padding: 12px 16px 14px; flex-wrap: wrap; gap: 10px; }.modal-fields { grid-template-columns: 1fr; }.project-status-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }.agent-workflow-options { grid-template-columns: 1fr; }
+  .content-area { padding: 14px 12px; }.project-dashboard { gap: 20px; padding: 16px 12px 32px; }.project-dashboard-heading { padding: 20px; }.project-dashboard-metrics { grid-template-columns: 1fr 1fr; gap: 12px; }.project-dashboard-grid { grid-template-columns: 1fr; gap: 16px; }.modal-backdrop { padding: 10px; }.modal-grid { grid-template-columns: 1fr; }.project-modal-grid.has-side { grid-template-columns: 1fr; }.task-modal > header, .project-modal > header { padding: 14px 16px 10px; }.task-modal-tabs { padding: 0 8px; }.task-modal-tabs button { padding: 0 10px; font-size: 11px; }.task-modal > .modal-body, .project-modal > .modal-body { padding: 16px 16px 10px; }.task-modal > footer, .project-modal > footer { padding: 12px 16px 14px; flex-wrap: wrap; gap: 10px; }.modal-fields { grid-template-columns: 1fr; }.project-form-row { grid-template-columns: 1fr; }.project-status-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }.agent-workflow-options { grid-template-columns: 1fr; }
   .board { min-width: 0; grid-template-columns: 1fr; gap: 10px; }
   .phase-list-stack, .task-table, .phases-page, .active-phase-banner, .no-active-phase, .empty-board-phase { min-width: 0; }
   .task-table { min-width: 760px; }
