@@ -306,8 +306,8 @@ test("review prompts include verified publication handoff context", async () => 
   let prompt = "";
   const api = { request: async (path: string) => {
     if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["READY_FOR_REVIEW", "IN_REVIEW", "APPROVED"] }, task: { ...event.task, status: "READY_FOR_REVIEW", branch: "agent/published" } };
-    if (path.endsWith("/runs")) return { run: { id: "run-review-published" } };
-    if (path.endsWith("/handoff")) return { status: "PUBLISHED", branch: "agent/published", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/9", pullRequestState: "OPEN" };
+    if (path.endsWith("/runs")) return path.includes("/tasks/") ? { runs: [{ id: "run-review-published" }, { id: "run-publisher" }] } : { run: { id: "run-review-published" } };
+    if (path.endsWith("/handoff")) return path.includes("run-publisher") ? { handoff: { status: "PUBLISHED", branch: "agent/published", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/9", pullRequestState: "OPEN" } } : { handoff: null };
     return {};
   } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, value) => { prompt = value; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
@@ -355,7 +355,7 @@ test("runner uses the project workflow mapping and ignores ordinary updates", as
   const updateBody = JSON.stringify(update);
   await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, updateBody)}` }, updateBody);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 2);
+  assert.equal(calls.filter((path) => path.endsWith("/runs")).length, 3);
 });
 
 test("runner executes the configured implementation-review-fix-re-review loop with correlated runs", async () => {
@@ -390,7 +390,7 @@ test("runner executes the configured implementation-review-fix-re-review loop wi
   assert.match(prompts[2]!, /fix start/);
   assert.match(prompts[3]!, /re-review start/);
   assert.deepEqual(calls.filter((call) => call.path.endsWith("/claim")).map((call) => call.path.split("/").at(-2)), ["run-implementation", "run-review", "run-fix", "run-rereview"]);
-  assert.equal(calls.filter((call) => call.path.endsWith("/runs")).length, 0, "webhook run IDs are reused rather than creating duplicate runs");
+  assert.equal(calls.filter((call) => call.path.endsWith("/runs") && call.body?.includes("kind")).length, 0, "webhook run IDs are reused rather than creating duplicate runs");
 });
 
 test("runner includes redacted findings in fix prompts and rejects invalid mappings visibly", async () => {

@@ -11,6 +11,7 @@ export interface AgentEvent { id: string; event: string; previousStatus?: string
 export type RunnerResult = { status: number; body: string };
 type AgentWorkflow = { implementationQueue: string; implementationStart: string; reviewHandoff: string; reviewStart: string; approved: string; fixNeeded: string; fixStart: string; reReview: string };
 type TaskFinding = { severity?: string; title?: string; body?: string; disposition?: string; filePath?: string | null; lineNumber?: number | null };
+type VerifiedHandoff = { branch?: string | null; headSha?: string | null; branchPublished?: boolean; pullRequestUrl?: string | null; pullRequestState?: string | null; status?: string };
 type ContextResponse = { project: { key: string; availableStatuses: string[]; localRepoPath?: string | null; agentWorkflow?: AgentWorkflow | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }>; findings?: TaskFinding[] } };
 type WorktreeFactory = (repo: string, branch: string | null, taskId: string) => Promise<string>;
 
@@ -204,9 +205,23 @@ export class SmithyRunner {
         this.store.setRunId(event.id, runId);
       }
       await api.request(`/api/runs/${runId}/claim`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) });
-      let verifiedHandoff: { branch?: string | null; headSha?: string | null; branchPublished?: boolean; pullRequestUrl?: string | null; pullRequestState?: string | null; status?: string } | null = null;
+      let verifiedHandoff: VerifiedHandoff | null = null;
       if (kind === "REVIEW" || kind === "RE_REVIEW") {
-        try { const response = await api.request(`/api/runs/${runId}/handoff`) as unknown as { handoff?: NonNullable<typeof verifiedHandoff> }; verifiedHandoff = response.handoff ?? response as NonNullable<typeof verifiedHandoff>; } catch { verifiedHandoff = null; }
+        try {
+          const response = await api.request(`/api/runs/${runId}/handoff`) as unknown as { handoff?: VerifiedHandoff | null } & VerifiedHandoff;
+          verifiedHandoff = response.handoff ?? response;
+          if (verifiedHandoff?.status !== "PUBLISHED" || !verifiedHandoff.branchPublished || !verifiedHandoff.headSha) {
+            const runsResponse = await api.request(`/api/tasks/${task.id}/runs`) as unknown as { runs?: Array<{ id: string }> };
+            for (const candidate of runsResponse.runs ?? []) {
+              if (candidate.id === runId) continue;
+              try {
+                const candidateResponse = await api.request(`/api/runs/${candidate.id}/handoff`) as unknown as { handoff?: VerifiedHandoff | null } & VerifiedHandoff;
+                const candidateHandoff: VerifiedHandoff = candidateResponse.handoff ?? candidateResponse;
+                if (candidateHandoff.status === "PUBLISHED" && candidateHandoff.branchPublished && candidateHandoff.headSha) { verifiedHandoff = candidateHandoff; break; }
+              } catch { /* stale or inaccessible historical run */ }
+            }
+          }
+        } catch { verifiedHandoff = null; }
       }
       heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }).catch((error) => { if (error instanceof Error && /lease is not owned|already leased|no longer runnable/i.test(error.message)) { leaseLost = true; controller.abort(); } }); }, this.heartbeatIntervalMs);
       heartbeat.unref?.();
@@ -264,7 +279,8 @@ export class SmithyRunner {
       try { headSha = (await readGit("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim() || null; } catch { /* provider may use a non-git checkout */ }
       // A local branch is not proof that it was pushed. Only an explicit
       // provider callback may mark branchPublished/PUBLISHED.
-      await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: task.branch ?? null, headSha, branchPublished: false, pullRequestUrl: prTask.pullRequestUrl ?? null, pullRequestTitle: prTask.pullRequestTitle ?? null, pullRequestState: prTask.pullRequestState ?? null, status: "PENDING", lastError: "Provider completed without explicit branch publication evidence" }) });
+      const existingHandoff = await api.request(`/api/runs/${runId}/handoff`).catch(() => ({})) as { handoff?: { status?: string } };
+      if (existingHandoff.handoff?.status !== "PUBLISHED") await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: task.branch ?? null, headSha, branchPublished: false, pullRequestUrl: prTask.pullRequestUrl ?? null, pullRequestTitle: prTask.pullRequestTitle ?? null, pullRequestState: prTask.pullRequestState ?? null, status: "PENDING", lastError: "Provider completed without explicit branch publication evidence" }) });
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });
       await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }) });
       appendLog("system", "lifecycle", `Smithy ${kind.toLowerCase()} run completed successfully.`);
