@@ -274,6 +274,8 @@ test("runner leaves task transitions to the assigned agent and explains the work
   assert.match(prompt, /Enabled workflow statuses: BACKLOG, TODO, IN_PROGRESS, READY_FOR_REVIEW/);
   assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"IN_PROGRESS","runId":"run-backlog"\}/);
   assert.match(prompt, /PATCH \/api\/tasks\/00000000-0000-4000-8000-000000000064 with \{"status":"READY_FOR_REVIEW","runId":"run-backlog"\}/);
+  assert.match(prompt, /commit all changes, push the existing task branch/);
+  assert.match(prompt, /PUT \/api\/runs\/run-backlog\/handoff/);
 });
 
 test("runner gives fix and re-review jobs focused, status-aware prompts", async () => {
@@ -293,7 +295,29 @@ test("runner gives fix and re-review jobs focused, status-aware prompts", async 
     assert.match(prompt, /\/api\/tasks\/00000000-0000-4000-8000-000000000064\/updates/);
     assert.match(prompt, /\/api\/tasks\/00000000-0000-4000-8000-000000000064\/agent-logs/);
     assert.match(prompt, /Enabled workflow statuses/);
+    if (status === "FIX_NEEDED") {
+      assert.match(prompt, /commit the fixes, push this same branch/);
+      assert.match(prompt, /PUT \/api\/runs\/run-fix_needed\/handoff/);
+    }
   }
+});
+
+test("review prompts include verified publication handoff context", async () => {
+  let prompt = "";
+  const api = { request: async (path: string) => {
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["READY_FOR_REVIEW", "IN_REVIEW", "APPROVED"] }, task: { ...event.task, status: "READY_FOR_REVIEW", branch: "agent/published" } };
+    if (path.endsWith("/runs")) return { run: { id: "run-review-published" } };
+    if (path.endsWith("/handoff")) return { status: "PUBLISHED", branch: "agent/published", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/9", pullRequestState: "OPEN" };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, value) => { prompt = value; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const review = { ...event, id: "event-review-published", event: "task.status_changed", runId: "run-review-published", previousStatus: "IN_PROGRESS", task: { ...event.task, status: "READY_FOR_REVIEW", branch: "agent/published" } };
+  const body = JSON.stringify(review);
+  await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` }, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(prompt, /Canonical publication \(verified\)/);
+  assert.match(prompt, new RegExp(`head SHA ${"a".repeat(40)}`));
+  assert.match(prompt, /pull request https:\/\/github.com\/example\/repo\/pull\/9/);
 });
 
 test("runner uses the project workflow mapping and ignores ordinary updates", async () => {
