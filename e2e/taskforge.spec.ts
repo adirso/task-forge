@@ -70,6 +70,7 @@ test.describe("workspace browser smoke", () => {
     await automationRows.nth(1).locator("select").nth(1).selectOption("actor");
     await page.getByRole("button", { name: "Create rule" }).click();
     await expect(page.getByText("Route implementation agent", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Board", exact: true }).click();
 
     await page.getByRole("button", { name: "Create task" }).first().click();
     await page.getByLabel("Task name").fill("Browser regression task");
