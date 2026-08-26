@@ -42,6 +42,7 @@ export class SmithyRunner {
     private readonly now = () => Date.now(),
     store: JobStore = new MemoryJobStore(),
     private readonly worktree: WorktreeFactory = noopWorktree,
+    private readonly heartbeatIntervalMs = 30_000,
   ) { this.store = store; }
 
   async resume() {
@@ -203,7 +204,7 @@ export class SmithyRunner {
         this.store.setRunId(event.id, runId);
       }
       await api.request(`/api/runs/${runId}/claim`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) });
-      heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }).catch(() => { leaseLost = true; controller.abort(); }); }, 30_000);
+      heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }).catch((error) => { if (error instanceof Error && /lease is not owned|already leased|no longer runnable/i.test(error.message)) { leaseLost = true; controller.abort(); } }); }, this.heartbeatIntervalMs);
       heartbeat.unref?.();
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `Smithy started ${kind.toLowerCase()} run ${runId}.` }) });
       const appendLog = (stream: "stdout" | "stderr" | "system" | "callback", category: "output" | "progress" | "tool" | "callback" | "lifecycle", content: string) => {
@@ -264,6 +265,13 @@ export class SmithyRunner {
       this.store.markComplete(event.id, "SUCCEEDED");
     } catch (error) {
       const wasCancelled = this.cancelled.has(event.id);
+      if (leaseLost) {
+        this.store.requeue(event.id);
+        logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:${job.attemptCount + 1}:lease-lost`, content: "Run lease was lost; queued the existing run for recovery." }) }); }).catch(() => undefined);
+        await logQueue;
+        setTimeout(() => { void this.resume(); }, 0).unref?.();
+        return;
+      }
       this.store.markComplete(event.id, wasCancelled ? "CANCELLED" : "FAILED");
       logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:${job.attemptCount + 1}:failure`, content: redact(error instanceof Error ? error.message : "Runner failure") }) }); }).catch(() => undefined);
       await logQueue;

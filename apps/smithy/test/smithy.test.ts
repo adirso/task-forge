@@ -459,6 +459,35 @@ test("runner only resumes stale RUNNING jobs after the lease window", async () =
   assert.equal(staleExecutions, 1);
 });
 
+test("lease loss requeues the SQLite job and resumes the same run without terminal overwrite", async () => {
+  const store = new MemoryJobStore();
+  let executions = 0;
+  let heartbeats = 0;
+  let runCreates = 0;
+  let completions = 0;
+  const api = { request: async (path: string) => {
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task };
+    if (path.endsWith("/runs")) { runCreates += 1; return { run: { id: "run-lease-recovery" } }; }
+    if (path.endsWith("/heartbeat")) { heartbeats += 1; if (heartbeats === 1) throw new Error('TaskForge API returned HTTP 400: {"error":"Agent run lease is not owned by this actor"}'); return {}; }
+    if (path.endsWith("/complete")) { completions += 1; return {}; }
+    return {};
+  } };
+  const execute = async (_command: string, _prompt: string, _cwd: string, _timeout: unknown, _onChunk: unknown, signal?: AbortSignal) => {
+    executions += 1;
+    if (executions === 1) await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+    return { code: 0, stdout: "ok", stderr: "" };
+  };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, execute as never, () => 1_700_000_000_000, store, undefined, 1);
+  const body = JSON.stringify({ ...event, id: "event-lease-recovery" });
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  await runner.handle("claude", headers, body);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(executions, 2);
+  assert.equal(runCreates, 1);
+  assert.equal(completions, 1);
+  assert.equal(store.pending().length, 0);
+});
+
 test("runner replays a failed duplicate without creating a second run", async () => {
   let executions = 0;
   const calls: string[] = [];
