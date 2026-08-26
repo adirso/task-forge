@@ -755,9 +755,9 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
   await move("FIX_IN_PROGRESS", agentId);
   await move("RE_REVIEW", reviewerId);
   await move("APPROVED", reviewerId);
-  const deliveries = await db.prepare("SELECT event_type, agent_id, payload FROM webhook_deliveries WHERE task_id = ? ORDER BY created_at ASC").all(loopTaskId) as Array<{ event_type: string; agent_id: string; payload: string }>;
+  const deliveries = await db.prepare("SELECT event_type, agent_id, payload FROM webhook_deliveries WHERE task_id = ? ORDER BY created_at ASC").all(loopTaskId) as Array<{ event_type: string; agent_id: string; payload: string | object }>;
   assert.ok(deliveries.some((delivery) => delivery.event_type === "task.status_changed" && delivery.agent_id === reviewerId));
-  assert.ok(deliveries.some((delivery) => JSON.parse(delivery.payload).runId === runId));
+  assert.ok(deliveries.some((delivery) => (typeof delivery.payload === "string" ? JSON.parse(delivery.payload) : delivery.payload as { runId?: string }).runId === runId));
   const evidence = await app.inject({ method: "PUT", url: `/api/tasks/${loopTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }] } });
   assert.equal(evidence.statusCode, 200, evidence.body);
   const scoped = await app.inject({ method: "POST", url: `/api/users/${reviewerId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Gate reviewer", permissions: ["task:gate:approve"] } });
