@@ -902,8 +902,26 @@ test("handoff checkpoints survive repeated API access and gate agent review read
   assert.equal(reopened.json().handoff.status, "PENDING");
   const blocked = await app.inject({ method: "PATCH", url: `/api/tasks/${id}`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "READY_FOR_REVIEW", runId } });
   assert.equal(blocked.statusCode, 400);
+  const missingPr = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { branch: "agent/handoff", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, status: "PUBLISHED" } });
+  assert.equal(missingPr.statusCode, 400);
+  assert.match(missingPr.json().error, /Published handoff requires branch, head SHA, published branch, and pull request metadata/);
   const published = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { branch: "agent/handoff", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/1", pullRequestTitle: "Handoff", pullRequestState: "OPEN", status: "PUBLISHED" } });
   assert.equal(published.statusCode, 200, published.body);
+  const duplicatePublished = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { branch: "agent/handoff", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/1", pullRequestTitle: "Handoff", pullRequestState: "OPEN", status: "PUBLISHED" } });
+  assert.equal(duplicatePublished.statusCode, 200, duplicatePublished.body);
+  assert.deepEqual(
+    { ...duplicatePublished.json().handoff, updatedAt: undefined },
+    { ...published.json().handoff, updatedAt: undefined },
+  );
+  const reassigneeId = randomUUID();
+  await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)").run(reassigneeId, `reassignee-${reassigneeId}@example.com`, "Reassigned Agent", new Date().toISOString());
+  const reassignmentMembership = await app.inject({ method: "POST", url: `/api/projects/${projectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: reassigneeId, role: "MEMBER" } });
+  assert.ok([204, 409].includes(reassignmentMembership.statusCode), reassignmentMembership.body);
+  const reassigned = await app.inject({ method: "PATCH", url: `/api/tasks/${id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { assigneeId: reassigneeId } });
+  assert.equal(reassigned.statusCode, 200, reassigned.body);
+  assert.equal(reassigned.json().task.branch, "agent/handoff");
+  const retainedEvidence = await app.inject({ method: "GET", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(retainedEvidence.json().handoff.headSha, "a".repeat(40));
   const ready = await app.inject({ method: "PATCH", url: `/api/tasks/${id}`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "READY_FOR_REVIEW", runId } });
   assert.equal(ready.statusCode, 200, ready.body);
 });

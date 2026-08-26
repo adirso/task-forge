@@ -214,3 +214,7 @@ Pull requests should explain the change, list validation commands, call out skip
 ## Design choices
 
 Humans receive short-lived JWTs because browser sessions benefit from expiration. Agents receive opaque tokens because automation credentials need simple bearer authentication, revocation, usage timestamps, and optional long expirations. Both resolve to the same user model and are subject to project membership checks, so the task API does not need separate human and agent behavior.
+
+## Autonomous delivery handoff states
+
+Smithy persists handoff evidence by `runId`. `IN_PROGRESS` with a pending handoff means work or recovery is active; a failed handoff exposes a redacted publication or credential error for retry. `PUBLISHED` records the pushed branch, head SHA, and pull-request metadata, and is required before `READY_FOR_REVIEW`. Restarts and reassignment reuse the existing branch and run evidence, while duplicate callbacks are safe to retry. Review approval and merge remain separate human-authorized steps; a successful provider run never implies `APPROVED` or `DONE`.

@@ -86,18 +86,17 @@ test("fake provider runner is idempotent and redacts callback logs", async () =>
 test("fake provider timeout and missing installation diagnostics are deterministic", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "smithy-failure-matrix-"));
   try {
-    const previousMode = process.env.FAKE_PROVIDER_MODE;
-    process.env.FAKE_PROVIDER_MODE = "timeout";
-    try {
-      const timeout = await executeCommand(`${process.execPath} ${fixture}`, "ignored", temp, 100, undefined, undefined);
-      assert.equal(timeout.timedOut, true);
-    } finally {
-      if (previousMode === undefined) delete process.env.FAKE_PROVIDER_MODE;
-      else process.env.FAKE_PROVIDER_MODE = previousMode;
-    }
+    const timeout = await executeCommand(`${process.execPath} ${fixture} --mode=timeout`, "ignored", temp, 100, undefined, undefined);
+    assert.equal(timeout.timedOut, true);
     const missing = await checkProvider("codex", { cmd: "definitely-missing-smithy-provider {prompt}", webhookSecret: "secret", apiToken: "tf_secret" }, executeCommand);
     assert.equal(missing.status, "MISSING");
     assert.doesNotMatch(missing.message, /tf_secret/);
+    const authFailure = await executeCommand(`${process.execPath} ${fixture} --mode=missing-auth`, "ignored", temp, 2_000);
+    assert.equal(authFailure.code, 1);
+    const diagnostic = redact(authFailure.stderr);
+    assert.match(diagnostic, /authentication required/);
+    assert.match(diagnostic, /token=\[REDACTED\]/);
+    assert.doesNotMatch(diagnostic, /tf_fake_secret/);
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
 
