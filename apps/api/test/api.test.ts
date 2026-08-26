@@ -886,3 +886,22 @@ test("agent observability API exposes run health fields alongside logs", async (
   assert.equal(logs.statusCode, 200);
   assert.equal(typeof logs.json().page.hasMore, "boolean");
 });
+
+test("handoff checkpoints survive repeated API access and gate agent review readiness", async () => {
+  const created = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Handoff persistence", status: "TODO", assigneeId: agentId, branch: "agent/handoff" } });
+  assert.equal(created.statusCode, 201, created.body);
+  const id = created.json().task.id as string;
+  const runResponse = await app.inject({ method: "POST", url: `/api/tasks/${id}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  const runId = runResponse.json().run.id as string;
+  const incomplete = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { branch: "agent/handoff", headSha: null, branchPublished: false, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, status: "PENDING", lastError: "Authorization: Bearer tf_example" } });
+  assert.equal(incomplete.statusCode, 200, incomplete.body);
+  assert.match(incomplete.json().handoff.lastError, /REDACTED/);
+  const reopened = await app.inject({ method: "GET", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(reopened.json().handoff.status, "PENDING");
+  const blocked = await app.inject({ method: "PATCH", url: `/api/tasks/${id}`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "READY_FOR_REVIEW", runId } });
+  assert.equal(blocked.statusCode, 400);
+  const published = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { branch: "agent/handoff", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/1", pullRequestTitle: "Handoff", pullRequestState: "OPEN", status: "PUBLISHED" } });
+  assert.equal(published.statusCode, 200, published.body);
+  const ready = await app.inject({ method: "PATCH", url: `/api/tasks/${id}`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "READY_FOR_REVIEW", runId } });
+  assert.equal(ready.statusCode, 200, ready.body);
+});
