@@ -904,6 +904,12 @@ test("handoff checkpoints survive repeated API access and gate agent review read
   assert.equal(blocked.statusCode, 400);
   const published = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { branch: "agent/handoff", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/1", pullRequestTitle: "Handoff", pullRequestState: "OPEN", status: "PUBLISHED" } });
   assert.equal(published.statusCode, 200, published.body);
+  const duplicatePublished = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { branch: "agent/handoff", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/1", pullRequestTitle: "Handoff", pullRequestState: "OPEN", status: "PUBLISHED" } });
+  assert.equal(duplicatePublished.statusCode, 200, duplicatePublished.body);
+  assert.deepEqual(
+    { ...duplicatePublished.json().handoff, updatedAt: undefined },
+    { ...published.json().handoff, updatedAt: undefined },
+  );
   const ready = await app.inject({ method: "PATCH", url: `/api/tasks/${id}`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "READY_FOR_REVIEW", runId } });
   assert.equal(ready.statusCode, 200, ready.body);
 });

@@ -86,6 +86,8 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: /E\d+-\d+: Browser regression task/ }).click();
     await page.getByLabel("Task name").fill("Edited browser regression task");
     await page.getByLabel("Task status").selectOption("IN_PROGRESS");
+    await page.getByLabel("PR URL").fill("https://github.com/example/task-forge/pull/96");
+    await page.getByLabel("PR title").fill("Autonomous delivery handoff");
     await page.getByRole("tab", { name: /Updates & activity/ }).click();
     await page.getByPlaceholder("Share progress, a decision, or a blocker…").fill("Browser note survived the edit flow");
     await page.getByRole("button", { name: "Post update" }).click();
@@ -101,6 +103,9 @@ test.describe("workspace browser smoke", () => {
       await page.getByRole("button", { name: "Save changes", exact: true }).click();
       await expect(page.getByRole("dialog")).toHaveCount(0);
     }
+    await page.getByRole("button", { name: /E\d+-\d+: Edited browser regression task/ }).click();
+    await expect(page.getByRole("dialog").getByRole("link", { name: "Open PR" })).toHaveAttribute("href", "https://github.com/example/task-forge/pull/96");
+    await page.getByRole("button", { name: "Close" }).click();
 
     await page.getByRole("button", { name: "List" }).click();
     await expect(page.getByRole("columnheader", { name: "Task" })).toBeVisible();
