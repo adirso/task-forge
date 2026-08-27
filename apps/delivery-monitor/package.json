@@ -1,0 +1,9 @@
+{
+  "name": "@taskforge/delivery-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {"build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit", "test": "node --test --import tsx test/*.test.ts", "dev": "tsx src/index.ts", "sync": "tsx src/index.ts --once"},
+  "dependencies": {"@taskforge/contracts": "*"},
+  "devDependencies": {"tsx": "^4.19.2", "typescript": "^5.7.3"}
+}

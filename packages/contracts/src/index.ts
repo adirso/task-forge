@@ -41,6 +41,57 @@ export const DEFAULT_AGENT_WORKFLOW: AgentWorkflow = {
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const taskTypeSchema = z.enum(["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
+/** Pull requests are intentionally restricted to canonical public GitHub URLs. */
+export const deliveryMonitorPullRequestSchema = z.object({
+  owner: z.string().regex(/^[A-Za-z0-9_.-]+$/),
+  repository: z.string().regex(/^[A-Za-z0-9_.-]+$/),
+  number: z.number().int().positive(),
+  url: z.string().url(),
+});
+export const deliveryMonitorErrorCategorySchema = z.enum([
+  "AUTHENTICATION", "PERMISSION", "RATE_LIMIT", "NOT_FOUND", "INVALID_URL", "NETWORK", "TIMEOUT", "UNKNOWN",
+]);
+export const deliveryMonitorConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  githubAppId: z.string().trim().min(1).optional(),
+  githubInstallationId: z.string().trim().min(1).optional(),
+  githubPrivateKey: z.string().trim().min(1).optional(),
+  pollIntervalMs: z.number().int().min(5_000).max(900_000).default(60_000),
+  batchSize: z.number().int().min(1).max(500).default(100),
+  leaseDurationMs: z.number().int().min(5_000).max(900_000).default(120_000),
+}).superRefine((value, context) => {
+  const configured = [value.githubAppId, value.githubInstallationId, value.githubPrivateKey].filter(Boolean).length;
+  if (configured > 0 && configured < 3) context.addIssue({ code: "custom", path: ["githubAppId"], message: "githubAppId, githubInstallationId, and githubPrivateKey must be configured together" });
+});
+export const deliveryMonitorSyncResultSchema = z.object({
+  taskId: z.string().uuid(),
+  pullRequestUrl: z.string().url(),
+  state: pullRequestStateSchema,
+  observedAt: z.string().datetime(),
+  destinationStatus: z.enum(["DONE", "CANCELLED"]).nullable(),
+  headSha: z.string().regex(/^[0-9a-f]{7,64}$/i).nullable(),
+  errorCategory: deliveryMonitorErrorCategorySchema.nullable(),
+});
+export const deliveryMonitorCheckpointSchema = z.object({
+  runId: z.string().uuid(),
+  taskId: z.string().uuid(),
+  cursor: z.string().nullable(),
+  observedAt: z.string().datetime(),
+  lastResult: deliveryMonitorSyncResultSchema.nullable(),
+});
+export const deliveryMonitorLeaseSchema = z.object({
+  runId: z.string().uuid(),
+  ownerId: z.string().min(1),
+  acquiredAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+});
+export const deliveryMonitorAuditEventSchema = z.object({
+  runId: z.string().uuid(),
+  taskId: z.string().uuid(),
+  event: z.enum(["SYNC_STARTED", "SYNC_COMPLETED", "SYNC_FAILED", "LEASE_RECLAIMED"]),
+  occurredAt: z.string().datetime(),
+  errorCategory: deliveryMonitorErrorCategorySchema.nullable(),
+});
 export const webhookEventTypeSchema = z.enum(["task.assigned", "task.update_added", "task.status_changed"]);
 export const webhookDeliveryStatusSchema = z.enum(["PENDING", "RETRYING", "DELIVERED", "FAILED"]);
 export const taskTagNameSchema = z.string().trim().min(1).max(32)
@@ -206,6 +257,36 @@ export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 export type TaskType = z.infer<typeof taskTypeSchema>;
 export type PullRequestState = z.infer<typeof pullRequestStateSchema>;
+export type DeliveryMonitorConfig = z.infer<typeof deliveryMonitorConfigSchema>;
+export type DeliveryMonitorPullRequest = z.infer<typeof deliveryMonitorPullRequestSchema>;
+export type DeliveryMonitorErrorCategory = z.infer<typeof deliveryMonitorErrorCategorySchema>;
+export type DeliveryMonitorSyncResult = z.infer<typeof deliveryMonitorSyncResultSchema>;
+export type DeliveryMonitorCheckpoint = z.infer<typeof deliveryMonitorCheckpointSchema>;
+export type DeliveryMonitorLease = z.infer<typeof deliveryMonitorLeaseSchema>;
+export type DeliveryMonitorAuditEvent = z.infer<typeof deliveryMonitorAuditEventSchema>;
+
+const GITHUB_PR_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/i;
+export function parseDeliveryMonitorPullRequestUrl(value: string): DeliveryMonitorPullRequest | null {
+  const match = GITHUB_PR_URL.exec(value.trim());
+  if (!match) return null;
+  const number = Number(match[3]);
+  if (!Number.isSafeInteger(number) || number < 1) return null;
+  const url = `https://github.com/${match[1]}/${match[2]}/pull/${number}`;
+  return deliveryMonitorPullRequestSchema.parse({ owner: match[1], repository: match[2], number, url });
+}
+
+export function mapGithubPullRequestState(state: "open" | "closed", mergedAt: string | null, draft = false): PullRequestState {
+  if (mergedAt) return "MERGED";
+  if (state === "closed") return "CLOSED";
+  return draft ? "DRAFT" : "OPEN";
+}
+
+/** Ensure a project can receive every terminal result produced by the monitor. */
+export function validateDeliveryMonitorDestinations(availableStatuses: readonly string[]): { merged: "DONE"; closed: "CANCELLED" } {
+  const missing = (["DONE", "CANCELLED"] as const).filter((status) => !availableStatuses.includes(status));
+  if (missing.length) throw new Error(`Delivery Monitor requires enabled destination status(es): ${missing.join(", ")}`);
+  return { merged: "DONE", closed: "CANCELLED" };
+}
 export type WebhookEventType = z.infer<typeof webhookEventTypeSchema>;
 export type WebhookDeliveryStatus = z.infer<typeof webhookDeliveryStatusSchema>;
 export type ProjectCreate = z.infer<typeof projectCreateSchema>;

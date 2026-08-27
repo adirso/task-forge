@@ -218,3 +218,13 @@ Humans receive short-lived JWTs because browser sessions benefit from expiration
 ## Autonomous delivery handoff states
 
 Smithy persists handoff evidence by `runId`. `IN_PROGRESS` with a pending handoff means work or recovery is active; a failed handoff exposes a redacted publication or credential error for retry. `PUBLISHED` records the pushed branch, head SHA, and pull-request metadata, and is required before `READY_FOR_REVIEW`. Restarts and reassignment reuse the existing branch and run evidence, while duplicate callbacks are safe to retry. Review approval and merge remain separate human-authorized steps; a successful provider run never implies `APPROVED` or `DONE`.
+
+## Delivery Monitor
+
+The Delivery Monitor is an optional worker that polls pull requests attached to tasks in the configured project workflow approval status (`agentWorkflow.approved`). It is deliberately separate from Smithy and uses a least-privilege GitHub App. Start it with `npm run dev:delivery-monitor`; run one poll with `npm run delivery-monitor:sync`.
+
+Configuration is supplied through environment variables: `GITHUB_APP_ID`, `GITHUB_INSTALLATION_ID`, and `GITHUB_PRIVATE_KEY` (all three are required together), `DELIVERY_MONITOR_POLL_INTERVAL_MS` (default 60000, 5 seconds–15 minutes), `DELIVERY_MONITOR_BATCH_SIZE` (default 100, maximum 500), and `DELIVERY_MONITOR_LEASE_DURATION_MS` (default 120000). Credentials are never written to logs or TaskForge updates. Polling is disabled with `DELIVERY_MONITOR_ENABLED=false`.
+
+The monitor accepts only `https://github.com/{owner}/{repository}/pull/{number}` URLs. A GitHub `merged_at` value maps to `DONE`; a closed, unmerged pull request maps to `CANCELLED`; open and draft requests remain in the approval workflow. Projects must explicitly enable both `DONE` and `CANCELLED` as available statuses before transitions are attempted.
+
+The GitHub App needs repository **Metadata: read**, **Contents: read**, and **Pull requests: read** permissions, installed only on repositories being monitored. It does not need write, issue, workflow, or administration permissions. Operators see redacted error categories: `AUTHENTICATION`, `PERMISSION`, `RATE_LIMIT`, `NOT_FOUND`, `INVALID_URL`, `NETWORK`, `TIMEOUT`, and `UNKNOWN`. For disabled destination statuses, missing App installation, or malformed URLs, correct the project status configuration or installation and retry; never paste a token or private key into diagnostics.

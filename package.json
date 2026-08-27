@@ -16,6 +16,8 @@
     "db:seed": "npm run db:seed -w @taskforge/api",
     "admin:bootstrap": "npm run admin:bootstrap -w @taskforge/api",
     "dev:agents": "npm run dev -w @taskforge/smithy",
+    "dev:delivery-monitor": "npm run dev -w @taskforge/delivery-monitor",
+    "delivery-monitor:sync": "npm run sync -w @taskforge/delivery-monitor",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium"
   },
