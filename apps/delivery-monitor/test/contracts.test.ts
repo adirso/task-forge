@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deliveryMonitorConfigSchema, mapGithubPullRequestState, parseDeliveryMonitorPullRequestUrl } from "@taskforge/contracts";
+import { deliveryMonitorConfigSchema, mapGithubPullRequestState, parseDeliveryMonitorPullRequestUrl, validateDeliveryMonitorDestinations } from "@taskforge/contracts";
 
 test("accepts canonical GitHub pull request URLs only", () => {
   assert.deepEqual(parseDeliveryMonitorPullRequestUrl("https://github.com/acme/app/pull/42"), { owner: "acme", repository: "app", number: 42, url: "https://github.com/acme/app/pull/42" });
@@ -21,4 +21,9 @@ test("provides safe defaults and rejects partial GitHub App credentials", () => 
   assert.equal(config.pollIntervalMs, 60_000);
   assert.equal(config.batchSize, 100);
   assert.throws(() => deliveryMonitorConfigSchema.parse({ githubAppId: "123" }), /configured together/);
+});
+
+test("requires enabled terminal destinations", () => {
+  assert.deepEqual(validateDeliveryMonitorDestinations(["TODO", "DONE", "CANCELLED"]), { merged: "DONE", closed: "CANCELLED" });
+  assert.throws(() => validateDeliveryMonitorDestinations(["TODO", "DONE"]), /CANCELLED/);
 });

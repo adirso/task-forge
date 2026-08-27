@@ -280,6 +280,13 @@ export function mapGithubPullRequestState(state: "open" | "closed", mergedAt: st
   if (state === "closed") return "CLOSED";
   return draft ? "DRAFT" : "OPEN";
 }
+
+/** Ensure a project can receive every terminal result produced by the monitor. */
+export function validateDeliveryMonitorDestinations(availableStatuses: readonly string[]): { merged: "DONE"; closed: "CANCELLED" } {
+  const missing = (["DONE", "CANCELLED"] as const).filter((status) => !availableStatuses.includes(status));
+  if (missing.length) throw new Error(`Delivery Monitor requires enabled destination status(es): ${missing.join(", ")}`);
+  return { merged: "DONE", closed: "CANCELLED" };
+}
 export type WebhookEventType = z.infer<typeof webhookEventTypeSchema>;
 export type WebhookDeliveryStatus = z.infer<typeof webhookDeliveryStatusSchema>;
 export type ProjectCreate = z.infer<typeof projectCreateSchema>;
