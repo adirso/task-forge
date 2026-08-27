@@ -1,4 +1,6 @@
 import { loadDeliveryMonitorConfig } from "./config.js";
+export * from "./persistence.js";
+export * from "./worker.js";
 
 const config = loadDeliveryMonitorConfig();
 if (process.argv.includes("--once")) process.stdout.write(`Delivery Monitor configured (poll=${config.pollIntervalMs}ms, batch=${config.batchSize})\n`);

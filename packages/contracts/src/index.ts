@@ -76,6 +76,9 @@ export const deliveryMonitorCheckpointSchema = z.object({
   runId: z.string().uuid(),
   taskId: z.string().uuid(),
   cursor: z.string().nullable(),
+  etag: z.string().max(512).nullable().default(null),
+  retryCount: z.number().int().nonnegative().default(0),
+  nextAttemptAt: z.string().datetime().nullable().default(null),
   observedAt: z.string().datetime(),
   lastResult: deliveryMonitorSyncResultSchema.nullable(),
 });
