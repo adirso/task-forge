@@ -76,11 +76,14 @@ export const deliveryMonitorSyncResultSchema = z.object({
 export const deliveryMonitorCheckpointSchema = z.object({
   runId: z.string().uuid(),
   taskId: z.string().uuid(),
+  pullRequestUrl: z.string().url(),
   cursor: z.string().nullable(),
   etag: z.string().max(512).nullable().default(null),
   retryCount: z.number().int().nonnegative().default(0),
   nextAttemptAt: z.string().datetime().nullable().default(null),
   observedAt: z.string().datetime(),
+  lastState: pullRequestStateSchema.nullable().default(null),
+  lastError: deliveryMonitorErrorCategorySchema.nullable().default(null),
   lastResult: deliveryMonitorSyncResultSchema.nullable(),
 });
 export const deliveryMonitorLeaseSchema = z.object({

@@ -10,8 +10,9 @@ function store(): MonitorStore & { checkpoints: MonitorCheckpoint[]; leases: Set
 
 test("sweep is bounded, persists checkpoints, and skips an already leased task", async () => {
   const db = store(); let polls = 0;
-  const processed = await runSweep({ store: db, ownerId: "worker-1", config: { pollIntervalMs: 60_000, batchSize: 1, leaseDurationMs: 120_000, maxRetries: 5 }, list: async () => [{ runId: "00000000-0000-4000-8000-000000000001", taskId: "00000000-0000-4000-8000-000000000002", pullRequestUrl: "https://github.com/acme/app/pull/1" }, { runId: "00000000-0000-4000-8000-000000000003", taskId: "00000000-0000-4000-8000-000000000004", pullRequestUrl: "https://github.com/acme/app/pull/2" }], poll: async () => { polls += 1; return { state: "OPEN", observedAt: new Date().toISOString(), etag: "etag-1" }; } });
-  assert.equal(processed, 1); assert.equal(polls, 1); assert.equal((await db.load("00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002", "https://github.com/acme/app/pull/1"))?.etag, "etag-1");
+  await db.acquireLease("00000000-0000-4000-8000-000000000001", "other-worker", new Date().toISOString(), new Date(Date.now() + 60_000).toISOString());
+  const processed = await runSweep({ store: db, ownerId: "worker-1", config: { pollIntervalMs: 60_000, batchSize: 2, leaseDurationMs: 120_000, maxRetries: 5 }, list: async () => [{ runId: "00000000-0000-4000-8000-000000000001", taskId: "00000000-0000-4000-8000-000000000002", pullRequestUrl: "https://github.com/acme/app/pull/1" }, { runId: "00000000-0000-4000-8000-000000000003", taskId: "00000000-0000-4000-8000-000000000004", pullRequestUrl: "https://github.com/acme/app/pull/2" }], poll: async () => { polls += 1; return { state: "OPEN", observedAt: new Date().toISOString(), etag: "etag-1" }; } });
+  assert.equal(processed, 1); assert.equal(polls, 1); assert.equal((await db.load("00000000-0000-4000-8000-000000000003", "00000000-0000-4000-8000-000000000004", "https://github.com/acme/app/pull/2"))?.etag, "etag-1");
 });
 
 test("does not retry a checkpoint beyond its configured bound", async () => {
