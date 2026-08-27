@@ -10,5 +10,6 @@ export function loadDeliveryMonitorConfig(env: NodeJS.ProcessEnv = process.env):
     pollIntervalMs: parseNumber("DELIVERY_MONITOR_POLL_INTERVAL_MS"),
     batchSize: parseNumber("DELIVERY_MONITOR_BATCH_SIZE"),
     leaseDurationMs: parseNumber("DELIVERY_MONITOR_LEASE_DURATION_MS"),
+    maxRetries: parseNumber("DELIVERY_MONITOR_MAX_RETRIES"),
   });
 }

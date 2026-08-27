@@ -59,6 +59,7 @@ export const deliveryMonitorConfigSchema = z.object({
   pollIntervalMs: z.number().int().min(5_000).max(900_000).default(60_000),
   batchSize: z.number().int().min(1).max(500).default(100),
   leaseDurationMs: z.number().int().min(5_000).max(900_000).default(120_000),
+  maxRetries: z.number().int().min(0).max(20).default(5),
 }).superRefine((value, context) => {
   const configured = [value.githubAppId, value.githubInstallationId, value.githubPrivateKey].filter(Boolean).length;
   if (configured > 0 && configured < 3) context.addIssue({ code: "custom", path: ["githubAppId"], message: "githubAppId, githubInstallationId, and githubPrivateKey must be configured together" });
