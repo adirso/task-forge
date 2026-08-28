@@ -67,6 +67,7 @@ test("delivery monitor diagnostics require authentication and expose safe idle s
   assert.ok(Array.isArray(body.monitor.failures));
 });
 
+
 test("human can log in and create a project", async () => {
   const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@example.com", password: "password123" } });
   assert.equal(login.statusCode, 200);
@@ -936,4 +937,18 @@ test("handoff checkpoints survive repeated API access and gate agent review read
   assert.equal(retainedEvidence.json().handoff.headSha, "a".repeat(40));
   const ready = await app.inject({ method: "PATCH", url: `/api/tasks/${id}`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "READY_FOR_REVIEW", runId } });
   assert.equal(ready.statusCode, 200, ready.body);
+});
+
+test("delivery monitor task checkpoint is project-authorized and observable", async () => {
+  assert.ok(taskId);
+  const observedAt = new Date().toISOString();
+  await db.prepare("INSERT INTO delivery_monitor_checkpoints (run_id, task_id, pull_request_url, last_state, observed_at, retry_count, last_error, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), taskId, "https://github.com/example/repo/pull/8", "OPEN", observedAt, 1, "RATE_LIMIT", observedAt);
+  const adminResponse = await app.inject({ method: "GET", url: `/api/delivery-monitor/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(adminResponse.statusCode, 200, adminResponse.body);
+  assert.equal(adminResponse.json().checkpoint.errorCategory, "RATE_LIMIT");
+  const strangerId = randomUUID();
+  await db.prepare("INSERT INTO users (id, email, name, password_hash, kind, role, created_at) VALUES (?, ?, ?, ?, 'HUMAN', 'MEMBER', ?)").run(strangerId, `stranger-${strangerId}@example.com`, "Stranger", await bcrypt.hash("password123", 8), observedAt);
+  const strangerLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: `stranger-${strangerId}@example.com`, password: "password123" } });
+  const memberResponse = await app.inject({ method: "GET", url: `/api/delivery-monitor/tasks/${taskId}`, headers: { authorization: `Bearer ${strangerLogin.json().token}` } });
+  assert.equal(memberResponse.statusCode, 403);
 });
