@@ -5,6 +5,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 export * from "./persistence.js";
 export * from "./worker.js";
+export * from "./github.js";
+export * from "./sync.js";
 
 const config = loadDeliveryMonitorConfig();
 const database = monitorDatabaseConfig();
