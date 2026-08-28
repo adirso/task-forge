@@ -3,7 +3,7 @@ import { SqliteMonitorStore, MysqlMonitorStore } from "./persistence.js";
 import { runWorker, runSweep, type MonitorItem, type PollResult } from "./worker.js";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { validateDeliveryMonitorDestinations } from "@taskforge/contracts";
+import { syncTask } from "./sync.js";
 import { createGithubInstallationToken, fetchGithubPullRequest } from "./github.js";
 export * from "./persistence.js";
 export * from "./worker.js";
@@ -43,7 +43,7 @@ async function pollGithub(item: MonitorItem, checkpoint: any): Promise<PollResul
   const result = await fetchGithubPullRequest(item.pullRequestUrl, githubToken, fetch, checkpoint?.etag);
   return { state: result.state, observedAt: new Date().toISOString(), etag: result.etag, cursor: null };
 }
-const options = { store, ownerId: process.env.DELIVERY_MONITOR_OWNER_ID ?? `monitor-${process.pid}`, config, list: async (_cursor: string | null, limit: number) => listTaskforgeItems(limit), poll: pollGithub, onResult: async (item: MonitorItem, result: PollResult) => { if (!process.env.TASKFORGE_API_URL || !item.status || item.status !== item.approvalStatus) return; const status = result.state === "MERGED" ? "DONE" : result.state === "CLOSED" ? "CANCELLED" : null; if (!status) return; validateDeliveryMonitorDestinations(item.availableStatuses ?? []); await taskforgeRequest(`/api/tasks/${item.taskId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ pullRequestState: result.state, status }) }); }, onError: (category: string) => process.stderr.write(`Delivery Monitor error: ${category}\n`), onAudit: (event: string) => process.stdout.write(JSON.stringify({ event, observedAt: new Date().toISOString() }) + "\n") };
+const options = { store, ownerId: process.env.DELIVERY_MONITOR_OWNER_ID ?? `monitor-${process.pid}`, config, list: async (_cursor: string | null, limit: number) => listTaskforgeItems(limit), poll: pollGithub, onResult: async (item: MonitorItem, result: PollResult) => { if (!process.env.TASKFORGE_API_URL) return; await syncTask({ id: item.taskId, status: item.status ?? "", approvalStatus: item.approvalStatus ?? "APPROVED", pullRequestUrl: item.pullRequestUrl, availableStatuses: item.availableStatuses ?? [] }, { fetchPullRequest: async () => ({ state: result.state as any, headSha: null, etag: result.etag ?? null }), updateTask: async (patch) => taskforgeRequest(`/api/tasks/${item.taskId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }) }); }, onError: (category: string) => process.stderr.write(`Delivery Monitor error: ${category}\n`), onAudit: (event: string, item?: MonitorItem) => process.stdout.write(JSON.stringify({ event, taskId: item?.taskId, runId: item?.runId, observedAt: new Date().toISOString() }) + "\n") };
 
 // The list/poll callbacks are supplied by the API integration in the next layer;
 // this entrypoint still owns migration, lifecycle, and lease-safe worker startup.
