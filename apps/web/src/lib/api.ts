@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
   id: string; taskId: string; projectId: string; requestedById: string; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
@@ -320,6 +320,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
   if (/^\/users\/[^/]+\/webhook-secret\/rotate$/.test(pathname) && method === "POST") return { user: { ...MOCK_AGENT, webhookSecretConfigured: true }, webhookSecret: "whsec_mock_rotated" } as T;
   if (pathname === "/users/webhook-deliveries" && method === "GET") return { deliveries: [] } as T;
   if (/^\/users\/webhook-deliveries\/[^/]+\/retry$/.test(pathname) && method === "POST") throw new ApiError("Mock delivery not found", 404);
+  if (pathname === "/delivery-monitor/health" && method === "GET") return { monitor: { status: "idle", lastSweepAt: null, activeLeaseCount: 0, processedCount: 0, nextRetryAt: null, failures: [] }, activeLeases: [] } as T;
 
   // Mutations used by settings and project management can no-op in mock mode.
   if (method !== "GET") return undefined as T;
@@ -437,4 +438,5 @@ export const api = {
   retryWebhookDelivery: (deliveryId: string) => request<{ delivery: WebhookDelivery }>(`/users/webhook-deliveries/${deliveryId}/retry`, { method: "POST" }),
   claimTask: (projectId: string, opts?: { phaseId?: string | null; priority?: string }) => request<{ task: Task }>(`/projects/${projectId}/tasks/claim`, { method: "POST", body: opts ?? {} }),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
+  deliveryMonitorHealth: () => request<{ monitor: DeliveryMonitorHealth; activeLeases: Array<{ runId: string; ownerId: string; acquiredAt: string; expiresAt: string }> }>("/delivery-monitor/health"),
 };

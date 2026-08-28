@@ -99,6 +99,18 @@ export const deliveryMonitorAuditEventSchema = z.object({
   occurredAt: z.string().datetime(),
   errorCategory: deliveryMonitorErrorCategorySchema.nullable(),
 });
+export const deliveryMonitorHealthSchema = z.object({
+  status: z.enum(["healthy", "stale", "idle", "unavailable"]),
+  lastSweepAt: z.string().datetime().nullable(),
+  activeLeaseCount: z.number().int().nonnegative(),
+  processedCount: z.number().int().nonnegative(),
+  nextRetryAt: z.string().datetime().nullable(),
+  failures: z.array(z.object({
+    runId: z.string().uuid(), taskId: z.string().uuid(), pullRequestUrl: z.string().url(),
+    retryCount: z.number().int().nonnegative(), nextRetryAt: z.string().datetime().nullable(),
+    lastObservedAt: z.string().datetime().nullable(), state: z.string().nullable(), errorCategory: z.string().nullable(),
+  })),
+});
 export const webhookEventTypeSchema = z.enum(["task.assigned", "task.update_added", "task.status_changed"]);
 export const webhookDeliveryStatusSchema = z.enum(["PENDING", "RETRYING", "DELIVERED", "FAILED"]);
 export const taskTagNameSchema = z.string().trim().min(1).max(32)
@@ -271,6 +283,7 @@ export type DeliveryMonitorSyncResult = z.infer<typeof deliveryMonitorSyncResult
 export type DeliveryMonitorCheckpoint = z.infer<typeof deliveryMonitorCheckpointSchema>;
 export type DeliveryMonitorLease = z.infer<typeof deliveryMonitorLeaseSchema>;
 export type DeliveryMonitorAuditEvent = z.infer<typeof deliveryMonitorAuditEventSchema>;
+export type DeliveryMonitorHealth = z.infer<typeof deliveryMonitorHealthSchema>;
 
 const GITHUB_PR_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/i;
 export function parseDeliveryMonitorPullRequestUrl(value: string): DeliveryMonitorPullRequest | null {

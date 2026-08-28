@@ -55,6 +55,18 @@ test("health endpoint is public", async () => {
   assert.deepEqual(response.json(), { status: "ok" });
 });
 
+test("delivery monitor diagnostics require authentication and expose safe idle state", async () => {
+  const denied = await app.inject({ method: "GET", url: "/api/delivery-monitor/health" });
+  assert.equal(denied.statusCode, 401);
+  const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@example.com", password: "password123" } });
+  const response = await app.inject({ method: "GET", url: "/api/delivery-monitor/health", headers: { authorization: `Bearer ${login.json().token}` } });
+  assert.equal(response.statusCode, 200, response.body);
+  const body = response.json();
+  assert.equal(body.monitor.status, "idle");
+  assert.equal(body.monitor.activeLeaseCount, 0);
+  assert.ok(Array.isArray(body.monitor.failures));
+});
+
 test("human can log in and create a project", async () => {
   const login = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@example.com", password: "password123" } });
   assert.equal(login.statusCode, 200);

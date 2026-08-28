@@ -62,6 +62,10 @@ export interface AgentHandoffEntity {
   createdAt: string; updatedAt: string;
 }
 
+export interface DeliveryMonitorLeaseEntity { runId: string; ownerId: string; acquiredAt: string; expiresAt: string; }
+export interface DeliveryMonitorFailureEntity { runId: string; taskId: string; pullRequestUrl: string; retryCount: number; nextRetryAt: string | null; lastObservedAt: string | null; state: string | null; errorCategory: string | null; }
+export interface DeliveryMonitorHealthEntity { status: "healthy" | "stale" | "idle" | "unavailable"; lastSweepAt: string | null; activeLeaseCount: number; processedCount: number; nextRetryAt: string | null; failures: DeliveryMonitorFailureEntity[]; activeLeases: DeliveryMonitorLeaseEntity[]; }
+
 export type GateCheckStatus = "PASS" | "FAIL" | "PENDING";
 export interface TaskGateEntity {
   taskId: string;
