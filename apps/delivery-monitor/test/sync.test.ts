@@ -17,6 +17,12 @@ test("open PRs update metadata without terminal transition", async () => {
   assert.equal(result.transitionedTo, null);
   assert.deepEqual(patch, { pullRequestState: "OPEN" });
 });
+test("draft PRs and non-approval tasks are not terminally transitioned", async () => {
+  let count = 0;
+  const draft = await syncTask(base, { fetchPullRequest: async () => ({ state: "DRAFT", headSha: null, etag: null }), updateTask: async () => { count += 1; } });
+  const skipped = await syncTask({ ...base, status: "TODO" }, { fetchPullRequest: async () => ({ state: "MERGED", headSha: null, etag: null }), updateTask: async () => { count += 1; } });
+  assert.equal(draft.transitionedTo, null); assert.equal(skipped.skipped, true); assert.equal(count, 1);
+});
 test("terminal transition is rejected when destination is disabled", async () => {
   const result = await syncTask({ ...base, availableStatuses: ["APPROVED", "DONE"] }, { fetchPullRequest: async () => ({ state: "CLOSED", headSha: null, etag: null }), updateTask: async () => { throw new Error("must not update"); } });
   assert.equal(result.errorCategory, "UNKNOWN");
