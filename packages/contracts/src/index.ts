@@ -59,6 +59,7 @@ export const deliveryMonitorConfigSchema = z.object({
   pollIntervalMs: z.number().int().min(5_000).max(900_000).default(60_000),
   batchSize: z.number().int().min(1).max(500).default(100),
   leaseDurationMs: z.number().int().min(5_000).max(900_000).default(120_000),
+  maxRetries: z.number().int().min(0).max(20).default(5),
 }).superRefine((value, context) => {
   const configured = [value.githubAppId, value.githubInstallationId, value.githubPrivateKey].filter(Boolean).length;
   if (configured > 0 && configured < 3) context.addIssue({ code: "custom", path: ["githubAppId"], message: "githubAppId, githubInstallationId, and githubPrivateKey must be configured together" });
@@ -75,8 +76,14 @@ export const deliveryMonitorSyncResultSchema = z.object({
 export const deliveryMonitorCheckpointSchema = z.object({
   runId: z.string().uuid(),
   taskId: z.string().uuid(),
+  pullRequestUrl: z.string().url(),
   cursor: z.string().nullable(),
+  etag: z.string().max(512).nullable().default(null),
+  retryCount: z.number().int().nonnegative().default(0),
+  nextAttemptAt: z.string().datetime().nullable().default(null),
   observedAt: z.string().datetime(),
+  lastState: pullRequestStateSchema.nullable().default(null),
+  lastError: deliveryMonitorErrorCategorySchema.nullable().default(null),
   lastResult: deliveryMonitorSyncResultSchema.nullable(),
 });
 export const deliveryMonitorLeaseSchema = z.object({
@@ -88,7 +95,7 @@ export const deliveryMonitorLeaseSchema = z.object({
 export const deliveryMonitorAuditEventSchema = z.object({
   runId: z.string().uuid(),
   taskId: z.string().uuid(),
-  event: z.enum(["SYNC_STARTED", "SYNC_COMPLETED", "SYNC_FAILED", "LEASE_RECLAIMED"]),
+  event: z.enum(["SYNC_STARTED", "SYNC_COMPLETED", "SYNC_FAILED", "LEASE_UNAVAILABLE"]),
   occurredAt: z.string().datetime(),
   errorCategory: deliveryMonitorErrorCategorySchema.nullable(),
 });

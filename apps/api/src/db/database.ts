@@ -592,6 +592,17 @@ export const migrations: readonly Migration[] = [
         : "CREATE TABLE IF NOT EXISTS agent_run_handoffs (run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, branch TEXT, head_sha TEXT, branch_published INTEGER NOT NULL DEFAULT 0, pull_request_url TEXT, pull_request_title TEXT, pull_request_state TEXT, status TEXT NOT NULL CHECK (status IN ('PENDING','PUBLISHED','FAILED')), last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)", []);
     },
   },
+  {
+    version: "0020_delivery_monitor_checkpoints",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS delivery_monitor_checkpoints (run_id CHAR(36) NOT NULL, task_id CHAR(36) NOT NULL, pull_request_url VARCHAR(2048) NOT NULL, cursor TEXT, etag VARCHAR(512), last_state VARCHAR(16), observed_at VARCHAR(30), retry_count INT NOT NULL DEFAULT 0, next_attempt_at VARCHAR(30), last_error TEXT, updated_at VARCHAR(30) NOT NULL, PRIMARY KEY (run_id, task_id, pull_request_url(255)), INDEX idx_delivery_monitor_checkpoint_due (next_attempt_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS delivery_monitor_checkpoints (run_id TEXT NOT NULL, task_id TEXT NOT NULL, pull_request_url TEXT NOT NULL, cursor TEXT, etag TEXT, last_state TEXT, observed_at TEXT, retry_count INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT, last_error TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (run_id, task_id, pull_request_url))", []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS delivery_monitor_leases (run_id CHAR(36) PRIMARY KEY, owner_id VARCHAR(255) NOT NULL, acquired_at VARCHAR(30) NOT NULL, expires_at VARCHAR(30) NOT NULL, INDEX idx_delivery_monitor_lease_expiry (expires_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS delivery_monitor_leases (run_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, acquired_at TEXT NOT NULL, expires_at TEXT NOT NULL)", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {
