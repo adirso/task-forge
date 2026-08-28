@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -140,6 +140,7 @@ export interface AgentRunRepository {
   cancel(id: string, now: string, error?: string | null): Promise<boolean>;
 }
 export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
+export interface DeliveryMonitorRepository { health(now: string, pollIntervalMs: number): Promise<DeliveryMonitorHealthEntity>; taskCheckpoint(taskId: string): Promise<Record<string, unknown> | null>; }
 export interface TaskGateRepository {
   findByTask(taskId: string): Promise<TaskGateEntity | null>;
   save(input: TaskGateEntity): Promise<TaskGateEntity>;
@@ -184,6 +185,7 @@ export interface RepositorySet {
   gates: TaskGateRepository;
   findings: TaskFindingRepository;
   handoffs: AgentHandoffRepository;
+  deliveryMonitor: DeliveryMonitorRepository;
 }
 
 export interface UnitOfWork {

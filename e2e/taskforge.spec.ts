@@ -162,6 +162,23 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByText("Waiting for provider input", { exact: true })).toBeVisible();
     await expect(page.getByText("Provider response timeline", { exact: false }).first()).toBeVisible();
   });
+
+  test("shows Delivery Monitor health and checkpoint details on the dashboard", async ({ page }) => {
+    await page.route("**/api/delivery-monitor/health", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      monitor: { status: "stale", lastSweepAt: "2026-08-28T06:00:00.000Z", activeLeaseCount: 1, processedCount: 7, nextRetryAt: "2026-08-28T06:10:00.000Z", failures: [{ runId: "00000000-0000-4000-8000-000000000801", taskId: "00000000-0000-4000-8000-000000000802", pullRequestUrl: "https://github.com/example/repo/pull/8", retryCount: 2, nextRetryAt: "2026-08-28T06:10:00.000Z", lastObservedAt: "2026-08-28T06:00:00.000Z", state: "OPEN", errorCategory: "RATE_LIMIT" }] },
+      activeLeases: [{ runId: "00000000-0000-4000-8000-000000000801", ownerId: "monitor-1", acquiredAt: "2026-08-28T05:59:00.000Z", expiresAt: "2026-08-28T06:02:00.000Z" }],
+    }) }));
+    await signIn(page);
+    await page.getByRole("button", { name: /TaskForge.*Drag to reorder/ }).click();
+    await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+    const card = page.getByRole("region", { name: "Delivery Monitor health" });
+    await expect(card).toBeVisible();
+    await expect(card.getByText("stale", { exact: true })).toBeVisible();
+    await expect(card.getByText("Processed checkpoints (total)", { exact: true })).toBeVisible();
+    await expect(card.getByText("7", { exact: true })).toBeVisible();
+    await expect(card.getByText("monitor-1", { exact: false })).toBeVisible();
+    await expect(card.getByText("RATE_LIMIT", { exact: false })).toBeVisible();
+  });
 });
 
 test.describe("mobile workspace smoke", () => {

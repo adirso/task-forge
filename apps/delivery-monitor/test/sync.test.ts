@@ -27,3 +27,9 @@ test("terminal transition is rejected when destination is disabled", async () =>
   const result = await syncTask({ ...base, availableStatuses: ["APPROVED", "DONE"] }, { fetchPullRequest: async () => ({ state: "CLOSED", headSha: null, etag: null }), updateTask: async () => { throw new Error("must not update"); } });
   assert.equal(result.errorCategory, "UNKNOWN");
 });
+test("records redacted operator activity for observations and failures with run correlation", async () => {
+  const events: unknown[] = [];
+  await syncTask({ ...base, runId: "run-1" }, { fetchPullRequest: async () => ({ state: "OPEN", headSha: null, etag: null }), updateTask: async () => undefined, recordActivity: async (event) => events.push(event) });
+  await syncTask({ ...base, runId: "run-1" }, { fetchPullRequest: async () => { const error = new Error("rate limited"); Object.assign(error, { category: "RATE_LIMIT" }); throw error; }, updateTask: async () => undefined, recordActivity: async (event) => events.push(event) });
+  assert.deepEqual(events, [{ state: "OPEN", errorCategory: null, runId: "run-1" }, { state: null, errorCategory: "RATE_LIMIT", runId: "run-1" }]);
+});
