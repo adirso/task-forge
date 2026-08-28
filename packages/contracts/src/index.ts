@@ -95,7 +95,7 @@ export const deliveryMonitorLeaseSchema = z.object({
 export const deliveryMonitorAuditEventSchema = z.object({
   runId: z.string().uuid(),
   taskId: z.string().uuid(),
-  event: z.enum(["SYNC_STARTED", "SYNC_COMPLETED", "SYNC_FAILED", "LEASE_RECLAIMED"]),
+  event: z.enum(["SYNC_STARTED", "SYNC_COMPLETED", "SYNC_FAILED", "LEASE_UNAVAILABLE"]),
   occurredAt: z.string().datetime(),
   errorCategory: deliveryMonitorErrorCategorySchema.nullable(),
 });
