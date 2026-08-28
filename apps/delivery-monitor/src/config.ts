@@ -10,5 +10,11 @@ export function loadDeliveryMonitorConfig(env: NodeJS.ProcessEnv = process.env):
     pollIntervalMs: parseNumber("DELIVERY_MONITOR_POLL_INTERVAL_MS"),
     batchSize: parseNumber("DELIVERY_MONITOR_BATCH_SIZE"),
     leaseDurationMs: parseNumber("DELIVERY_MONITOR_LEASE_DURATION_MS"),
+    maxRetries: parseNumber("DELIVERY_MONITOR_MAX_RETRIES"),
   });
+}
+
+export function monitorDatabaseConfig(env: NodeJS.ProcessEnv = process.env) {
+  const driver = env.DATABASE_DRIVER === "mysql" ? "mysql" : "sqlite";
+  return driver === "mysql" ? { driver, url: env.DATABASE_URL ?? "" } : { driver, path: env.DATABASE_PATH ?? "./data/taskforge.db" };
 }
