@@ -372,7 +372,7 @@ export default function App() {
           {view === "automations" && <AutomationManager project={currentProject} users={allUsers} phases={phases} />}
           {view === "dashboard" && <ProjectDashboard project={currentProject} tasks={tasks} phases={phases} />}
           <section className={`content-area${view === "automations" ? " automations-hidden" : ""}${view === "dashboard" ? " dashboard-hidden" : ""}`}>
-            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {
+            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} currentUser={user} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {
               setPhases(updated);
               setBoardPhaseId((selectedId) => updated.some((phase) => phase.id === selectedId) ? selectedId : resolveBoardPhase(updated)?.id ?? null);
               if (!deletedPhaseId) return;
