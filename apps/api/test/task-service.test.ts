@@ -192,6 +192,31 @@ test("tasks can move between any statuses enabled by the project workflow", asyn
   await service.update({ actor: { userId: "owner-1", kind: "HUMAN", role: "ADMIN", tokenScopes: null } }, task.id, { status: "READY_FOR_REVIEW" });
 });
 
+test("agent API clients may hand off published task evidence without a Smithy run", async () => {
+  const task = {
+    id: "task-manual-handoff", projectId: "project-1", number: 65, title: "Manual handoff", description: "", definitionOfDone: "",
+    status: "IN_PROGRESS", priority: "MEDIUM", type: "FEATURE", assigneeId: "agent-1", creatorId: "owner-1", parentId: null,
+    branch: "agent/manual", dueDate: null, estimatePoints: null, phaseId: null,
+    pullRequestUrl: "https://github.com/acme/app/pull/65", pullRequestTitle: "Manual handoff", pullRequestState: "OPEN",
+    position: 0, createdAt: "", updatedAt: "",
+  } as const;
+  let updated = task;
+  const set = repositories({
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["IN_PROGRESS", "READY_FOR_REVIEW"], defaultStatus: "IN_PROGRESS", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    tasks: { findById: async () => updated, update: async (_id: string, input: Record<string, unknown>) => { updated = { ...task, ...input }; return updated; } } as never,
+  });
+  const service = new TaskApplicationService({ run: async (work) => work(set) });
+  const result = await service.update({ actor: { userId: "agent-1", name: "Builder", kind: "AGENT", role: "MEMBER", tokenScopes: null } }, task.id, { status: "READY_FOR_REVIEW" });
+  assert.equal(result.status, "READY_FOR_REVIEW");
+});
+
+test("agent handoff without a run still rejects missing publication evidence", async () => {
+  const task = { id: "task-unpublished", projectId: "project-1", number: 66, title: "Unpublished", description: "", definitionOfDone: "", status: "IN_PROGRESS", priority: "MEDIUM", type: "FEATURE", assigneeId: "agent-1", creatorId: "owner-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "" } as const;
+  const set = repositories({ tasks: { findById: async () => task } as never });
+  const service = new TaskApplicationService({ run: async (work) => work(set) });
+  await assert.rejects(() => service.update({ actor: { userId: "agent-1", name: "Builder", kind: "AGENT", role: "MEMBER", tokenScopes: null } }, task.id, { status: "READY_FOR_REVIEW" }), /published branch, head SHA, and pull request evidence/);
+});
+
 test("claim emits a status-changed event with the source status", async () => {
   const deliveries: Array<Record<string, unknown>> = [];
   const claimed = { id: "task-claim", projectId: "project-1", number: 64, title: "Claimed", description: "", definitionOfDone: "", status: "IN_PROGRESS", priority: "HIGH", type: "FEATURE", assigneeId: "agent-1", creatorId: "owner-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "", previousStatus: "TODO" };
