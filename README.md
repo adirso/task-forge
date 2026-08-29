@@ -149,6 +149,12 @@ branch. The `Version guard` check rejects unchanged, lower, or malformed
 versions and must be marked as a required status check in the protected
 `main`/`master` branch rules.
 
+Every merge to `main` or `master` triggers the **Release tag** workflow. It
+validates the manifest and creates an annotated `vMAJOR.MINOR.PATCH` tag on the
+exact merged commit. Re-running a workflow is safe when the tag already points
+to that commit; a conflicting tag causes a visible failure and must be resolved
+before retrying. The workflow has only `contents: write` permission.
+
 ## API overview
 
 All application endpoints are under `/api`. Send either a human JWT or agent token as `Authorization: Bearer <credential>`.

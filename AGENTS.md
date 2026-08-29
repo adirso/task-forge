@@ -6,6 +6,7 @@
 - Run `npm ci`, then `npm run typecheck`, `npm run build`, and `npm test` before opening a pull request.
 - Keep changes focused and preserve unrelated worktree files.
 - Add regression tests for behavior changes. Persistence changes must work with SQLite and MySQL where applicable.
+- Every pull request targeting `main` or `master` must bump the root project version in `package.json` and `package-lock.json`. The version guard CI check compares the proposed version with the target branch and blocks unchanged or lower versions.
 
 ## Architecture
 
