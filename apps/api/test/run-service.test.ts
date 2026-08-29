@@ -4,7 +4,7 @@ import { AgentRunApplicationService } from "../src/application/run-service.js";
 import type { AgentRunEntity, ProjectEntity, TaskEntity } from "../src/application/models.js";
 import type { RepositorySet } from "../src/application/repositories.js";
 
-const project: ProjectEntity = { id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000", availableStatuses: ["TODO", "IN_PROGRESS", "DONE"], defaultStatus: "TODO", ownerId: "owner-1", createdAt: "", updatedAt: "" };
+const project: ProjectEntity = { id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000", availableStatuses: ["TODO", "IN_PROGRESS", "DONE"], defaultStatus: "TODO", agentWorkflow: null, hiddenEmptyStatuses: ["TODO", "IN_PROGRESS", "DONE"], mergeTarget: "main", ownerId: "owner-1", createdAt: "", updatedAt: "" };
 const task: TaskEntity = { id: "task-1", projectId: project.id, number: 1, title: "Run", description: "", definitionOfDone: "", status: "TODO", priority: "MEDIUM", type: "FEATURE", assigneeId: null, creatorId: "owner-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "" };
 const actor = { actor: { userId: "runner-1", name: "Runner", kind: "AGENT" as const, role: "MEMBER" as const, tokenScopes: null } };
 

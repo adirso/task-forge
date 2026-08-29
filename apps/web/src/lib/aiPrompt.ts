@@ -1,4 +1,4 @@
-import { TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES, type Project, type Task } from "@taskforge/contracts";
+import { TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES, phaseBranchName, type Project, type Task } from "@taskforge/contracts";
 
 export type AIProvider = "claude-code" | "codex" | "cursor";
 export type AIPromptMode = "IMPLEMENT" | "REVIEW" | "FIX" | "RE_REVIEW";
@@ -56,6 +56,9 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
   const providerMeta = aiProviders.find((item) => item.id === provider)!;
   const taskKey = `${project.key}-${task.number}`;
   const branch = suggestedTaskBranch(project, task);
+  const phaseMergeInstruction = project.mergeTarget === "phase" && phaseNumber !== null
+    ? `- This project uses phase-branch delivery. Target task pull requests at the active phase branch \`${phaseBranchName(project.key, phaseNumber)}\`; create or reuse that branch before opening the PR. The phase branch is merged to main only after every task in the phase is complete.`
+    : "- This project targets the main/master branch directly for task pull requests.";
   const existingBranch = task.branch?.trim() || null;
   const normalizedApiBase = apiBaseUrl.replace(/\/$/, "");
   const contextEndpoint = `${normalizedApiBase}/context?project=${encodeURIComponent(project.key)}&task=${encodeURIComponent(taskKey)}`;
@@ -155,6 +158,7 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
     `- Suggested branch: ${branch}`,
     `- TaskForge URL: ${contextUrl}`,
     `- Attachments: ${task.attachments.length} (list with GET ${attachmentsEndpoint}; download each attachment using its downloadUrl)`,
+    `- Merge target: ${project.mergeTarget === "phase" ? "active phase branch" : "main/master"}`,
     "",
     ...modeInstructions,
     "",
@@ -170,6 +174,7 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
     "- Before every status change, use project.availableStatuses from the latest context response and never PATCH a disabled status.",
     "- If this prompt came from a signed assignment with a runId, preserve that runId on status changes and run callbacks; redact tokens, secrets, and credentials from updates, logs, and findings.",
     startInstruction,
+    phaseMergeInstruction,
     `- Post meaningful progress and blocker notes to POST ${updatesEndpoint} with a JSON body containing the body field. Human updates should summarize decisions and handoffs; provider output belongs in agent logs when available.`,
     `- For Fix needed and Re-review, use GET ${agentLogsEndpoint} alongside ${updatesEndpoint} to recover the latest findings before acting.`,
     pullRequestInstruction,

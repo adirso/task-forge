@@ -207,7 +207,7 @@ export default function App() {
   async function createProject(input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) {
     const { project } = await api.createProject(input); setProjects((items) => [project, ...items]); setShowSettings(false); await loadProject(project.id); flash("Project created");
   }
-  async function updateProject(input: { name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses: TaskStatus[]; defaultStatus: TaskStatus; agentWorkflow?: import("@taskforge/contracts").AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[] }) {
+  async function updateProject(input: { name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses: TaskStatus[]; defaultStatus: TaskStatus; agentWorkflow?: import("@taskforge/contracts").AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[]; mergeTarget?: "main" | "phase" }) {
     if (!currentProject) return;
     const { project } = await api.updateProject(currentProject.id, input);
     setCurrentProject((current) => current?.id === project.id ? { ...current, ...project } : current);
@@ -372,7 +372,7 @@ export default function App() {
           {view === "automations" && <AutomationManager project={currentProject} users={allUsers} phases={phases} />}
           {view === "dashboard" && <ProjectDashboard project={currentProject} tasks={tasks} phases={phases} />}
           <section className={`content-area${view === "automations" ? " automations-hidden" : ""}${view === "dashboard" ? " dashboard-hidden" : ""}`}>
-            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {
+            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} currentUser={user} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {
               setPhases(updated);
               setBoardPhaseId((selectedId) => updated.some((phase) => phase.id === selectedId) ? selectedId : resolveBoardPhase(updated)?.id ?? null);
               if (!deletedPhaseId) return;
@@ -384,7 +384,7 @@ export default function App() {
       </main>
       {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? currentProject.defaultStatus} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} availableTags={tags} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
       {showProjectModal && <ProjectModal projects={projects} onClose={() => setShowProjectModal(false)} onSave={createProject} />}
-      {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onEnableWorkflow={enableAgentWorkflow} onSave={async ({ name, description, repoUrl, localRepoPath, color, availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses }) => updateProject({ name, description, repoUrl, localRepoPath, color, availableStatuses: availableStatuses!, defaultStatus: defaultStatus!, agentWorkflow, hiddenEmptyStatuses })} />}
+      {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onEnableWorkflow={enableAgentWorkflow} onSave={async ({ name, description, repoUrl, localRepoPath, color, availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget }) => updateProject({ name, description, repoUrl, localRepoPath, color, availableStatuses: availableStatuses!, defaultStatus: defaultStatus!, agentWorkflow, hiddenEmptyStatuses, mergeTarget })} />}
       {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
       {showMembersModal && currentProject && <ProjectMembersModal project={currentProject} users={allUsers} currentUser={user} onClose={() => setShowMembersModal(false)} onChanged={applyProjectMembers} />}
       {showLogoutConfirm && <LogoutConfirmModal user={user} onClose={() => setShowLogoutConfirm(false)} onConfirm={logout} />}

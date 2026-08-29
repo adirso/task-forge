@@ -1,4 +1,4 @@
-import type { AgentWorkflow, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
+import type { AgentWorkflow, ProjectMergeTarget, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
 
 export interface UserEntity {
   id: string;
@@ -169,6 +169,7 @@ export interface ProjectEntity {
   defaultStatus: TaskStatus;
   agentWorkflow: AgentWorkflow | null;
   hiddenEmptyStatuses: TaskStatus[];
+  mergeTarget: ProjectMergeTarget;
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -184,6 +185,7 @@ export interface PhaseEntity {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  branchName?: string | null;
   taskCount?: number;
   nonDoneTaskCount?: number;
   completedTaskCount?: number;

@@ -5,6 +5,7 @@ import { createUnitOfWork } from "../infrastructure/database.js";
 import { PhaseApplicationService } from "../application/resource-services.js";
 
 type ProjectParams = { projectId: string };
+type ProjectPhaseParams = { projectId: string; id: string };
 type PhaseParams = { id: string };
 const service = new PhaseApplicationService(createUnitOfWork(db));
 const requestContext = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: (request.authUser.tokenScopes ?? null) as import("../application/context.js").TokenScope[] | null } });
@@ -20,4 +21,6 @@ export async function phaseRoutes(app: FastifyInstance) {
     await service.delete(requestContext(request), request.params.id, options);
     return reply.code(204).send();
   });
+  app.post<{ Params: ProjectPhaseParams }>("/projects/:projectId/phases/:id/branch", async (request) => ({ branch: await service.ensureBranch(projectContext(request, request.params.projectId), request.params.id) }));
+  app.post<{ Params: ProjectPhaseParams }>("/projects/:projectId/phases/:id/merge-to-main", async (request) => ({ merge: await service.mergeToMain(projectContext(request, request.params.projectId), request.params.id) }));
 }
