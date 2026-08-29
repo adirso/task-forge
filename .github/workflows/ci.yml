@@ -109,6 +109,11 @@ jobs:
           set -o pipefail
           npm run test:mysql -w @taskforge/api 2>&1 | tee artifacts/api-mysql.log
 
+      - name: Test Delivery Monitor with MySQL
+        run: |
+          set -o pipefail
+          npm run test:mysql -w @taskforge/delivery-monitor 2>&1 | tee artifacts/delivery-monitor-mysql.log
+
       - name: Capture MySQL service logs
         if: failure()
         run: docker logs "${{ job.services.mysql.id }}" > artifacts/mysql-service.log 2>&1 || true

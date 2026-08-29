@@ -33,3 +33,16 @@ test("records redacted operator activity for observations and failures with run 
   await syncTask({ ...base, runId: "run-1" }, { fetchPullRequest: async () => { const error = new Error("rate limited"); Object.assign(error, { category: "RATE_LIMIT" }); throw error; }, updateTask: async () => undefined, recordActivity: async (event) => events.push(event) });
   assert.deepEqual(events, [{ state: "OPEN", errorCategory: null, runId: "run-1" }, { state: null, errorCategory: "RATE_LIMIT", runId: "run-1" }]);
 });
+
+test("missing pull requests are skipped and provider failures do not transition status", async () => {
+  let updates = 0;
+  const missing = await syncTask({ ...base, pullRequestUrl: null }, { updateTask: async () => { updates += 1; } });
+  assert.equal(missing.skipped, true);
+  const invalid = await syncTask(base, {
+    fetchPullRequest: async () => { throw Object.assign(new Error("unsupported URL"), { category: "INVALID_URL" }); },
+    updateTask: async () => { updates += 1; },
+  });
+  assert.equal(invalid.errorCategory, "INVALID_URL");
+  assert.equal(invalid.transitionedTo, null);
+  assert.equal(updates, 0);
+});
