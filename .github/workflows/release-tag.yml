@@ -1,0 +1,56 @@
+name: Release tag
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-tag-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out merged commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Validate release tag logic
+        run: npm run test:release-tag
+
+      - name: Resolve release tag
+        id: version
+        run: echo "tag=$(node scripts/release-tag.mjs)" >> "$GITHUB_OUTPUT"
+
+      - name: Create or verify annotated tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if git show-ref --tags --verify --quiet "refs/tags/$TAG"; then
+            existing="$(git rev-list -n 1 "$TAG")"
+            if [ "$existing" != "$COMMIT" ]; then
+              echo "Release tag $TAG already points to a different commit" >&2
+              exit 1
+            fi
+            echo "Release tag $TAG already points to $COMMIT; retry is idempotent."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "$TAG" "$COMMIT" --message "Release $TAG"
+          git push origin "refs/tags/$TAG"
