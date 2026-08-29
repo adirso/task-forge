@@ -20,6 +20,7 @@ process.env.TEST = "1";
 
 const { db } = await import("../src/db/database.js");
 const { buildApp } = await import("../src/app.js");
+const { syncTask } = await import("../../delivery-monitor/src/sync.js");
 const app = await buildApp();
 
 const adminId = randomUUID();
@@ -951,4 +952,28 @@ test("delivery monitor task checkpoint is project-authorized and observable", as
   const strangerLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: `stranger-${strangerId}@example.com`, password: "password123" } });
   const memberResponse = await app.inject({ method: "GET", url: `/api/delivery-monitor/tasks/${taskId}`, headers: { authorization: `Bearer ${strangerLogin.json().token}` } });
   assert.equal(memberResponse.statusCode, 403);
+});
+
+test("delivery monitor terminal observations apply API status transitions", async () => {
+  const project = await app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: {
+    availableStatuses: ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "APPROVED", "DONE", "CANCELLED"],
+    defaultStatus: "TODO",
+  } });
+  assert.equal(project.statusCode, 200, project.body);
+  const created = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: {
+    title: "Monitor terminal transition", status: "APPROVED", pullRequestUrl: "https://github.com/example/repo/pull/99",
+  } });
+  assert.equal(created.statusCode, 201, created.body);
+  const id = created.json().task.id as string;
+  const observed = await syncTask({ id, status: "APPROVED", approvalStatus: "APPROVED", pullRequestUrl: "https://github.com/example/repo/pull/99", availableStatuses: project.json().project.availableStatuses }, {
+    fetchPullRequest: async () => ({ state: "MERGED", headSha: "a".repeat(40), etag: "etag-99" }),
+    updateTask: async (patch) => {
+      const response = await app.inject({ method: "PATCH", url: `/api/tasks/${id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: patch });
+      assert.equal(response.statusCode, 200, response.body);
+    },
+  });
+  assert.equal(observed.transitionedTo, "DONE");
+  const terminal = await app.inject({ method: "GET", url: `/api/tasks/${id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(terminal.json().task.status, "DONE");
+  assert.equal(terminal.json().task.pullRequestState, "MERGED");
 });

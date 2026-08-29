@@ -5,6 +5,7 @@ import { fetchGithubPullRequest, GithubMonitorError } from "../src/github.js";
 const response = (status: number, body: unknown, headers: Record<string,string> = {}) => new Response(JSON.stringify(body), { status, headers });
 test("maps GitHub merged, closed, draft and open responses", async () => {
   const run = (body: unknown) => fetchGithubPullRequest("https://github.com/acme/app/pull/1", undefined, async () => response(200, body));
+  assert.equal((await run({ state: "open", merged_at: null, draft: false })).state, "OPEN");
   assert.equal((await run({ state: "closed", merged_at: "now", draft: false })).state, "MERGED");
   assert.equal((await run({ state: "closed", merged_at: null, draft: false })).state, "CLOSED");
   assert.equal((await run({ state: "open", merged_at: null, draft: true })).state, "DRAFT");

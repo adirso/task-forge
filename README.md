@@ -221,6 +221,8 @@ Smithy persists handoff evidence by `runId`. `IN_PROGRESS` with a pending handof
 
 ## Delivery Monitor
 
+See the complete [Delivery Monitor operator runbook](docs/DELIVERY_MONITOR_RUNBOOK.md) for setup, recovery, and troubleshooting.
+
 The Delivery Monitor is an optional worker that polls pull requests attached to tasks in the configured project workflow approval status (`agentWorkflow.approved`). It is deliberately separate from Smithy and uses a least-privilege GitHub App. Start it with `npm run dev:delivery-monitor`; run one poll with `npm run delivery-monitor:sync`.
 
 Configuration is supplied through environment variables: `GITHUB_APP_ID`, `GITHUB_INSTALLATION_ID`, and `GITHUB_PRIVATE_KEY` (all three are required together), `DELIVERY_MONITOR_POLL_INTERVAL_MS` (default 60000, 5 seconds–15 minutes), `DELIVERY_MONITOR_BATCH_SIZE` (default 100, maximum 500), and `DELIVERY_MONITOR_LEASE_DURATION_MS` (default 120000). Credentials are never written to logs or TaskForge updates. Polling is disabled with `DELIVERY_MONITOR_ENABLED=false`.
