@@ -141,6 +141,14 @@ Keep SQL and driver-specific behavior in repositories, authorization and orchest
 
 Every pull request and push to `main` runs the required **Quality and SQLite**, **API on MySQL 8**, and **Browser E2E** checks. Browser E2E can be run locally with `npm run test:e2e` after `npm run test:e2e:install`.
 
+The root `package.json` is the single source of truth for the release version;
+keep `package-lock.json` synchronized when changing it (for example, with
+`npm version --no-git-tag-version <major.minor.patch>`). Every pull request
+must increase the strict `MAJOR.MINOR.PATCH` version relative to its base
+branch. The `Version guard` check rejects unchanged, lower, or malformed
+versions and must be marked as a required status check in the protected
+`main`/`master` branch rules.
+
 ## API overview
 
 All application endpoints are under `/api`. Send either a human JWT or agent token as `Authorization: Bearer <credential>`.

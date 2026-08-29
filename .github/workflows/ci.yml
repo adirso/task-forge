@@ -18,6 +18,26 @@ env:
   NODE_VERSION: 22
 
 jobs:
+  version-guard:
+    name: Version guard
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Fetch pull-request base
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+      - name: Test version guard
+        run: npm run test:version
+      - name: Require an increased version
+        run: BASE_VERSION="$(git show "origin/${{ github.base_ref }}:package.json" | node -e 'let d=""; process.stdin.on("data", c => d += c).on("end", () => process.stdout.write(JSON.parse(d).version))')" node scripts/check-version.mjs
+
   quality-sqlite:
     name: Quality and SQLite
     runs-on: ubuntu-latest

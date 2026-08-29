@@ -18,6 +18,7 @@
     "dev:agents": "npm run dev -w @taskforge/smithy",
     "dev:delivery-monitor": "npm run dev -w @taskforge/delivery-monitor",
     "delivery-monitor:sync": "npm run sync -w @taskforge/delivery-monitor",
+    "test:version": "node --test scripts/check-version.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium"
   },
