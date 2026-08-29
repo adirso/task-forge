@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ActivityApplicationService, ConflictError, DashboardApplicationService, ForbiddenError, NotFoundError, UserApplicationService, ValidationError, type ProjectEntity, type RepositorySet, type RequestContext, type TaskEntity, type UnitOfWork, type UserEntity } from "../src/application/index.js";
+import { ActivityApplicationService, ConflictError, DashboardApplicationService, ForbiddenError, NotFoundError, PhaseApplicationService, UserApplicationService, ValidationError, type PhaseEntity, type ProjectEntity, type RepositorySet, type RequestContext, type TaskEntity, type UnitOfWork, type UserEntity } from "../src/application/index.js";
 
 const adminContext: RequestContext = { actor: { userId: "admin-1", name: "Admin", kind: "HUMAN", role: "ADMIN", tokenScopes: null } };
 const memberContext: RequestContext = { actor: { userId: "member-1", name: "Member", kind: "HUMAN", role: "MEMBER", tokenScopes: null } };
@@ -13,6 +13,29 @@ test("application errors expose stable transport-independent codes", () => {
   assert.equal(new ForbiddenError().code, "FORBIDDEN");
   assert.equal(new NotFoundError("Task").code, "NOT_FOUND");
   assert.equal(new ValidationError("invalid input").code, "VALIDATION");
+});
+
+test("phase delivery creates a reusable branch and guards the final merge", async () => {
+  const phase: PhaseEntity = { id: "phase-1", projectId: "project-1", number: 2, goal: "Ship", isActive: true, branchName: null, createdAt: "now", updatedAt: "now" };
+  const projectEntity = { ...project({ id: "project-1", key: "TAS!" }), mergeTarget: "phase" as const };
+  let incomplete = true;
+  const repositories = {
+    projects: { findById: async () => projectEntity },
+    phases: { findById: async () => phase, update: async (_id: string, input: Partial<PhaseEntity>) => Object.assign(phase, input) },
+    memberships: { isMember: async () => true },
+    tasks: { hasIncompleteByPhase: async () => incomplete },
+  } as unknown as RepositorySet;
+  const service = new PhaseApplicationService(unitOfWork(repositories));
+  const context: RequestContext = { actor: { userId: "admin-1", name: "Admin", kind: "HUMAN", role: "ADMIN", tokenScopes: null }, projectId: "project-1" };
+  const first = await service.ensureBranch(context, phase.id);
+  const second = await service.ensureBranch(context, phase.id);
+  assert.equal(first.branchName, "phase/tas--2");
+  assert.equal(second.branchName, first.branchName);
+  await assert.rejects(() => service.mergeToMain(context, phase.id), ValidationError);
+  incomplete = false;
+  assert.equal((await service.mergeToMain(context, phase.id)).target, "main");
+  const memberRequest = { ...context, actor: memberContext.actor };
+  await assert.rejects(() => service.mergeToMain(memberRequest, phase.id), ForbiddenError);
 });
 
 test("dashboard service authorizes projects and assembles reporting responses", async () => {

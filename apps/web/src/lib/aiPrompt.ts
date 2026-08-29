@@ -1,4 +1,4 @@
-import { TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES, type Project, type Task } from "@taskforge/contracts";
+import { TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES, phaseBranchName, type Project, type Task } from "@taskforge/contracts";
 
 export type AIProvider = "claude-code" | "codex" | "cursor";
 export type AIPromptMode = "IMPLEMENT" | "REVIEW" | "FIX" | "RE_REVIEW";
@@ -57,7 +57,7 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
   const taskKey = `${project.key}-${task.number}`;
   const branch = suggestedTaskBranch(project, task);
   const phaseMergeInstruction = project.mergeTarget === "phase" && phaseNumber !== null
-    ? `- This project uses phase-branch delivery. Target task pull requests at the active phase branch \`phase/${project.key.toLowerCase()}-${phaseNumber}\`; create or reuse that branch before opening the PR. The phase branch is merged to main only after every task in the phase is complete.`
+    ? `- This project uses phase-branch delivery. Target task pull requests at the active phase branch \`${phaseBranchName(project.key, phaseNumber)}\`; create or reuse that branch before opening the PR. The phase branch is merged to main only after every task in the phase is complete.`
     : "- This project targets the main/master branch directly for task pull requests.";
   const existingBranch = task.branch?.trim() || null;
   const normalizedApiBase = apiBaseUrl.replace(/\/$/, "");
