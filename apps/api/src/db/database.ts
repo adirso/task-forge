@@ -607,8 +607,14 @@ export const migrations: readonly Migration[] = [
     version: "0021_project_merge_target",
     async up(executor, dialect) {
       await executor.run(dialect === "mysql"
-        ? "ALTER TABLE projects ADD COLUMN merge_target VARCHAR(10) NOT NULL DEFAULT 'main'"
+        ? "ALTER TABLE projects ADD COLUMN merge_target VARCHAR(10) NOT NULL DEFAULT 'main' CHECK (merge_target IN ('main','phase'))"
         : "ALTER TABLE projects ADD COLUMN merge_target TEXT NOT NULL DEFAULT 'main' CHECK (merge_target IN ('main','phase'))", []);
+    },
+  },
+  {
+    version: "0022_phase_branch_name",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql" ? "ALTER TABLE phases ADD COLUMN branch_name VARCHAR(255) NULL" : "ALTER TABLE phases ADD COLUMN branch_name TEXT NULL", []);
     },
   },
 ];

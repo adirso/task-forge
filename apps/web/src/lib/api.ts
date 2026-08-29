@@ -369,9 +369,11 @@ export const api = {
   createPhase: (projectId: string, input: { number: number; goal: string; isActive: boolean }) => request<{ phase: Phase }>(`/projects/${projectId}/phases`, { method: "POST", body: input }),
   updatePhase: (id: string, input: Partial<{ number: number; goal: string; isActive: boolean }>) => request<{ phase: Phase }>(`/phases/${id}`, { method: "PATCH", body: input }),
   deletePhase: (id: string, input?: { taskAction?: "move" | "delete"; targetPhaseId?: string }) => request<void>(`/phases/${id}`, { method: "DELETE", body: input ?? {} }),
+  ensurePhaseBranch: (projectId: string, phaseId: string) => request<{ branch: { phaseId: string; branchName: string } }>(`/projects/${projectId}/phases/${phaseId}/branch`, { method: "POST" }),
+  mergePhaseToMain: (projectId: string, phaseId: string) => request<{ merge: { phaseId: string; branchName: string; target: "main" } }>(`/projects/${projectId}/phases/${phaseId}/merge-to-main`, { method: "POST" }),
   createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
-  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"] }) =>
+  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"]; mergeTarget?: Project["mergeTarget"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),
   enableAgentWorkflow: (id: string) => request<{ project: Project }>(`/projects/${id}/agent-workflow/enable`, { method: "POST" }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),

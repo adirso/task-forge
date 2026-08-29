@@ -44,6 +44,8 @@ export interface PhaseService {
   create(context: ProjectContext, input: { number: number; goal: string; isActive: boolean }): Promise<PhaseEntity>;
   update(context: RequestContext, phaseId: string, input: Partial<Pick<PhaseEntity, "number" | "goal" | "isActive">>): Promise<PhaseEntity>;
   delete(context: RequestContext, phaseId: string, options?: { taskAction?: "move" | "delete"; targetPhaseId?: string }): Promise<void>;
+  ensureBranch(context: ProjectContext, phaseId: string): Promise<{ phaseId: string; branchName: string }>;
+  mergeToMain(context: ProjectContext, phaseId: string): Promise<{ phaseId: string; branchName: string; target: "main" }>;
 }
 
 export interface TaskService {

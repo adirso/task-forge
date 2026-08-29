@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, agentWorkflowSchema } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, agentWorkflowSchema, phaseBranchName } from "@taskforge/contracts";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { PhaseEntity, ProjectEntity, UserEntity } from "./models.js";
@@ -101,6 +101,8 @@ export class PhaseApplicationService implements PhaseService {
       await repositories.phases.delete(phaseId);
     });
   }
+  async ensureBranch(context: ProjectContext, phaseId: string) { return this.unitOfWork.run(async (repositories) => { const phase = await repositories.phases.findById(phaseId); if (!phase || phase.projectId !== context.projectId) throw new NotFoundError("Phase"); const project = await projectAccess(repositories, context, context.projectId); if (project.mergeTarget !== "phase") throw new ValidationError("Phase branches are disabled for this project"); const branchName = phase.branchName ?? phaseBranchName(project.key, phase.number); if (!phase.branchName) await repositories.phases.update(phase.id, { branchName }); return { phaseId: phase.id, branchName }; }); }
+  async mergeToMain(context: ProjectContext, phaseId: string) { return this.unitOfWork.run(async (repositories) => { const phase = await repositories.phases.findById(phaseId); if (!phase || phase.projectId !== context.projectId) throw new NotFoundError("Phase"); const project = await projectAccess(repositories, context, context.projectId); if (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can merge a phase to main"); if (project.mergeTarget !== "phase") throw new ValidationError("Phase-to-main merge is only available in phase mode"); if (await repositories.tasks.hasIncompleteByPhase(phaseId)) throw new ValidationError("Every task in the phase must be DONE or CANCELLED before merging to main"); const branchName = phase.branchName ?? phaseBranchName(project.key, phase.number); if (!phase.branchName) await repositories.phases.update(phase.id, { branchName }); return { phaseId: phase.id, branchName, target: "main" as const }; }); }
 }
 
 export class UserApplicationService implements UserService {

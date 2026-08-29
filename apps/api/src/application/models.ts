@@ -185,6 +185,7 @@ export interface PhaseEntity {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  branchName?: string | null;
   taskCount?: number;
   nonDoneTaskCount?: number;
   completedTaskCount?: number;

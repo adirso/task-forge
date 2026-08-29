@@ -38,7 +38,7 @@ export interface PhaseRepository {
   findActive(projectId: string): Promise<PhaseEntity | null>;
   deactivateOthers(projectId: string, phaseId?: string): Promise<void>;
   create(input: PhaseEntity): Promise<PhaseEntity>;
-  update(id: string, input: Partial<Pick<PhaseEntity, "number" | "goal" | "isActive">>): Promise<PhaseEntity>;
+  update(id: string, input: Partial<Pick<PhaseEntity, "number" | "goal" | "isActive" | "branchName">>): Promise<PhaseEntity>;
   delete(id: string): Promise<void>;
 }
 
@@ -54,6 +54,7 @@ export interface TaskRepository {
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   unassignForProjectMember(projectId: string, userId: string): Promise<void>;
   countByPhase(phaseId: string): Promise<number>;
+  hasIncompleteByPhase(phaseId: string): Promise<boolean>;
   reassignPhase(fromPhaseId: string, toPhaseId: string): Promise<number>;
   deleteByPhase(phaseId: string): Promise<number>;
   create(input: TaskEntity): Promise<TaskEntity>;

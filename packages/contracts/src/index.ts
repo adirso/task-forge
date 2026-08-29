@@ -29,6 +29,9 @@ export const agentWorkflowSchema = z.object({
 });
 export const projectMergeTargetSchema = z.enum(["main", "phase"]);
 export type ProjectMergeTarget = z.infer<typeof projectMergeTargetSchema>;
+export function phaseBranchName(projectKey: string, phaseNumber: number) {
+  return `phase/${projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-")}-${phaseNumber}`;
+}
 export type AgentWorkflow = z.infer<typeof agentWorkflowSchema>;
 export const DEFAULT_AGENT_WORKFLOW: AgentWorkflow = {
   implementationQueue: "TODO",
@@ -383,6 +386,7 @@ export interface Phase {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  branchName?: string | null;
   taskCount?: number;
   nonDoneTaskCount?: number;
   completedTaskCount?: number;

@@ -62,7 +62,7 @@ function toProject(row: Row): ProjectEntity {
 }
 
 function toPhase(row: Row): PhaseEntity {
-  return { id: text(row.id), projectId: text(row.project_id), number: Number(row.number), goal: text(row.goal), isActive: Boolean(row.is_active), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}), ...(row.non_done_task_count !== undefined ? { nonDoneTaskCount: Number(row.non_done_task_count) } : {}), ...(row.completed_task_count !== undefined ? { completedTaskCount: Number(row.completed_task_count) } : {}), ...(row.cancelled_task_count !== undefined ? { cancelledTaskCount: Number(row.cancelled_task_count) } : {}) };
+  return { id: text(row.id), projectId: text(row.project_id), number: Number(row.number), goal: text(row.goal), isActive: Boolean(row.is_active), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.branch_name != null ? { branchName: String(row.branch_name) } : {}), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}), ...(row.non_done_task_count !== undefined ? { nonDoneTaskCount: Number(row.non_done_task_count) } : {}), ...(row.completed_task_count !== undefined ? { completedTaskCount: Number(row.completed_task_count) } : {}), ...(row.cancelled_task_count !== undefined ? { cancelledTaskCount: Number(row.cancelled_task_count) } : {}) };
 }
 
 function toTask(row: Row): TaskEntity {
@@ -222,8 +222,8 @@ function createPhaseRepository(db: DatabasePort): PhaseRepository {
     async findById(id) { const row = await db.prepare("SELECT * FROM phases WHERE id = ?").get(id); return row ? toPhase(row) : null; },
     async findActive(projectId) { const row = await db.prepare("SELECT * FROM phases WHERE project_id = ? AND is_active = 1").get(projectId); return row ? toPhase(row) : null; },
     async deactivateOthers(projectId, phaseId) { await db.prepare("UPDATE phases SET is_active = 0, updated_at = ? WHERE project_id = ? AND (? IS NULL OR id != ?)").run(new Date().toISOString(), projectId, phaseId ?? null, phaseId ?? null); },
-    async create(input) { await db.prepare("INSERT INTO phases (id, project_id, number, goal, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(input.id, input.projectId, input.number, input.goal, input.isActive ? 1 : 0, input.createdAt, input.updatedAt); return input; },
-    async update(id, input) { const fields: string[] = []; const values: unknown[] = []; if (input.number !== undefined) { fields.push("number = ?"); values.push(input.number); } if (input.goal !== undefined) { fields.push("goal = ?"); values.push(input.goal); } if (input.isActive !== undefined) { fields.push("is_active = ?"); values.push(input.isActive ? 1 : 0); } fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE phases SET ${fields.join(", ")} WHERE id = ?`).run(...values); const row = await db.prepare("SELECT * FROM phases WHERE id = ?").get(id); if (!row) throw new Error("Phase not found after update"); return toPhase(row); },
+    async create(input) { await db.prepare("INSERT INTO phases (id, project_id, number, goal, is_active, branch_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.projectId, input.number, input.goal, input.isActive ? 1 : 0, input.branchName ?? null, input.createdAt, input.updatedAt); return input; },
+    async update(id, input) { const fields: string[] = []; const values: unknown[] = []; if (input.number !== undefined) { fields.push("number = ?"); values.push(input.number); } if (input.goal !== undefined) { fields.push("goal = ?"); values.push(input.goal); } if (input.isActive !== undefined) { fields.push("is_active = ?"); values.push(input.isActive ? 1 : 0); } if (input.branchName !== undefined) { fields.push("branch_name = ?"); values.push(input.branchName); } fields.push("updated_at = ?"); values.push(new Date().toISOString(), id); await db.prepare(`UPDATE phases SET ${fields.join(", ")} WHERE id = ?`).run(...values); const row = await db.prepare("SELECT * FROM phases WHERE id = ?").get(id); if (!row) throw new Error("Phase not found after update"); return toPhase(row); },
     async delete(id) { await db.prepare("DELETE FROM phases WHERE id = ?").run(id); },
   };
 }
@@ -279,6 +279,7 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       return rows.map((row) => ({ ...toTask(row), projectName: text(row.project_name), projectKey: text(row.project_key) }));
     },
     async listUsedStatuses(projectId) { return (await db.prepare("SELECT DISTINCT status FROM tasks WHERE project_id = ?").all(projectId)).map((row) => row.status as TaskStatus); },
+    async hasIncompleteByPhase(phaseId) { return Boolean(await db.prepare("SELECT 1 FROM tasks WHERE phase_id = ? AND status NOT IN ('DONE','CANCELLED') LIMIT 1").get(phaseId)); },
     async claimNext(projectId, claimantId, workflow, options = {}) {
       if (!workflow.sourceStatuses.length) return null;
       const sourcePlaceholders = workflow.sourceStatuses.map(() => "?").join(", ");
