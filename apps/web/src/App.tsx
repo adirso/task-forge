@@ -21,6 +21,7 @@ import { ProjectDashboard } from "./components/ProjectDashboard";
 import { DashboardPage } from "./components/DashboardPage";
 import { MultiFilterDropdown } from "./components/MultiFilterDropdown";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
+import { canMergePhaseToMain } from "./lib/phaseMerge";
 import { priorityMeta, statusMeta } from "./lib/ui";
 
 type DefaultView = "board" | "list";
@@ -198,6 +199,16 @@ export default function App() {
     try { const { task } = await api.updateTask(id, { status }); setTasks((items) => items.map((item) => item.id === id ? task : item)); }
     catch { setTasks((items) => items.map((task) => task.id === id ? existing : task)); flash("Could not move task"); }
   }
+  async function mergeActivePhase() {
+    if (!currentProject || !activePhase) return;
+    try {
+      await api.ensurePhaseBranch(currentProject.id, activePhase.id);
+      await api.mergePhaseToMain(currentProject.id, activePhase.id);
+      flash(`Phase ${activePhase.number} merge authorized`);
+    } catch (error) {
+      flash(error instanceof ApiError ? error.message : "Could not merge phase to main");
+    }
+  }
   async function deleteSelected() {
     if (!selectedTask || !window.confirm(`Delete ${currentProject?.key}-${selectedTask.number} and any subtasks?`)) return;
     await api.deleteTask(selectedTask.id); setTasks((items) => items.filter((item) => item.id !== selectedTask.id && item.parentId !== selectedTask.id));
@@ -372,13 +383,13 @@ export default function App() {
           {view === "automations" && <AutomationManager project={currentProject} users={allUsers} phases={phases} />}
           {view === "dashboard" && <ProjectDashboard project={currentProject} tasks={tasks} phases={phases} />}
           <section className={`content-area${view === "automations" ? " automations-hidden" : ""}${view === "dashboard" ? " dashboard-hidden" : ""}`}>
-            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} currentUser={user} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {
+            {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {
               setPhases(updated);
               setBoardPhaseId((selectedId) => updated.some((phase) => phase.id === selectedId) ? selectedId : resolveBoardPhase(updated)?.id ?? null);
               if (!deletedPhaseId) return;
               if (taskAction === "delete") setTasks((items) => items.filter((task) => task.phaseId !== deletedPhaseId));
               else if (taskAction === "move" && targetPhaseId) setTasks((items) => items.map((task) => task.phaseId === deletedPhaseId ? { ...task, phaseId: targetPhaseId, phase: updated.find((phase) => phase.id === targetPhaseId) ?? task.phase } : task));
-            }} /> : view === "board" ? <>{selectedBoardPhase ? <><div className={`active-phase-banner${selectedBoardPhase.isActive ? "" : " viewing-phase"}`}><span className="phase-number-badge">{selectedBoardPhase.number}</span><div className="phase-banner-copy"><span>{selectedBoardPhase.isActive ? "Active phase" : "Viewing phase"}</span><strong>Phase {selectedBoardPhase.number}</strong><p>{selectedBoardPhase.goal}</p></div><label className="board-phase-selector"><span>Board phase</span><div><select aria-label="Board phase" value={selectedBoardPhase.id} onChange={(event) => setBoardPhaseId(event.target.value)}>{[...phases].sort((a, b) => a.number - b.number).map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select><ChevronDown /></div></label><small>{boardTasks.length} {boardTasks.length === 1 ? "task" : "tasks"}</small><button className="button button-secondary" onClick={() => setView("phases")}>Manage phases</button></div>{selectedPhaseHasTasks ? <BoardView tasks={boardTasks} project={currentProject} onOpen={setSelectedTask} onCreate={setNewTaskStatus} onMove={moveTask} /> : <div className="empty-board-phase"><Flag /><strong>No tasks in Phase {selectedBoardPhase.number}</strong><span>This phase is ready for its first task.</span><button className="button button-primary" onClick={() => setNewTaskStatus(currentProject.defaultStatus)}><Plus /> Create task</button></div>}</> : <div className="no-active-phase"><Flag /><div><strong>No active phase</strong><span>Choose an active phase to populate the board.</span></div><button className="button button-primary" onClick={() => setView("phases")}>Manage phases</button></div>}</> : <ListView tasks={visibleTasks} phases={phases} project={currentProject} onOpen={setSelectedTask} />}
+            }} /> : view === "board" ? <>{selectedBoardPhase ? <><div className={`active-phase-banner${selectedBoardPhase.isActive ? "" : " viewing-phase"}`}><span className="phase-number-badge">{selectedBoardPhase.number}</span><div className="phase-banner-copy"><span>{selectedBoardPhase.isActive ? "Active phase" : "Viewing phase"}</span><strong>Phase {selectedBoardPhase.number}</strong><p>{selectedBoardPhase.goal}</p></div><label className="board-phase-selector"><span>Board phase</span><div><select aria-label="Board phase" value={selectedBoardPhase.id} onChange={(event) => setBoardPhaseId(event.target.value)}>{[...phases].sort((a, b) => a.number - b.number).map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select><ChevronDown /></div></label><small>{boardTasks.length} {boardTasks.length === 1 ? "task" : "tasks"}</small>{currentProject.mergeTarget === "phase" && selectedBoardPhase.isActive && (user.role === "ADMIN" || currentProject.ownerId === user.id) && <button className="button button-secondary" disabled={!canMergePhaseToMain(currentProject.mergeTarget, selectedBoardPhase.nonDoneTaskCount ?? 0)} onClick={mergeActivePhase}>{canMergePhaseToMain(currentProject.mergeTarget, selectedBoardPhase.nonDoneTaskCount ?? 0) ? "Merge phase to main" : "Complete tasks to merge"}</button>}<button className="button button-secondary" onClick={() => setView("phases")}>Manage phases</button></div>{selectedPhaseHasTasks ? <BoardView tasks={boardTasks} project={currentProject} onOpen={setSelectedTask} onCreate={setNewTaskStatus} onMove={moveTask} /> : <div className="empty-board-phase"><Flag /><strong>No tasks in Phase {selectedBoardPhase.number}</strong><span>This phase is ready for its first task.</span><button className="button button-primary" onClick={() => setNewTaskStatus(currentProject.defaultStatus)}><Plus /> Create task</button></div>}</> : <div className="no-active-phase"><Flag /><div><strong>No active phase</strong><span>Choose an active phase to populate the board.</span></div><button className="button button-primary" onClick={() => setView("phases")}>Manage phases</button></div>}</> : <ListView tasks={visibleTasks} phases={phases} project={currentProject} onOpen={setSelectedTask} />}
           </section>
         </> : <DashboardPage currentUser={user} />}
       </main>
