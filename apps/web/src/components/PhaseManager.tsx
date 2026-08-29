@@ -3,7 +3,6 @@ import type { Phase, Project } from "@taskforge/contracts";
 import { CheckCircle2, Flag, Plus, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
 import { PhaseDeleteModal, type PhaseDeleteDisposition } from "./PhaseDeleteModal";
-import { canMergePhaseToMain } from "../lib/phaseMerge";
 
 export type PhaseListChange = {
   phases: Phase[];
@@ -12,10 +11,9 @@ export type PhaseListChange = {
   targetPhaseId?: string;
 };
 
-export function PhasesPage({ project, phases, currentUser, onChange }: {
+export function PhasesPage({ project, phases, onChange }: {
   project: Project;
   phases: Phase[];
-  currentUser: { id: string; role: "ADMIN" | "MEMBER" };
   onChange: (change: PhaseListChange) => void;
 }) {
   const nextNumber = Math.max(0, ...phases.map((phase) => phase.number)) + 1;
@@ -89,7 +87,7 @@ export function PhasesPage({ project, phases, currentUser, onChange }: {
   return (
     <div className="phases-page">
       <div className="phases-overview"><div><span className="modal-kicker">Planning</span><h2>Project phases</h2><p>Organize delivery windows and choose which phase supplies work to the board.</p></div><div className="phase-stats"><span><strong>{nonDonePhases}</strong>Non-done phases</span><span><strong>{nonDoneTasks}</strong>Non-done tasks</span><span><strong>{cancelledTasks}</strong>Cancelled tasks</span><span><strong>{activePhase ? `#${activePhase.number}` : "—"}</strong>Active</span></div></div>
-      <div className="phases-page-layout"><section><div className="phase-page-section-title"><h3>All phases</h3><span>{project.name}</span></div><div className="phase-list">{phases.map((phase) => <article key={phase.id} className={phase.isActive ? "active" : ""}><span className="phase-number">{phase.number}</span><div><span><strong>Phase {phase.number}</strong>{phase.isActive && <em><CheckCircle2 /> Active</em>}</span><p>{phase.goal}</p><small>{phase.nonDoneTaskCount ?? 0} non-done · {phase.completedTaskCount ?? 0} done · {phase.cancelledTaskCount ?? 0} cancelled</small></div><div>{project.mergeTarget === "phase" && currentUser && (currentUser.role === "ADMIN" || currentUser.id === project.ownerId) && <button className="button button-secondary" disabled={!canMergePhaseToMain(project.mergeTarget, phase.nonDoneTaskCount ?? 0)} onClick={async () => { try { await api.ensurePhaseBranch(project.id, phase.id); await api.mergePhaseToMain(project.id, phase.id); setError(""); } catch (err) { setError(err instanceof Error ? err.message : "Could not merge phase"); } }}>{canMergePhaseToMain(project.mergeTarget, phase.nonDoneTaskCount ?? 0) ? "Merge phase to main" : "Complete tasks to merge"}</button>}{!phase.isActive && <button className="button button-secondary" onClick={() => activate(phase.id)}>Set active</button>}<button className="phase-delete" onClick={() => setPendingDelete(phase)} aria-label={`Delete Phase ${phase.number}`}><Trash2 /></button></div></article>)}</div>{!phases.length && <div className="phases-empty"><Flag /><strong>No phases yet</strong><span>Create the first phase using the form.</span></div>}</section>
+      <div className="phases-page-layout"><section><div className="phase-page-section-title"><h3>All phases</h3><span>{project.name}</span></div><div className="phase-list">{phases.map((phase) => <article key={phase.id} className={phase.isActive ? "active" : ""}><span className="phase-number">{phase.number}</span><div><span><strong>Phase {phase.number}</strong>{phase.isActive && <em><CheckCircle2 /> Active</em>}</span><p>{phase.goal}</p><small>{phase.nonDoneTaskCount ?? 0} non-done · {phase.completedTaskCount ?? 0} done · {phase.cancelledTaskCount ?? 0} cancelled</small></div><div>{!phase.isActive && <button className="button button-secondary" onClick={() => activate(phase.id)}>Set active</button>}<button className="phase-delete" onClick={() => setPendingDelete(phase)} aria-label={`Delete Phase ${phase.number}`}><Trash2 /></button></div></article>)}</div>{!phases.length && <div className="phases-empty"><Flag /><strong>No phases yet</strong><span>Create the first phase using the form.</span></div>}</section>
         <aside><form className="new-phase-form" onSubmit={create}><h3><Plus /> Add a phase</h3><p>Create the next planning window and optionally make it active immediately.</p><div className="new-phase-fields"><label>Number<input type="number" min="1" value={number} onChange={(event) => setNumber(Number(event.target.value))} required /></label><label>Goal<input value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="What should this phase accomplish?" required /></label></div><label className="checkbox-label"><input type="checkbox" checked={makeActive} onChange={(event) => setMakeActive(event.target.checked)} /><Flag /> Make this the active phase</label>{error && <div className="form-error">{error}</div>}<footer><button className="button button-primary" disabled={saving}>{saving ? "Creating…" : "Create phase"}</button></footer></form></aside></div>
       {pendingDelete && <PhaseDeleteModal phase={pendingDelete} alternatives={phases.filter((phase) => phase.id !== pendingDelete.id)} onClose={() => setPendingDelete(null)} onConfirm={confirmDelete} />}
     </div>
