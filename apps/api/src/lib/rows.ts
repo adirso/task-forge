@@ -42,6 +42,7 @@ export function toProject(row: Row): Project {
     defaultStatus: availableStatuses.includes(configuredDefault) ? configuredDefault : availableStatuses[0]!,
     agentWorkflow,
     hiddenEmptyStatuses,
+    mergeTarget: row.merge_target === "phase" ? "phase" : "main",
     ownerId: String(row.owner_id),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),

@@ -94,6 +94,12 @@ test("human can log in and create a project", async () => {
   const project = await app.inject({ method: "GET", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(project.statusCode, 200);
   assert.equal(project.json().project.members[0].projectRole, "OWNER");
+  assert.equal(project.json().project.mergeTarget, "main");
+  const phaseTarget = await app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { mergeTarget: "phase" } });
+  assert.equal(phaseTarget.statusCode, 200, phaseTarget.body);
+  assert.equal(phaseTarget.json().project.mergeTarget, "phase");
+  const invalidTarget = await app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { mergeTarget: "release" } });
+  assert.equal(invalidTarget.statusCode, 400);
   const nextPhase = await app.inject({ method: "POST", url: `/api/projects/${projectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { number: 2, goal: "Deliver the integration", isActive: true } });
   assert.equal(nextPhase.statusCode, 201);
   assert.equal(nextPhase.json().phase.isActive, true);

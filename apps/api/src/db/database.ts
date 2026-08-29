@@ -603,6 +603,14 @@ export const migrations: readonly Migration[] = [
         : "CREATE TABLE IF NOT EXISTS delivery_monitor_leases (run_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, acquired_at TEXT NOT NULL, expires_at TEXT NOT NULL)", []);
     },
   },
+  {
+    version: "0021_project_merge_target",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE projects ADD COLUMN merge_target VARCHAR(10) NOT NULL DEFAULT 'main'"
+        : "ALTER TABLE projects ADD COLUMN merge_target TEXT NOT NULL DEFAULT 'main' CHECK (merge_target IN ('main','phase'))", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

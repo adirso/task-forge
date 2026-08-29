@@ -13,6 +13,7 @@ const project: Project = {
   sortOrder: 0,
   availableStatuses: ["TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"],
   defaultStatus: "TODO",
+  mergeTarget: "main",
   ownerId: "owner-id",
   createdAt: "2026-08-06T00:00:00.000Z",
   updatedAt: "2026-08-06T00:00:00.000Z",
@@ -90,6 +91,12 @@ test("builds distinct implementation and review prompts", () => {
   assert.doesNotMatch(review, /Commit the focused change/);
   assert.doesNotMatch(review, /Move the task to IN_PROGRESS/);
   assert.match(review, /do not commit, push, open, or merge a pull request/);
+});
+
+test("documents phase branch merge targeting in implementation prompts", () => {
+  const prompt = buildAIPrompt({ provider: "codex", project: { ...project, mergeTarget: "phase" }, task, phaseNumber: 4, contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3", apiBaseUrl: "https://api.taskforge.example/api" });
+  assert.match(prompt, /Merge target: active phase branch/);
+  assert.match(prompt, /phase\/tas-4/);
 });
 
 test("builds focused fix and re-review prompts from the review trail", () => {

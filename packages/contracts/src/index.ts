@@ -27,6 +27,8 @@ export const agentWorkflowSchema = z.object({
   fixStart: taskStatusSchema,
   reReview: taskStatusSchema,
 });
+export const projectMergeTargetSchema = z.enum(["main", "phase"]);
+export type ProjectMergeTarget = z.infer<typeof projectMergeTargetSchema>;
 export type AgentWorkflow = z.infer<typeof agentWorkflowSchema>;
 export const DEFAULT_AGENT_WORKFLOW: AgentWorkflow = {
   implementationQueue: "TODO",
@@ -141,6 +143,7 @@ export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).parti
   defaultStatus: taskStatusSchema.optional(),
   agentWorkflow: agentWorkflowSchema.nullable().optional(),
   hiddenEmptyStatuses: projectAvailableStatusesSchema.optional(),
+  mergeTarget: projectMergeTargetSchema.optional(),
 });
 export const projectOrderSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(500) });
 
@@ -364,6 +367,7 @@ export interface Project {
   defaultStatus: TaskStatus;
   agentWorkflow: AgentWorkflow | null;
   hiddenEmptyStatuses: TaskStatus[];
+  mergeTarget: ProjectMergeTarget;
   ownerId: string;
   createdAt: string;
   updatedAt: string;

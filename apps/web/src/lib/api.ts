@@ -61,6 +61,7 @@ let mockProjects: Project[] = [{
   hiddenEmptyStatuses: [...TASK_STATUSES],
   defaultStatus: "TODO",
   agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW },
+  mergeTarget: "main",
   ownerId: MOCK_USER.id,
   createdAt: MOCK_NOW,
   updatedAt: MOCK_NOW,
