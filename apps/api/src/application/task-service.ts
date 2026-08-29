@@ -63,9 +63,17 @@ export class TaskApplicationService implements TaskService {
         this.assertStatusAvailable(project.availableStatuses, input.status);
         const reviewHandoff = project.agentWorkflow?.reviewHandoff ?? "READY_FOR_REVIEW";
         if (input.status === reviewHandoff && context.actor.kind === "AGENT") {
-          if (!input.runId) throw new ValidationError("Agent review handoff requires runId");
-          const handoff = await repositories.handoffs.findByRun(input.runId);
-          if (!handoff || handoff.taskId !== existing.id || handoff.status !== "PUBLISHED" || !handoff.branch || !handoff.headSha || !handoff.branchPublished || !handoff.pullRequestUrl || !handoff.pullRequestState) throw new ValidationError("Review handoff requires published branch, head SHA, and pull request evidence");
+          if (input.runId) {
+            const handoff = await repositories.handoffs.findByRun(input.runId);
+            if (!handoff || handoff.taskId !== existing.id || handoff.status !== "PUBLISHED" || !handoff.branch || !handoff.headSha || !handoff.branchPublished || !handoff.pullRequestUrl || !handoff.pullRequestState) throw new ValidationError("Review handoff requires published branch, head SHA, and pull request evidence");
+          } else {
+            // Non-Smithy API clients may hand off an already-published task without a run.
+            // Require the durable task fields so an agent cannot bypass publication checks.
+            const branch = input.branch ?? existing.branch;
+            const pullRequestUrl = input.pullRequestUrl ?? existing.pullRequestUrl;
+            const pullRequestState = input.pullRequestState ?? existing.pullRequestState;
+            if (!branch || !pullRequestUrl || !pullRequestState) throw new ValidationError("Review handoff requires published branch, head SHA, and pull request evidence");
+          }
         }
       }
       await this.validateRelations(repositories, existing.projectId, taskId, input);
