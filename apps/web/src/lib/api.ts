@@ -91,8 +91,8 @@ let mockTasks: Task[] = [
   makeMockTask(3, "Collapse filters on phones", "IN_REVIEW", "MEDIUM", "UPDATE", "ph1", MOCK_USER, ["tag-ui"]),
   makeMockTask(4, "Tune mobile header spacing", "APPROVED", "LOW", "UPDATE", "ph1", MOCK_MEMBER, ["tag-ui"]),
   makeMockTask(5, "Write dashboard docs examples", "DONE", "MEDIUM", "DOCS", "ph2", null, []),
-  makeMockTask(6, "Add responsive empty states", "DONE", "MEDIUM", "FEATURE", "ph2", MOCK_MEMBER, ["tag-ui"]),
-  makeMockTask(7, "Verify mobile keyboard flow", "DONE", "LOW", "UPDATE", "ph2", MOCK_AGENT, ["tag-mobile"]),
+  makeMockTask(6, "Add responsive empty states", "IN_REVIEW", "MEDIUM", "FEATURE", "ph2", MOCK_MEMBER, ["tag-ui"]),
+  makeMockTask(7, "Verify mobile keyboard flow", "READY_FOR_REVIEW", "LOW", "UPDATE", "ph2", MOCK_AGENT, ["tag-mobile"]),
   makeMockTask(8, "Archive obsolete mobile mock", "CANCELLED", "LOW", "CHORE", "ph1", null, []),
   makeMockTask(9, "Capture onboarding requirements", "BACKLOG", "MEDIUM", "FEATURE", "ph1", null, []),
   makeMockTask(10, "Refine tablet breakpoints", "REFINING", "MEDIUM", "UPDATE", "ph1", MOCK_MEMBER, ["tag-ui"]),
@@ -103,9 +103,9 @@ let mockTasks: Task[] = [
   makeMockTask(15, "Decide legacy browser support", "PENDING_DECISION", "LOW", "CHORE", "ph1", MOCK_USER, []),
   makeMockTask(16, "Investigate failed visual snapshot", "FAILED", "HIGH", "BUG", "ph1", null, ["tag-ui"]),
   makeMockTask(17, "Polish loading skeleton states", "DONE", "LOW", "UPDATE", "ph2", MOCK_MEMBER, ["tag-ui"]),
-  makeMockTask(18, "Document responsive testing matrix", "DONE", "MEDIUM", "DOCS", "ph2", MOCK_AGENT, ["tag-mobile"]),
-  makeMockTask(19, "Verify dark mode contrast", "DONE", "MEDIUM", "UPDATE", "ph2", MOCK_USER, ["tag-ui"]),
-  makeMockTask(20, "Sign off mobile release checklist", "DONE", "HIGH", "CHORE", "ph2", MOCK_MEMBER, ["tag-mobile"]),
+  makeMockTask(18, "Document responsive testing matrix", "APPROVED", "MEDIUM", "DOCS", "ph2", MOCK_AGENT, ["tag-mobile"]),
+  makeMockTask(19, "Verify dark mode contrast", "FIX_IN_PROGRESS", "MEDIUM", "UPDATE", "ph2", MOCK_USER, ["tag-ui"]),
+  makeMockTask(20, "Sign off mobile release checklist", "TODO", "HIGH", "CHORE", "ph2", MOCK_MEMBER, ["tag-mobile"]),
 ];
 const mockNotifications: Notification[] = [
   { id: "n1", userId: MOCK_USER.id, projectId: "p_mobile", taskId: "t3", type: "TASK_UPDATED", title: "Task moved to review", message: "Collapse filters on phones is ready for review.", readAt: null, createdAt: MOCK_NOW, projectName: "Mobile Refresh", projectKey: "MOB", taskNumber: 3 },
