@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Notification, Phase, Project, Tag, Task, TaskCreate, TaskPriority, TaskSearchResult, TaskStatus, User } from "@taskforge/contracts";
+import { phaseBranchName, type Notification, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskPriority, type TaskSearchResult, type TaskStatus, type User } from "@taskforge/contracts";
 import { BarChart3, Bell, ChevronDown, Filter, Flag, Kanban, LayoutList, Link2, Menu, Plus, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./components/Login";
@@ -20,6 +20,7 @@ import { AutomationManager } from "./components/AutomationManager";
 import { ProjectDashboard } from "./components/ProjectDashboard";
 import { DashboardPage } from "./components/DashboardPage";
 import { MultiFilterDropdown } from "./components/MultiFilterDropdown";
+import { PhaseMergeModal } from "./components/PhaseMergeModal";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
 import { canMergePhaseToMain } from "./lib/phaseMerge";
 import { priorityMeta, statusMeta } from "./lib/ui";
@@ -61,6 +62,7 @@ export default function App() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showMobileNav, setShowMobileNav] = useState(false);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [phaseMergeDraft, setPhaseMergeDraft] = useState<{ phaseNumber: number; sourceBranch: string; title: string; body: string; compareUrl: string } | null>(null);
 
   function applyProjectMembers(updated: Project) {
     if (currentProject?.id !== updated.id) return;
@@ -202,9 +204,11 @@ export default function App() {
   async function mergeActivePhase() {
     if (!currentProject || !activePhase) return;
     try {
-      await api.ensurePhaseBranch(currentProject.id, activePhase.id);
-      await api.mergePhaseToMain(currentProject.id, activePhase.id);
-      flash(`Phase ${activePhase.number} merge authorized`);
+      const { branch } = await api.ensurePhaseBranch(currentProject.id, activePhase.id);
+      const sourceBranch = branch.branchName || phaseBranchName(currentProject.key, activePhase.number);
+      const repository = currentProject.repoUrl?.replace(/\.git$/, "").replace(/\/$/, "") ?? "";
+      const compareUrl = repository ? `${repository}/compare/main...${encodeURIComponent(sourceBranch)}?expand=1` : "";
+      setPhaseMergeDraft({ phaseNumber: activePhase.number, sourceBranch, title: `Merge Phase ${activePhase.number} into main`, body: `## Summary\n\nMerge the completed Phase ${activePhase.number} delivery branch into main.\n\nSource: ${sourceBranch}\nTarget: main`, compareUrl });
     } catch (error) {
       flash(error instanceof ApiError ? error.message : "Could not merge phase to main");
     }
@@ -393,6 +397,7 @@ export default function App() {
           </section>
         </> : <DashboardPage currentUser={user} />}
       </main>
+      {phaseMergeDraft && currentProject && <PhaseMergeModal {...phaseMergeDraft} targetBranch="main" onClose={() => setPhaseMergeDraft(null)} onAuthorize={async () => { await api.mergePhaseToMain(currentProject.id, activePhase!.id); flash("Phase merge authorized; GitHub compare opened"); setPhaseMergeDraft(null); }} />}
       {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? currentProject.defaultStatus} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} availableTags={tags} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} />}
       {showProjectModal && <ProjectModal projects={projects} onClose={() => setShowProjectModal(false)} onSave={createProject} />}
       {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onEnableWorkflow={enableAgentWorkflow} onSave={async ({ name, description, repoUrl, localRepoPath, color, availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget }) => updateProject({ name, description, repoUrl, localRepoPath, color, availableStatuses: availableStatuses!, defaultStatus: defaultStatus!, agentWorkflow, hiddenEmptyStatuses, mergeTarget })} />}
