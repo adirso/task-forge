@@ -65,7 +65,7 @@ let mockProjects: Project[] = [{
   ownerId: MOCK_USER.id,
   createdAt: MOCK_NOW,
   updatedAt: MOCK_NOW,
-  taskCount: 8,
+  taskCount: 16,
   members: [
     { ...MOCK_USER, projectRole: "OWNER" },
     { ...MOCK_MEMBER, projectRole: "MEMBER" },
@@ -94,6 +94,14 @@ let mockTasks: Task[] = [
   makeMockTask(6, "Add responsive empty states", "DONE", "MEDIUM", "FEATURE", "ph2", MOCK_MEMBER, ["tag-ui"]),
   makeMockTask(7, "Verify mobile keyboard flow", "DONE", "LOW", "UPDATE", "ph2", MOCK_AGENT, ["tag-mobile"]),
   makeMockTask(8, "Archive obsolete mobile mock", "CANCELLED", "LOW", "CHORE", "ph1", null, []),
+  makeMockTask(9, "Capture onboarding requirements", "BACKLOG", "MEDIUM", "FEATURE", "ph1", null, []),
+  makeMockTask(10, "Refine tablet breakpoints", "REFINING", "MEDIUM", "UPDATE", "ph1", MOCK_MEMBER, ["tag-ui"]),
+  makeMockTask(11, "Publish navigation QA notes", "READY_FOR_REVIEW", "MEDIUM", "DOCS", "ph1", MOCK_AGENT, ["tag-mobile"]),
+  makeMockTask(12, "Address reviewer accessibility feedback", "RE_REVIEW", "HIGH", "UPDATE", "ph1", MOCK_MEMBER, ["tag-ui"]),
+  makeMockTask(13, "Fix touch target regression", "FIX_NEEDED", "HIGH", "BUG", "ph1", MOCK_AGENT, ["tag-mobile"]),
+  makeMockTask(14, "Apply requested mobile fixes", "FIX_IN_PROGRESS", "HIGH", "BUG", "ph1", MOCK_AGENT, ["tag-mobile"]),
+  makeMockTask(15, "Decide legacy browser support", "PENDING_DECISION", "LOW", "CHORE", "ph1", MOCK_USER, []),
+  makeMockTask(16, "Investigate failed visual snapshot", "FAILED", "HIGH", "BUG", "ph1", null, ["tag-ui"]),
 ];
 const mockNotifications: Notification[] = [
   { id: "n1", userId: MOCK_USER.id, projectId: "p_mobile", taskId: "t3", type: "TASK_UPDATED", title: "Task moved to review", message: "Collapse filters on phones is ready for review.", readAt: null, createdAt: MOCK_NOW, projectName: "Mobile Refresh", projectKey: "MOB", taskNumber: 3 },
