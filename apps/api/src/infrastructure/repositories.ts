@@ -152,9 +152,10 @@ async function hydrateTasks(db: DatabasePort, tasks: TaskEntity[]): Promise<Task
   const assignees = new Map(assigneeRows.map((row) => [text(row.id), toUser(row)]));
   const phases = new Map(phaseRows.map((row) => [text(row.id), toPhase(row)]));
   const durations = new Map<string, Partial<Record<TaskStatus, number>>>();
+  const durationExcludedStatuses = new Set(["BACKLOG", "TODO"]);
   for (const row of durationRows) {
     const status = text(row.status) as TaskStatus;
-    if (terminalStatuses.has(status)) continue;
+    if (terminalStatuses.has(status) || durationExcludedStatuses.has(status)) continue;
     const stored = Number(row.duration_seconds ?? 0);
     const live = row.exited_at == null ? Math.max(0, (Date.now() - Date.parse(date(row.entered_at))) / 1000) : 0;
     const current = durations.get(text(row.task_id)) ?? {};

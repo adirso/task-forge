@@ -319,6 +319,8 @@ test("task lifecycle supports assignment and status changes", async () => {
   assert.equal(created.statusCode, 201);
   assert.equal(created.json().task.number, 1);
   assert.equal(created.json().task.phaseId, phaseId);
+  assert.equal(created.json().task.statusDurations?.BACKLOG, undefined);
+  assert.equal(created.json().task.statusDurations?.TODO, undefined);
   assert.deepEqual(created.json().task.phase, { id: phaseId, projectId, number: 2, goal: "Deliver the integration", isActive: true, createdAt: created.json().task.phase.createdAt, updatedAt: created.json().task.phase.updatedAt });
   assert.deepEqual(created.json().task.tags.map((tag: { name: string }) => tag.name), ["backend", "frontend"]);
   taskId = created.json().task.id;
@@ -358,6 +360,11 @@ test("task lifecycle supports assignment and status changes", async () => {
   assert.ok(updated.json().task.statusDurations.IN_PROGRESS !== undefined);
   assert.equal(updated.json().task.statusDurations.DONE, undefined);
   assert.equal(updated.json().task.statusDurations.CANCELLED, undefined);
+  const returnedToTodo = await app.inject({ method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "TODO" } });
+  assert.equal(returnedToTodo.statusCode, 200, returnedToTodo.body);
+  assert.equal(returnedToTodo.json().task.statusDurations?.TODO, undefined);
+  const resumedWork = await app.inject({ method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "IN_PROGRESS" } });
+  assert.equal(resumedWork.statusCode, 200, resumedWork.body);
 
   const postedDependencies = await app.inject({
     method: "POST", url: `/api/tasks/${taskId}/dependencies`, headers: { authorization: `Bearer ${jwtToken}` },
