@@ -20,7 +20,7 @@ env:
 jobs:
   version-guard:
     name: Version guard
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
