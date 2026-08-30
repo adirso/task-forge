@@ -61,7 +61,7 @@ let mockProjects: Project[] = [{
   hiddenEmptyStatuses: [...TASK_STATUSES],
   defaultStatus: "TODO",
   agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW },
-  mergeTarget: "main",
+  mergeTarget: "phase",
   ownerId: MOCK_USER.id,
   createdAt: MOCK_NOW,
   updatedAt: MOCK_NOW,
@@ -73,23 +73,44 @@ let mockProjects: Project[] = [{
   ],
 }];
 const mockPhases: Phase[] = [
-  { id: "ph1", projectId: "p_mobile", number: 1, goal: "Build responsive foundation", isActive: true, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, taskCount: 5 },
-  { id: "ph2", projectId: "p_mobile", number: 2, goal: "Ship polish and QA", isActive: false, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, taskCount: 3 },
+  { id: "ph1", projectId: "p_mobile", number: 1, goal: "Build responsive foundation", isActive: false, branchName: "phase/mob-1", createdAt: MOCK_NOW, updatedAt: MOCK_NOW, taskCount: 5 },
+  { id: "ph2", projectId: "p_mobile", number: 2, goal: "Ship polish and QA", isActive: true, branchName: "phase/mob-2", createdAt: MOCK_NOW, updatedAt: MOCK_NOW, taskCount: 3 },
 ];
 const mockTags: Tag[] = [
   { id: "tag-ui", projectId: "p_mobile", name: "ui", createdAt: MOCK_NOW, taskCount: 4 },
   { id: "tag-mobile", projectId: "p_mobile", name: "mobile", createdAt: MOCK_NOW, taskCount: 5 },
 ];
+let mockAutomations: Automation[] = [{
+  id: "automation-demo-1", projectId: "p_mobile", name: "Route review tasks", enabled: true, trigger: "TASK_UPDATED", actorType: "ANY", actorId: null, service: null,
+  conditions: [{ field: "status", operator: "changed_to", value: "READY_FOR_REVIEW", fromValue: null }],
+  actions: [{ field: "assigneeId", valueType: "user", value: MOCK_USER.id }], createdAt: MOCK_NOW, updatedAt: MOCK_NOW,
+}];
 let mockTasks: Task[] = [
   makeMockTask(1, "Design mobile top bar", "IN_PROGRESS", "HIGH", "FEATURE", "ph1", MOCK_MEMBER, ["tag-ui", "tag-mobile"]),
   makeMockTask(2, "Add slide-out navigation drawer", "TODO", "HIGH", "FEATURE", "ph1", MOCK_AGENT, ["tag-mobile"]),
   makeMockTask(3, "Collapse filters on phones", "IN_REVIEW", "MEDIUM", "UPDATE", "ph1", MOCK_USER, ["tag-ui"]),
-  makeMockTask(4, "Tune mobile header spacing", "DONE", "LOW", "UPDATE", "ph1", MOCK_MEMBER, ["tag-ui"]),
-  makeMockTask(5, "Write dashboard docs examples", "BACKLOG", "MEDIUM", "DOCS", "ph2", null, []),
+  makeMockTask(4, "Tune mobile header spacing", "APPROVED", "LOW", "UPDATE", "ph1", MOCK_MEMBER, ["tag-ui"]),
+  makeMockTask(5, "Write dashboard docs examples", "DONE", "MEDIUM", "DOCS", "ph2", null, []),
+  makeMockTask(6, "Add responsive empty states", "DONE", "MEDIUM", "FEATURE", "ph2", MOCK_MEMBER, ["tag-ui"]),
+  makeMockTask(7, "Verify mobile keyboard flow", "DONE", "LOW", "UPDATE", "ph2", MOCK_AGENT, ["tag-mobile"]),
+  makeMockTask(8, "Archive obsolete mobile mock", "CANCELLED", "LOW", "CHORE", "ph1", null, []),
 ];
 const mockNotifications: Notification[] = [
   { id: "n1", userId: MOCK_USER.id, projectId: "p_mobile", taskId: "t3", type: "TASK_UPDATED", title: "Task moved to review", message: "Collapse filters on phones is ready for review.", readAt: null, createdAt: MOCK_NOW, projectName: "Mobile Refresh", projectKey: "MOB", taskNumber: 3 },
 ];
+const mockRuns: Record<string, AgentRun[]> = {
+  t1: [{ id: "run-demo-1", taskId: "t1", projectId: "p_mobile", requestedById: MOCK_USER.id, kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy-demo", leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(), heartbeatAt: MOCK_NOW, timeoutAt: new Date(Date.now() + 900_000).toISOString(), lastError: null, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, completedAt: null }],
+};
+const mockAgentLogs: Record<string, AgentLog[]> = {
+  t1: [{ id: "log-demo-1", taskId: "t1", runId: "run-demo-1", provider: "codex", stream: "stdout", category: "progress", sequence: 1, eventId: "demo-event-1", content: "Implementation started on agent/mob-1", createdAt: MOCK_NOW }],
+};
+
+function mockPhaseData() {
+  return mockPhases.map((phase) => {
+    const phaseTasks = mockTasks.filter((task) => task.phaseId === phase.id);
+    return { ...phase, taskCount: phaseTasks.length, completedTaskCount: phaseTasks.filter((task) => task.status === "DONE").length, cancelledTaskCount: phaseTasks.filter((task) => task.status === "CANCELLED").length, nonDoneTaskCount: phaseTasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).length };
+  });
+}
 
 function makeMockTask(
   number: number,
@@ -101,6 +122,7 @@ function makeMockTask(
   assignee: User | null,
   tagIds: string[],
 ): Task {
+  const pullRequest = number === 3 ? { url: "https://github.com/example/mobile-refresh/pull/3", title: "Collapse filters on phones", state: "OPEN" as const } : number === 4 ? { url: "https://github.com/example/mobile-refresh/pull/4", title: "Tune mobile header spacing", state: "OPEN" as const } : number === 6 ? { url: "https://github.com/example/mobile-refresh/pull/6", title: "Add responsive empty states", state: "MERGED" as const } : number === 8 ? { url: "https://github.com/example/mobile-refresh/pull/8", title: "Archive obsolete mobile mock", state: "CLOSED" as const } : null;
   return {
     id: `t${number}`,
     projectId: "p_mobile",
@@ -114,13 +136,14 @@ function makeMockTask(
     assigneeId: assignee?.id ?? null,
     creatorId: MOCK_USER.id,
     parentId: null,
-    branch: null,
+    branch: number <= 4 ? `agent/mob-${number}` : null,
     dueDate: null,
     estimatePoints: number % 3 === 0 ? 2 : 3,
     phaseId,
-    pullRequestUrl: null,
-    pullRequestTitle: null,
-    pullRequestState: null,
+    pullRequestUrl: pullRequest?.url ?? null,
+    pullRequestTitle: pullRequest?.title ?? null,
+    pullRequestState: pullRequest?.state ?? null,
+    statusDurations: status === "BACKLOG" || status === "TODO" ? {} : { [status]: status === "DONE" || status === "CANCELLED" ? 0 : number * 420 },
     position: number,
     createdAt: MOCK_NOW,
     updatedAt: MOCK_NOW,
@@ -203,9 +226,34 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
     return { project: mockProjects[0] } as T;
   }
   if (/^\/projects\/[^/]+\/tasks$/.test(pathname) && method === "GET") return { tasks: mockTasks } as T;
-  if (/^\/projects\/[^/]+\/phases$/.test(pathname) && method === "GET") return { phases: mockPhases } as T;
+  if (/^\/projects\/[^/]+\/phases$/.test(pathname) && method === "GET") return { phases: mockPhaseData() } as T;
+  if (/^\/projects\/[^/]+\/phases\/[^/]+\/branch$/.test(pathname) && method === "POST") {
+    const phase = mockPhases.find((item) => item.id === pathname.split("/")[4]);
+    if (!phase) throw new ApiError("Phase not found", 404);
+    phase.branchName ??= `phase/${mockProjects[0]!.key.toLowerCase()}-${phase.number}`;
+    return { branch: { phaseId: phase.id, branchName: phase.branchName } } as T;
+  }
+  if (/^\/projects\/[^/]+\/phases\/[^/]+\/merge-to-main$/.test(pathname) && method === "POST") {
+    const phase = mockPhases.find((item) => item.id === pathname.split("/")[4]);
+    if (!phase) throw new ApiError("Phase not found", 404);
+    return { merge: { phaseId: phase.id, branchName: phase.branchName ?? `phase/${mockProjects[0]!.key.toLowerCase()}-${phase.number}`, target: "main" } } as T;
+  }
   if (/^\/projects\/[^/]+\/tags$/.test(pathname) && method === "GET") return { tags: mockTags } as T;
-  if (/^\/projects\/[^/]+\/automations$/.test(pathname) && method === "GET") return { automations: [] } as T;
+  if (/^\/projects\/[^/]+\/automations$/.test(pathname) && method === "GET") return { automations: mockAutomations } as T;
+  if (/^\/projects\/[^/]+\/automations$/.test(pathname) && method === "POST") {
+    const input = options.body as AutomationCreate;
+    const automation = { ...input, id: `automation-${Date.now()}`, projectId: "p_mobile", enabled: input.enabled ?? true, trigger: input.trigger ?? "TASK_UPDATED", actorType: input.actorType ?? "ANY", actorId: input.actorId ?? null, service: input.service ?? null, conditions: input.conditions ?? [], actions: input.actions, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as Automation;
+    mockAutomations = [automation, ...mockAutomations];
+    return { automation } as T;
+  }
+  if (/^\/automations\/[^/]+$/.test(pathname) && method === "PATCH") {
+    const id = pathname.split("/")[2]!;
+    mockAutomations = mockAutomations.map((item) => item.id === id ? { ...item, ...(options.body as AutomationUpdate), updatedAt: new Date().toISOString() } : item);
+    const automation = mockAutomations.find((item) => item.id === id);
+    if (!automation) throw new ApiError("Automation not found", 404);
+    return { automation } as T;
+  }
+  if (/^\/automations\/[^/]+$/.test(pathname) && method === "DELETE") { mockAutomations = mockAutomations.filter((item) => item.id !== pathname.split("/")[2]); return undefined as T; }
   if (pathname === "/search" && method === "GET") {
     const query = (url.searchParams.get("q") ?? "").toLowerCase();
     const results = mockTasks
@@ -293,8 +341,8 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
   }
 
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "GET") return { updates: [] } as T;
-  if (/^\/tasks\/[^/]+\/runs$/.test(pathname) && method === "GET") return { runs: [] } as T;
-  if (/^\/tasks\/[^/]+\/agent-logs$/.test(pathname) && method === "GET") return { agentLogs: [], page: { limit: 100, hasMore: false, nextCursor: null } } as T;
+  if (/^\/tasks\/[^/]+\/runs$/.test(pathname) && method === "GET") return { runs: mockRuns[pathname.split("/")[2]!] ?? [] } as T;
+  if (/^\/tasks\/[^/]+\/agent-logs$/.test(pathname) && method === "GET") return { agentLogs: mockAgentLogs[pathname.split("/")[2]!] ?? [], page: { limit: 100, hasMore: false, nextCursor: null } } as T;
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "POST") {
     return {
       update: {
@@ -321,7 +369,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
   if (/^\/users\/[^/]+\/webhook-secret\/rotate$/.test(pathname) && method === "POST") return { user: { ...MOCK_AGENT, webhookSecretConfigured: true }, webhookSecret: "whsec_mock_rotated" } as T;
   if (pathname === "/users/webhook-deliveries" && method === "GET") return { deliveries: [] } as T;
   if (/^\/users\/webhook-deliveries\/[^/]+\/retry$/.test(pathname) && method === "POST") throw new ApiError("Mock delivery not found", 404);
-  if (pathname === "/delivery-monitor/health" && method === "GET") return { monitor: { status: "idle", lastSweepAt: null, activeLeaseCount: 0, processedCount: 0, nextRetryAt: null, failures: [] }, activeLeases: [] } as T;
+  if (pathname === "/delivery-monitor/health" && method === "GET") return { monitor: { status: "healthy", lastSweepAt: MOCK_NOW, activeLeaseCount: 1, processedCount: 12, nextRetryAt: new Date(Date.now() + 45_000).toISOString(), failures: [{ runId: "00000000-0000-4000-8000-000000000001", taskId: "00000000-0000-4000-8000-000000000004", pullRequestUrl: "https://github.com/example/mobile-refresh/pull/4", retryCount: 1, nextRetryAt: new Date(Date.now() + 45_000).toISOString(), lastObservedAt: MOCK_NOW, state: "OPEN", errorCategory: "RATE_LIMIT" }] }, activeLeases: [{ runId: "00000000-0000-4000-8000-000000000001", ownerId: "smithy-demo", acquiredAt: MOCK_NOW, expiresAt: new Date(Date.now() + 90_000).toISOString() }] } as T;
 
   // Mutations used by settings and project management can no-op in mock mode.
   if (method !== "GET") return undefined as T;
