@@ -338,6 +338,7 @@ svg { flex: 0 0 auto; }
 .task-modal-tabs button.active b { background: #eae6ff; color: #403294; }
 .task-tab-panel { display: grid; gap: 16px; align-content: start; min-height: 100%; }
 .task-agents .task-runs, .task-agents .task-agent-logs { margin-top: 0; padding-top: 0; border-top: 0; }
+.force-cycle-callout { display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 1px solid #ffbdad; border-radius: 8px; background: #ffebe6; padding: 11px 12px; }.force-cycle-callout > span { display: grid; gap: 3px; color: #bf2600; }.force-cycle-callout strong { font-size: 11px; }.force-cycle-callout small { font-size: 9px; line-height: 1.45; }.force-cycle-callout .button { flex: 0 0 auto; }
 .task-agents:has(> .task-agents-empty) { align-content: center; justify-items: center; }
 .task-agents-empty { display: grid; place-items: center; text-align: center; color: #6b778c; padding: 12px 16px; }
 .task-agents-empty > span { display: grid; gap: 8px; justify-items: center; max-width: 320px; }

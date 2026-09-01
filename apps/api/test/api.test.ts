@@ -916,6 +916,60 @@ test("agent observability API exposes run health fields alongside logs", async (
   assert.equal(typeof logs.json().page.hasMore, "boolean");
 });
 
+test("force-cycle API authorizes, audits, dispatches once, and preserves the raised cap", async () => {
+  const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `FC${randomUUID().slice(0, 4)}`, name: "Force cycle", description: "Cycle grant integration", color: "#BF2600" } });
+  assert.equal(createdProject.statusCode, 201, createdProject.body);
+  const forceProjectId = createdProject.json().project.id as string;
+  for (const userId of [memberId, agentId]) {
+    const added = await app.inject({ method: "POST", url: `/api/projects/${forceProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId, role: "MEMBER" } });
+    assert.equal(added.statusCode, 204, added.body);
+  }
+  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${forceProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Capped agent task", assigneeId: agentId, status: "FAILED" } });
+  assert.equal(createdTask.statusCode, 201, createdTask.body);
+  const forceTaskId = createdTask.json().task.id as string;
+  const now = new Date().toISOString();
+  for (let index = 0; index < 6; index += 1) {
+    await db.prepare("INSERT INTO agent_runs (id, task_id, project_id, requested_by_id, kind, status, attempt_count, max_attempts, lease_owner, lease_expires_at, heartbeat_at, timeout_at, last_error, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, 'IMPLEMENTATION', 'FAILED', 1, 3, NULL, NULL, NULL, NULL, 'failed', ?, ?, ?)").run(randomUUID(), forceTaskId, forceProjectId, adminId, now, now, now);
+  }
+  await db.prepare("INSERT INTO agent_logs (id, task_id, run_id, provider, stream, category, `sequence`, event_id, content, created_at) VALUES (?, ?, NULL, 'codex', 'system', 'lifecycle', 0, ?, ?, ?)").run(randomUUID(), forceTaskId, "smithy-capped-event:1:failure", "Task has reached the maximum autonomous delivery cycle limit", now);
+  const listed = await app.inject({ method: "GET", url: `/api/tasks/${forceTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.deepEqual(listed.json().cycle, { count: 6, limit: 6, limitFailure: true });
+
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  const denied = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs/force-cycle`, headers: { authorization: `Bearer ${memberLogin.json().token}`, "idempotency-key": "force-integration-6" } });
+  assert.equal(denied.statusCode, 403, denied.body);
+
+  const originalFetch = globalThis.fetch;
+  const dispatched: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request) => { dispatched.push(String(input)); return new Response("{}", { status: 202 }); }) as typeof fetch;
+  try {
+    const forced = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs/force-cycle`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "force-integration-6" } });
+    assert.equal(forced.statusCode, 202, forced.body);
+    assert.deepEqual(forced.json().cycle, { count: 6, limit: 7, limitFailure: false });
+    const duplicate = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs/force-cycle`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "force-integration-6" } });
+    assert.equal(duplicate.statusCode, 202, duplicate.body);
+    assert.equal(duplicate.json().duplicate, true);
+    assert.equal(dispatched.length, 2, "a repeated request may safely redeliver the same Smithy idempotency key");
+    assert.ok(dispatched.every((url) => url.endsWith("/force-cycle")));
+  } finally { globalThis.fetch = originalFetch; }
+
+  const grants = await db.prepare("SELECT prior_count, new_limit, actor_id FROM agent_cycle_grants WHERE task_id = ?").all(forceTaskId);
+  assert.deepEqual(grants, [{ prior_count: 6, new_limit: 7, actor_id: adminId }]);
+  const audits = await db.prepare("SELECT actor_id, metadata FROM activity WHERE task_id = ? AND action = 'task.agent_cycle_forced'").all(forceTaskId);
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0]?.actor_id, adminId);
+  const auditMetadata = typeof audits[0]?.metadata === "string" ? JSON.parse(audits[0].metadata) : audits[0]?.metadata;
+  assert.deepEqual(auditMetadata, { priorCount: 6, newLimit: 7 });
+
+  const seventh = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  assert.equal(seventh.statusCode, 201, seventh.body);
+  const eighth = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  assert.equal(eighth.statusCode, 400, eighth.body);
+  assert.match(eighth.json().error, /maximum autonomous delivery cycle limit/);
+  const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${forceProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deleted.statusCode, 204, deleted.body);
+});
+
 test("handoff checkpoints survive repeated API access and gate agent review readiness", async () => {
   const membership = await app.inject({ method: "POST", url: `/api/projects/${projectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: agentId, role: "MEMBER" } });
   assert.ok([204, 409].includes(membership.statusCode), membership.body);

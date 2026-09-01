@@ -617,6 +617,14 @@ export const migrations: readonly Migration[] = [
       await executor.run(dialect === "mysql" ? "ALTER TABLE phases ADD COLUMN branch_name VARCHAR(255) NULL" : "ALTER TABLE phases ADD COLUMN branch_name TEXT NULL", []);
     },
   },
+  {
+    version: "0023_agent_cycle_grants",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS agent_cycle_grants (task_id CHAR(36) NOT NULL, prior_count INT NOT NULL, new_limit INT NOT NULL, request_id VARCHAR(180) NOT NULL UNIQUE, smithy_event_id VARCHAR(180) NOT NULL, actor_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, PRIMARY KEY (task_id, prior_count), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (actor_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS agent_cycle_grants (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, prior_count INTEGER NOT NULL, new_limit INTEGER NOT NULL, request_id TEXT NOT NULL UNIQUE, smithy_event_id TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, PRIMARY KEY (task_id, prior_count))", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

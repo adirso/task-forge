@@ -67,6 +67,20 @@ test("health endpoint runs on-demand checks even when startup preflight is disab
   } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 });
 
+test("Smithy exposes the provider force-cycle endpoint", async () => {
+  let received: { provider: string; signature?: string; body: string } | null = null;
+  const runner = { resume: async () => undefined, handle: async () => ({ status: 202, body: "{}" }), cancel: () => false, forceCycle: async (providerLabel: string, headers: Record<string, string | undefined>, body: string) => { received = { provider: providerLabel, signature: headers["x-taskforge-signature"], body }; return { status: 202, body: JSON.stringify({ accepted: true }) }; } };
+  const config = { host: "127.0.0.1", port: 0, apiUrl: "http://127.0.0.1:4000", dbPath: ":memory:", preflight: false, providers: { claude: provider } };
+  const server = createSmithyServer(config, runner as never);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address() as { port: number };
+    const response = await fetch(`http://127.0.0.1:${address.port}/agents/claude/force-cycle`, { method: "POST", headers: { "X-TaskForge-Signature": "signed" }, body: JSON.stringify({ id: "force-1" }) });
+    assert.equal(response.status, 202);
+    assert.deepEqual(received, { provider: "claude", signature: "signed", body: JSON.stringify({ id: "force-1" }) });
+  } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+});
+
 
 test("provider env updates preserve unrelated settings and support custom labels", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "smithy-env-"));
@@ -97,6 +111,37 @@ test("job store deduplicates events and survives status transitions", () => {
   assert.equal(store.pending()[0]?.status, "PENDING");
   store.cancel("event-store");
   assert.equal(store.pending().length, 0);
+});
+
+test("force-cycle authentication grants one retry of the exact failed event", async () => {
+  const store = new MemoryJobStore();
+  store.accept(event.id, "claude", event.task.id, JSON.stringify(event));
+  store.markRunning(event.id);
+  store.markComplete(event.id, "FAILED");
+  let executions = 0;
+  const api = { request: async (requestPath: string) => {
+    if (requestPath.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task };
+    if (requestPath.endsWith("/runs")) return { run: { id: "forced-run" } };
+    if (requestPath.endsWith("/findings")) return { findings: [] };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { executions += 1; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000, store);
+  const body = JSON.stringify({ id: "force-request-1", taskId: event.task.id, eventId: event.id, priorCount: 6, newLimit: 7 });
+  const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
+  assert.equal((await runner.forceCycle("claude", { "x-taskforge-signature": "invalid" }, body)).status, 401);
+  assert.equal((await runner.forceCycle("claude", headers, JSON.stringify({ ...JSON.parse(body), eventId: "unknown" }))).status, 401, "changing the signed body invalidates authentication");
+  const missingBody = JSON.stringify({ ...JSON.parse(body), id: "force-missing", eventId: "unknown" });
+  assert.equal((await runner.forceCycle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, missingBody)}` }, missingBody)).status, 404);
+  const activeEvent = { ...event, id: "event-not-failed" };
+  store.accept(activeEvent.id, "claude", activeEvent.task.id, JSON.stringify(activeEvent));
+  const activeBody = JSON.stringify({ ...JSON.parse(body), id: "force-active", eventId: activeEvent.id });
+  assert.equal((await runner.forceCycle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, activeBody)}` }, activeBody)).status, 409);
+  assert.equal((await runner.forceCycle("claude", headers, body)).status, 202);
+  await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+  assert.equal(executions, 1);
+  const duplicate = await runner.forceCycle("claude", headers, body);
+  assert.match(duplicate.body, /"duplicate":true/);
+  assert.equal(executions, 1);
 });
 
 test("SQLite job store persists dedupe and recovery state", async (t) => {
