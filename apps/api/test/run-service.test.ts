@@ -7,6 +7,7 @@ import type { RepositorySet } from "../src/application/repositories.js";
 const project: ProjectEntity = { id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000", availableStatuses: ["TODO", "IN_PROGRESS", "DONE"], defaultStatus: "TODO", agentWorkflow: null, hiddenEmptyStatuses: ["TODO", "IN_PROGRESS", "DONE"], mergeTarget: "main", ownerId: "owner-1", createdAt: "", updatedAt: "" };
 const task: TaskEntity = { id: "task-1", projectId: project.id, number: 1, title: "Run", description: "", definitionOfDone: "", status: "TODO", priority: "MEDIUM", type: "FEATURE", assigneeId: null, creatorId: "owner-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "" };
 const actor = { actor: { userId: "runner-1", name: "Runner", kind: "AGENT" as const, role: "MEMBER" as const, tokenScopes: null } };
+const owner = { actor: { userId: "owner-1", name: "Owner", kind: "HUMAN" as const, role: "MEMBER" as const, tokenScopes: null } };
 
 function base(overrides: Partial<RepositorySet> = {}): RepositorySet {
   return {
@@ -65,4 +66,47 @@ test("only project owners and admins can cancel a run", async () => {
   const service = new AgentRunApplicationService({ run: async (work) => work(set) });
   await assert.rejects(() => service.complete(actor, current.id, "CANCELLED"), /project owner or administrator/);
   await service.complete({ actor: { ...actor.actor, role: "ADMIN" } }, current.id, "CANCELLED");
+});
+
+test("project owners grant exactly one audited cycle and repeated requests are idempotent", async () => {
+  const grants = new Map<string, any>();
+  const activities: any[] = [];
+  const cappedTask = { ...task, assigneeId: "agent-1" };
+  const runs = {
+    cycleState: async () => ({ count: 6, limit: 6, limitFailure: true, failureEventId: "event-capped" }),
+    findCycleGrant: async (requestId: string) => grants.get(requestId) ?? null,
+    grantCycle: async (input: any) => { grants.set(input.requestId, input); return { grant: input, created: true }; },
+  };
+  const set = base({
+    tasks: { findById: async () => cappedTask } as never,
+    runs: runs as never,
+    users: { findById: async () => ({ id: "agent-1", kind: "AGENT" }), getWebhookConfiguration: async () => ({ webhookUrl: "http://127.0.0.1:4500/agents/codex", secretCiphertext: "encrypted", secretVersion: 2 }) } as never,
+    activity: { record: async (input: any) => { activities.push(input); } } as never,
+  });
+  const service = new AgentRunApplicationService({ run: async (work) => work(set) }, () => "2026-09-01T10:00:00.000Z");
+  const first = await service.forceCycle(owner, task.id, "force-task-1-6");
+  const repeated = await service.forceCycle(owner, task.id, "force-task-1-6");
+  assert.equal(first.grant.priorCount, 6);
+  assert.equal(first.grant.newLimit, 7);
+  assert.equal(first.duplicate, false);
+  assert.equal(repeated.duplicate, true);
+  assert.equal(activities.length, 1);
+  assert.deepEqual(activities[0].metadata, { priorCount: 6, newLimit: 7 });
+  assert.equal(activities[0].actorId, owner.actor.userId);
+  assert.equal(activities[0].taskId, task.id);
+});
+
+test("force cycle rejects project members, agents, and tasks without a current limit failure", async () => {
+  const cappedTask = { ...task, assigneeId: "agent-1" };
+  let limitFailure = true;
+  const set = base({
+    tasks: { findById: async () => cappedTask } as never,
+    runs: { findCycleGrant: async () => null, cycleState: async () => ({ count: 6, limit: 6, limitFailure, failureEventId: limitFailure ? "event-capped" : null }) } as never,
+    users: { findById: async () => ({ id: "agent-1", kind: "AGENT" }), getWebhookConfiguration: async () => ({ webhookUrl: "http://127.0.0.1:4500/agents/codex", secretCiphertext: "encrypted", secretVersion: 1 }) } as never,
+  });
+  const service = new AgentRunApplicationService({ run: async (work) => work(set) });
+  await assert.rejects(() => service.forceCycle({ actor: { ...owner.actor, userId: "member-1" } }, task.id, "member-request"), /project owner or administrator/);
+  await assert.rejects(() => service.forceCycle(actor, task.id, "agent-request"), /project owner or administrator/);
+  limitFailure = false;
+  await assert.rejects(() => service.forceCycle(owner, task.id, "not-capped"), /does not have a current cycle-limit failure/);
 });

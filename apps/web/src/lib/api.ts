@@ -6,6 +6,7 @@ export interface AgentRun {
   leaseOwner: string | null; leaseExpiresAt: string | null; heartbeatAt: string | null; timeoutAt: string | null; lastError: string | null;
   createdAt: string; updatedAt: string; completedAt: string | null;
 }
+export interface AgentCycleState { count: number; limit: number; limitFailure: boolean; }
 export interface AgentLog { id: string; taskId: string; runId: string | null; provider: string; stream: "stdout" | "stderr" | "system" | "callback"; category: "output" | "progress" | "tool" | "callback" | "lifecycle"; sequence: number; eventId: string | null; content: string; createdAt: string; }
 
 // In development, Vite proxies /api to the backend. Keeping the browser on one
@@ -353,7 +354,8 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
   }
 
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "GET") return { updates: [] } as T;
-  if (/^\/tasks\/[^/]+\/runs$/.test(pathname) && method === "GET") return { runs: mockRuns[pathname.split("/")[2]!] ?? [] } as T;
+  if (/^\/tasks\/[^/]+\/runs$/.test(pathname) && method === "GET") { const runs = mockRuns[pathname.split("/")[2]!] ?? []; return { runs, cycle: { count: runs.length, limit: 6, limitFailure: false } } as T; }
+  if (/^\/tasks\/[^/]+\/runs\/force-cycle$/.test(pathname) && method === "POST") return { cycle: { count: 6, limit: 7, limitFailure: false }, duplicate: false } as T;
   if (/^\/tasks\/[^/]+\/agent-logs$/.test(pathname) && method === "GET") return { agentLogs: mockAgentLogs[pathname.split("/")[2]!] ?? [], page: { limit: 100, hasMore: false, nextCursor: null } } as T;
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "POST") {
     return {
@@ -462,7 +464,8 @@ export const api = {
     } while (cursor);
     return { updates };
   },
-  taskRuns: (id: string) => request<{ runs: AgentRun[] }>(`/tasks/${id}/runs`),
+  taskRuns: (id: string) => request<{ runs: AgentRun[]; cycle: AgentCycleState }>(`/tasks/${id}/runs`),
+  forceTaskCycle: (id: string, requestId: string) => request<{ cycle: AgentCycleState; duplicate: boolean }>(`/tasks/${id}/runs/force-cycle`, { method: "POST", headers: { "Idempotency-Key": requestId } }),
   taskAgentLogs: async (id: string) => {
     const logs: AgentLog[] = []; let cursor: string | null = null;
     do {

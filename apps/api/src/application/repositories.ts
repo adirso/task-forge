@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -134,6 +134,9 @@ export interface AgentRunRepository {
   findById(id: string): Promise<AgentRunEntity | null>;
   listForTask(taskId: string): Promise<AgentRunEntity[]>;
   countForTask(taskId: string): Promise<number>;
+  cycleState(taskId: string): Promise<AgentCycleStateEntity>;
+  findCycleGrant(requestId: string): Promise<AgentCycleGrantEntity | null>;
+  grantCycle(input: AgentCycleGrantEntity): Promise<{ grant: AgentCycleGrantEntity; created: boolean }>;
   expire(now: string): Promise<number>;
   claim(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
   heartbeat(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;

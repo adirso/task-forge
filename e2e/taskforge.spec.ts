@@ -163,6 +163,37 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByText("Provider response timeline", { exact: false }).first()).toBeVisible();
   });
 
+  test("confirms, safely retries, and hides the force-cycle action after success", async ({ page }) => {
+    await signIn(page);
+    await createProject(page, `Cycle limit Workspace ${Date.now() % 10000}`, `C${Date.now() % 1000000}`);
+    await page.getByRole("button", { name: "Create task" }).first().click();
+    await page.getByLabel("Task name").fill("Cycle limited task");
+    await page.getByLabel("Task status").selectOption("FAILED");
+    await page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true }).click({ force: true });
+    await expect(page.getByRole("button", { name: /Cycle limited task/ })).toBeVisible();
+
+    let forceAttempts = 0;
+    await page.route("**/api/tasks/*/runs", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ runs: Array.from({ length: 6 }, (_, index) => ({ id: `run-${index}`, taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "FAILED", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: "Cycle failed", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completedAt: new Date().toISOString() })), cycle: { count: 6, limit: 6, limitFailure: true } }) }));
+    await page.route("**/api/tasks/*/agent-logs*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agentLogs: [{ id: "limit-log", taskId: "task", runId: null, provider: "codex", stream: "system", category: "lifecycle", sequence: 1, eventId: "event:1:failure", content: "Task has reached the maximum autonomous delivery cycle limit", createdAt: new Date().toISOString() }], page: { limit: 100, hasMore: false, nextCursor: null } }) }));
+    await page.route("**/api/tasks/*/runs/force-cycle", (route) => {
+      forceAttempts += 1;
+      if (forceAttempts === 1) return route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: "token=tf_private secret=do-not-show" }) });
+      return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ cycle: { count: 6, limit: 7, limitFailure: false }, duplicate: true }) });
+    });
+    await page.getByRole("button", { name: /Cycle limited task/ }).click();
+    await page.getByRole("tab", { name: /Agents/ }).click();
+    const forceButton = page.getByRole("button", { name: "Force one additional cycle" });
+    await expect(forceButton).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await forceButton.click();
+    await expect(page.getByText(/grant is safe to retry/i)).toBeVisible();
+    await expect(page.getByText(/tf_private|do-not-show/)).toHaveCount(0);
+    page.once("dialog", (dialog) => dialog.accept());
+    await forceButton.click();
+    await expect(forceButton).toHaveCount(0);
+    expect(forceAttempts).toBe(2);
+  });
+
   test("shows Delivery Monitor health and checkpoint details on the dashboard", async ({ page }) => {
     await page.route("**/api/delivery-monitor/health", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       monitor: { status: "stale", lastSweepAt: "2026-08-28T06:00:00.000Z", activeLeaseCount: 1, processedCount: 7, nextRetryAt: "2026-08-28T06:10:00.000Z", failures: [{ runId: "00000000-0000-4000-8000-000000000801", taskId: "00000000-0000-4000-8000-000000000802", pullRequestUrl: "https://github.com/example/repo/pull/8", retryCount: 2, nextRetryAt: "2026-08-28T06:10:00.000Z", lastObservedAt: "2026-08-28T06:00:00.000Z", state: "OPEN", errorCategory: "RATE_LIMIT" }] },

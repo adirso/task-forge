@@ -2,13 +2,14 @@ import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import type { ActivityEvent, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
 import { Activity, Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Terminal, Trash2, UploadCloud, X } from "lucide-react";
 import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
-import { api, type AgentLog, type AgentRun } from "../lib/api";
+import { api, type AgentCycleState, type AgentLog, type AgentRun } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { SendToAI } from "./SendToAI";
 import type { AIPromptMode } from "../lib/aiPrompt";
 import { TaskTagEditor } from "./TaskTags";
 import { TaskDependencyEditor } from "./TaskDependencies";
 import { formatAge, formatCountdown, getRunHealth, latestRunLog, runIsWaitingForInput, runLogs } from "../lib/runObservability";
+import { canForceCycle, FORCE_CYCLE_FAILURE_MESSAGE, forceCycleRequestId } from "../lib/cycleLimit";
 
 type TaskModalTab = "details" | "updates" | "agents";
 
@@ -23,6 +24,8 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [updates, setUpdates] = useState<TaskNote[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [cycle, setCycle] = useState<AgentCycleState | null>(null);
+  const [forcingCycle, setForcingCycle] = useState(false);
   const [agentLogs, setAgentLogs] = useState<AgentLog[]>([]);
   const [updateBody, setUpdateBody] = useState("");
   const [postingUpdate, setPostingUpdate] = useState(false);
@@ -46,7 +49,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
       const refreshObservability = async () => {
         const [updatesResult, runsResult, logsResult] = await Promise.allSettled([api.taskUpdates(task.id), api.taskRuns(task.id), api.taskAgentLogs(task.id)]);
         if (updatesResult.status === "fulfilled") setUpdates(updatesResult.value.updates);
-        if (runsResult.status === "fulfilled") setRuns(runsResult.value.runs);
+        if (runsResult.status === "fulfilled") { setRuns(runsResult.value.runs); setCycle(runsResult.value.cycle); }
         if (logsResult.status === "fulfilled") setAgentLogs(logsResult.value.agentLogs);
         setObservedAt(Date.now());
       };
@@ -56,7 +59,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
       const timer = window.setInterval(() => { void refreshObservability(); }, 5000);
       const clock = window.setInterval(() => setObservedAt(Date.now()), 1000);
       return () => { window.clearInterval(timer); window.clearInterval(clock); };
-    } else { setUpdates([]); setAttachments([]); setActivity([]); setRuns([]); setAgentLogs([]); }
+    } else { setUpdates([]); setAttachments([]); setActivity([]); setRuns([]); setCycle(null); setAgentLogs([]); }
   }, [task]);
 
   const set = <K extends keyof TaskCreate>(key: K, value: TaskCreate[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -79,6 +82,18 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
     const url = new URL(window.location.href);
     url.search = ""; url.searchParams.set("project", project.key); url.searchParams.set("task", `${project.key}-${task.number}`);
     await navigator.clipboard.writeText(url.toString()); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 1800);
+  }
+  async function forceCycle() {
+    if (!task || !cycle || !canForceCycle(currentUser, project, cycle)) return;
+    if (!window.confirm(`Force one additional autonomous delivery cycle for ${project.key}-${task.number}? The safety limit will increase from ${cycle.limit} to ${cycle.limit + 1}.`)) return;
+    setForcingCycle(true); setError("");
+    try {
+      const result = await api.forceTaskCycle(task.id, forceCycleRequestId(task.id, cycle.count));
+      setCycle(result.cycle);
+      const refreshedActivity = await api.taskActivity(task.id).catch(() => null);
+      if (refreshedActivity) setActivity(refreshedActivity.activity);
+    } catch { setError(FORCE_CYCLE_FAILURE_MESSAGE); }
+    finally { setForcingCycle(false); }
   }
   async function uploadFiles(files: FileList | File[]) {
     if (!task || !files.length) return;
@@ -163,6 +178,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
           </section>}
           {tab === "agents" && task && <section className="task-agents task-tab-panel">
             {runs.length || agentLogs.length || liveProvider ? <>
+              {canForceCycle(currentUser, project, cycle) && <div className="force-cycle-callout" role="alert"><span><strong>Autonomous cycle limit reached</strong><small>{cycle!.count} of {cycle!.limit} delivery cycles have been used. An owner or administrator may authorize exactly one more.</small></span><button type="button" className="button button-danger-quiet" onClick={() => void forceCycle()} disabled={forcingCycle}><Sparkles /> {forcingCycle ? "Starting…" : "Force one additional cycle"}</button></div>}
               {liveProvider && <div className="task-provider-progress"><Terminal /><span><strong>Live provider progress</strong><small>{liveProvider.provider} · {liveProvider.stream} · #{liveProvider.sequence}</small><pre>{liveProvider.content}</pre></span></div>}
               <section className="task-runs">
                 <div className="section-heading"><span>Agent runs <b>{runs.length}</b></span><small>{runningAgents ? "Live · refreshes every 5s" : ""}</small></div>
@@ -196,6 +212,7 @@ function activityLabel(action: string, metadata: Record<string, unknown>): strin
     case "task.created": return "created this task";
     case "task.claimed": return "claimed this task";
     case "task.note_added": return "posted an update";
+    case "task.agent_cycle_forced": return `authorized one additional agent cycle (${String(metadata.priorCount)} → limit ${String(metadata.newLimit)})`;
     case "task.updated": {
       const keys = Object.keys(metadata).filter((k) => k !== "updatedAt");
       if (keys.length === 1) {

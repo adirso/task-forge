@@ -54,6 +54,21 @@ export interface AgentRunEntity {
   updatedAt: string;
   completedAt: string | null;
 }
+export interface AgentCycleStateEntity {
+  count: number;
+  limit: number;
+  limitFailure: boolean;
+  failureEventId: string | null;
+}
+export interface AgentCycleGrantEntity {
+  taskId: string;
+  priorCount: number;
+  newLimit: number;
+  requestId: string;
+  smithyEventId: string;
+  actorId: string;
+  createdAt: string;
+}
 export type AgentHandoffStatus = "PENDING" | "PUBLISHED" | "FAILED";
 export interface AgentHandoffEntity {
   runId: string; taskId: string; branch: string | null; headSha: string | null;

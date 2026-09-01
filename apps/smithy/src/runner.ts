@@ -102,6 +102,24 @@ export class SmithyRunner {
     return { status: 202, body: JSON.stringify({ accepted: true, eventId: event.id }) };
   }
 
+  async forceCycle(provider: string, headers: Record<string, string | undefined>, body: string): Promise<RunnerResult> {
+    const config = this.providers[provider as ProviderLabel];
+    if (!config) return { status: 404, body: JSON.stringify({ error: "Unknown or unconfigured agent" }) };
+    if (!verifySignature(config.webhookSecret, headers["x-taskforge-signature"], body, Math.floor(this.now() / 1000))) return { status: 401, body: JSON.stringify({ error: "Invalid signature" }) };
+    let input: { id?: unknown; taskId?: unknown; eventId?: unknown };
+    try { input = JSON.parse(body) as typeof input; } catch { return { status: 400, body: JSON.stringify({ error: "Invalid JSON" }) }; }
+    if (typeof input.id !== "string" || !input.id.trim() || typeof input.taskId !== "string" || !input.taskId.trim() || typeof input.eventId !== "string" || !input.eventId.trim()) return { status: 400, body: JSON.stringify({ error: "Force request id, taskId, and eventId are required" }) };
+    const result = this.store.force(input.id, provider, input.taskId, input.eventId);
+    if (result.status === "not_found") return { status: 404, body: JSON.stringify({ error: "Failed cycle event was not found" }) };
+    if (result.status === "not_failed") return { status: 409, body: JSON.stringify({ error: "Cycle event is not failed" }) };
+    const forcedJob = result.job;
+    if (result.status === "accepted") {
+      const event = JSON.parse(forcedJob.body) as AgentEvent;
+      void this.process(config, event, forcedJob).catch(() => undefined);
+    }
+    return { status: 202, body: JSON.stringify({ accepted: true, duplicate: result.status === "duplicate", eventId: forcedJob.eventId }) };
+  }
+
   private kind(event: AgentEvent, workflow: AgentWorkflow | null | undefined): "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX" | null {
     const status = event.task?.status;
     if (!status && event.event === "task.assigned") return "IMPLEMENTATION";

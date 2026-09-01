@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { RequestContext } from "./context.js";
 import type { AgentRunEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
@@ -17,7 +17,8 @@ export class AgentRunApplicationService {
       const task = await r.tasks.findById(taskId);
       if (!task) throw new NotFoundError("Task");
       await this.authorize(r, context, task.projectId);
-      if (await r.runs.countForTask(taskId) >= 6) throw new ValidationError("Task has reached the maximum autonomous delivery cycle limit");
+      const cycle = await r.runs.cycleState(taskId);
+      if (cycle.count >= cycle.limit) throw new ValidationError("Task has reached the maximum autonomous delivery cycle limit");
       const now = this.now();
       const run: AgentRunEntity = { id: this.newId(), taskId, projectId: task.projectId, requestedById: context.actor.userId, kind: input.kind, status: "PENDING", attemptCount: 0, maxAttempts: Math.max(1, Math.min(10, input.maxAttempts ?? 3)), leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: input.timeoutAt ?? null, lastError: null, createdAt: now, updatedAt: now, completedAt: null };
       return r.runs.create(run);
@@ -25,7 +26,32 @@ export class AgentRunApplicationService {
   }
 
   async list(context: RequestContext, taskId: string) {
-    return this.unitOfWork.run(async (r) => { await r.runs.expire(this.now()); const task = await r.tasks.findById(taskId); if (!task) throw new NotFoundError("Task"); await this.authorize(r, context, task.projectId); return r.runs.listForTask(taskId); });
+    return this.unitOfWork.run(async (r) => { await r.runs.expire(this.now()); const task = await r.tasks.findById(taskId); if (!task) throw new NotFoundError("Task"); await this.authorize(r, context, task.projectId); const [runs, cycle] = await Promise.all([r.runs.listForTask(taskId), r.runs.cycleState(taskId)]); return { runs, cycle: { count: cycle.count, limit: cycle.limit, limitFailure: cycle.limitFailure } }; });
+  }
+
+  async forceCycle(context: RequestContext, taskId: string, requestId: string) {
+    return this.unitOfWork.run(async (r) => {
+      const task = await r.tasks.findById(taskId);
+      if (!task) throw new NotFoundError("Task");
+      const project = await this.authorize(r, context, task.projectId);
+      if (context.actor.kind !== "HUMAN" || (context.actor.role !== "ADMIN" && context.actor.userId !== project.ownerId)) throw new ForbiddenError("Only a project owner or administrator can force an additional delivery cycle");
+      const existing = await r.runs.findCycleGrant(requestId);
+      let result;
+      if (existing) {
+        if (existing.taskId !== taskId) throw new ConflictError("Idempotency key is already used for another task");
+        result = { grant: existing, created: false };
+      } else {
+        const cycle = await r.runs.cycleState(taskId);
+        if (!cycle.limitFailure || !cycle.failureEventId) throw new ValidationError("The task does not have a current cycle-limit failure");
+        result = await r.runs.grantCycle({ taskId, priorCount: cycle.count, newLimit: cycle.limit + 1, requestId, smithyEventId: cycle.failureEventId, actorId: context.actor.userId, createdAt: this.now() });
+      }
+      const assignee = task.assigneeId ? await r.users.findById(task.assigneeId) : null;
+      if (!assignee || assignee.kind !== "AGENT") throw new ValidationError("The task must be assigned to a configured agent before forcing a cycle");
+      const webhook = await r.users.getWebhookConfiguration(assignee.id);
+      if (!webhook?.webhookUrl || !webhook.secretCiphertext) throw new ValidationError("The assigned agent does not have a configured Smithy webhook");
+      if (result.created) await r.activity.record({ projectId: task.projectId, taskId, actorId: context.actor.userId, action: "task.agent_cycle_forced", metadata: { priorCount: result.grant.priorCount, newLimit: result.grant.newLimit } });
+      return { grant: result.grant, duplicate: !result.created, agentId: assignee.id, webhook };
+    });
   }
 
   async claim(context: RequestContext, runId: string, leaseMs = 60_000) {

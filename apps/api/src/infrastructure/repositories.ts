@@ -435,11 +435,35 @@ function toAgentRun(row: Record<string, unknown>): AgentRunEntity {
 }
 
 function createAgentRunRepository(db: DatabasePort): AgentRunRepository {
+  const toCycleGrant = (row: Row): import("../application/models.js").AgentCycleGrantEntity => ({ taskId: text(row.task_id), priorCount: Number(row.prior_count), newLimit: Number(row.new_limit), requestId: text(row.request_id), smithyEventId: text(row.smithy_event_id), actorId: text(row.actor_id), createdAt: date(row.created_at) });
   return {
     async create(input) { await db.prepare("INSERT INTO agent_runs (id, task_id, project_id, requested_by_id, kind, status, attempt_count, max_attempts, lease_owner, lease_expires_at, heartbeat_at, timeout_at, last_error, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.projectId, input.requestedById, input.kind, input.status, input.attemptCount, input.maxAttempts, input.leaseOwner, input.leaseExpiresAt, input.heartbeatAt, input.timeoutAt, input.lastError, input.createdAt, input.updatedAt, input.completedAt); return input; },
     async findById(id) { const row = await db.prepare("SELECT * FROM agent_runs WHERE id = ?").get(id); return row ? toAgentRun(row) : null; },
     async listForTask(taskId) { return (await db.prepare("SELECT * FROM agent_runs WHERE task_id = ? ORDER BY created_at DESC, id DESC").all(taskId)).map(toAgentRun); },
     async countForTask(taskId) { const row = await db.prepare("SELECT COUNT(*) AS count FROM agent_runs WHERE task_id = ?").get(taskId); return Number(row?.count ?? 0); },
+    async cycleState(taskId) {
+      const [runRow, grantRows, failureRow] = await Promise.all([
+        db.prepare("SELECT COUNT(*) AS count FROM agent_runs WHERE task_id = ?").get(taskId),
+        db.prepare("SELECT request_id, created_at FROM agent_cycle_grants WHERE task_id = ? ORDER BY created_at DESC, request_id DESC").all(taskId),
+        db.prepare("SELECT event_id, created_at FROM agent_logs WHERE task_id = ? AND content LIKE ? ORDER BY created_at DESC, id DESC LIMIT 1").get(taskId, "%maximum autonomous delivery cycle limit%"),
+      ]);
+      const count = Number(runRow?.count ?? 0);
+      const limit = 6 + grantRows.length;
+      const latestGrantAt = grantRows[0] ? date(grantRows[0].created_at) : null;
+      const failureAt = failureRow ? date(failureRow.created_at) : null;
+      const rawLogEventId = failureRow ? nullableText(failureRow.event_id) : null;
+      const parts = rawLogEventId?.split(":") ?? [];
+      const failureEventId = parts.length >= 3 ? parts.slice(0, -2).join(":") : null;
+      const limitFailure = count >= limit && Boolean(failureEventId) && (!latestGrantAt || failureAt! > latestGrantAt);
+      return { count, limit, limitFailure, failureEventId: limitFailure ? failureEventId : null };
+    },
+    async findCycleGrant(requestId) { const row = await db.prepare("SELECT * FROM agent_cycle_grants WHERE request_id = ?").get(requestId); return row ? toCycleGrant(row) : null; },
+    async grantCycle(input) {
+      const result = await db.prepare("INSERT OR IGNORE INTO agent_cycle_grants (task_id, prior_count, new_limit, request_id, smithy_event_id, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(input.taskId, input.priorCount, input.newLimit, input.requestId, input.smithyEventId, input.actorId, input.createdAt);
+      const row = await db.prepare("SELECT * FROM agent_cycle_grants WHERE task_id = ? AND prior_count = ?").get(input.taskId, input.priorCount);
+      if (!row) throw new Error("Cycle grant was not found after insert");
+      return { grant: toCycleGrant(row), created: result.changes > 0 };
+    },
     async expire(now) { return (await db.prepare("UPDATE agent_runs SET status = 'FAILED', last_error = COALESCE(last_error, 'Run lease or timeout expired'), completed_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE status IN ('PENDING', 'RUNNING') AND ((timeout_at IS NOT NULL AND timeout_at <= ?) OR (lease_expires_at IS NOT NULL AND lease_expires_at <= ?))").run(now, now, now, now)).changes; },
     async claim(id, owner, now, leaseExpiresAt) { return Boolean((await db.prepare("UPDATE agent_runs SET status = 'RUNNING', attempt_count = attempt_count + 1, lease_owner = ?, lease_expires_at = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status IN ('PENDING', 'FAILED') AND attempt_count < max_attempts").run(owner, leaseExpiresAt, now, now, id)).changes); },
     async heartbeat(id, owner, now, leaseExpiresAt) { return Boolean((await db.prepare("UPDATE agent_runs SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'RUNNING' AND lease_owner = ?").run(now, leaseExpiresAt, now, id, owner)).changes); },

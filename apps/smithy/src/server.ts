@@ -19,6 +19,17 @@ export function createSmithyServer(config = loadConfig(), runner = new SmithyRun
       response.end(JSON.stringify(cancelled ? { cancelled: true, eventId: cancelMatch[1] } : { error: "Job is not cancellable" }));
       return;
     }
+    const forceMatch = request.method === "POST" ? request.url?.match(/^\/agents\/([^/]+)\/force-cycle$/) : null;
+    if (forceMatch) {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", async () => {
+        const signature = request.headers["x-taskforge-signature"];
+        const result = await runner.forceCycle(forceMatch[1]!, { "x-taskforge-signature": Array.isArray(signature) ? signature[0] : signature }, Buffer.concat(chunks).toString("utf8"));
+        response.writeHead(result.status, { "Content-Type": "application/json" }); response.end(result.body);
+      });
+      return;
+    }
     if (request.method !== "POST" || !request.url?.startsWith("/agents/")) { response.writeHead(404); response.end(JSON.stringify({ error: "Not found" })); return; }
     const provider = request.url.slice("/agents/".length).split("/")[0] ?? "";
     const chunks: Buffer[] = [];
