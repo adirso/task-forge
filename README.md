@@ -168,6 +168,7 @@ All application endpoints are under `/api`. Send either a human JWT or agent tok
 | `POST` | `/api/projects/:id/members` | Add a person or agent (owner/admin only) |
 | `DELETE` | `/api/projects/:id/members/:userId` | Remove a member and unassign their tasks (owner/admin only) |
 | `GET/POST` | `/api/projects/:id/tasks` | List or create project tasks |
+| `POST` | `/api/projects/:id/tasks/claim` | Atomically claim the next unassigned task whose dependencies satisfy the project policy |
 | `GET/POST` | `/api/projects/:id/phases` | List or create project phases |
 | `PATCH/DELETE` | `/api/phases/:id` | Activate, edit, or delete a phase |
 | `GET/PATCH/DELETE` | `/api/tasks/:id` | Read, update, or delete a task |
@@ -198,6 +199,8 @@ TaskForge is an open-source project and welcomes issues, documentation improveme
 - Keep Smithy changes provider-agnostic: provider names are routing labels and commands remain operator configuration.
 
 Pull requests should explain the change, list validation commands, call out skipped checks (for example a local native-module limitation), and identify any migration or rollout considerations. Automated checks are required before merge.
+
+Task dependencies gate autonomous work. `DONE` dependencies always unblock a task; project owners and administrators can choose whether `CANCELLED` dependencies also count as resolved in project settings. Blocked tasks stay visible on the board and through the API with an actionable reason, but claim queries omit them until every dependency reaches an accepted terminal status.
 
 ## Troubleshooting
 

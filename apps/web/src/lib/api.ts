@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
   id: string; taskId: string; projectId: string; requestedById: string; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
@@ -63,6 +63,7 @@ let mockProjects: Project[] = [{
   defaultStatus: "TODO",
   agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW },
   mergeTarget: "phase",
+  dependencyResolutionStatuses: [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES],
   ownerId: MOCK_USER.id,
   createdAt: MOCK_NOW,
   updatedAt: MOCK_NOW,
@@ -435,7 +436,7 @@ export const api = {
   mergePhaseToMain: (projectId: string, phaseId: string) => request<{ merge: { phaseId: string; branchName: string; target: "main" } }>(`/projects/${projectId}/phases/${phaseId}/merge-to-main`, { method: "POST" }),
   createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
-  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"]; mergeTarget?: Project["mergeTarget"] }) =>
+  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"]; mergeTarget?: Project["mergeTarget"]; dependencyResolutionStatuses?: Project["dependencyResolutionStatuses"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),
   enableAgentWorkflow: (id: string) => request<{ project: Project }>(`/projects/${id}/agent-workflow/enable`, { method: "POST" }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),

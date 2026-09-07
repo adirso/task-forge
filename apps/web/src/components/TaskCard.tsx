@@ -1,5 +1,5 @@
 import type { Project, Task } from "@taskforge/contracts";
-import { CalendarDays, CheckSquare2, GitBranch, GitPullRequest } from "lucide-react";
+import { CalendarDays, CheckSquare2, CircleAlert, GitBranch, GitPullRequest } from "lucide-react";
 import { formatDate, priorityMeta } from "../lib/ui";
 import { Avatar } from "./Avatar";
 import { TaskTagPills } from "./TaskTags";
@@ -13,6 +13,7 @@ export function TaskCard({ task, project, onOpen }: { task: Task; project: Proje
       <h3>{task.title}</h3>
       <TaskTagPills tags={task.tags} limit={3} />
       <TaskDependencyPills dependencies={task.dependencies} limit={2} />
+      {task.blockedReason && <span className="task-blocked-reason"><CircleAlert />{task.blockedReason}</span>}
       {task.parentId && <span className="subtask-label"><CheckSquare2 /> Subtask</span>}
       <div className="card-meta">
         <span>{task.estimatePoints !== null ? <><b>{task.estimatePoints}</b> pts</> : "No estimate"}</span>
