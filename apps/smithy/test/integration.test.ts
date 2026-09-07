@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { test } from "node:test";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { HEADLESS_PROVIDER_COMMANDS } from "../src/config.js";
-import { executeCommand, renderCommand } from "../src/command.js";
+import { executeCommand, gitSandboxPaths, renderCommand } from "../src/command.js";
 import { SmithyRunner } from "../src/runner.js";
 import { checkProvider } from "../src/preflight.js";
 import { redact } from "../src/security.js";
@@ -114,6 +114,16 @@ test("provider worktrees are isolated and reusable", async () => {
     const first = await prepareWorktree(repo, null, "matrix-task");
     const second = await prepareWorktree(repo, null, "matrix-task");
     assert.equal(first, second);
+    const gitPaths = await gitSandboxPaths(first);
+    const commonDirectory = path.join(await realpath(repo), ".git");
+    assert.ok(gitPaths.readPaths.includes(commonDirectory));
+    assert.ok(!gitPaths.writePaths.includes(commonDirectory));
+    assert.ok(gitPaths.writePaths.includes(path.join(commonDirectory, "objects")));
+    assert.ok(gitPaths.writePaths.includes(path.join(commonDirectory, "refs")));
+    assert.ok(gitPaths.writePaths.includes(path.join(commonDirectory, "logs")));
+    assert.ok(gitPaths.denyWritePaths.includes(path.join(commonDirectory, "hooks")));
+    assert.ok(gitPaths.denyWritePaths.includes(path.join(commonDirectory, "config")));
+    assert.ok(gitPaths.denyWritePaths.includes(path.join(first, ".git")));
     await writeFile(path.join(first, "isolated.txt"), "only worktree\n");
     await assert.rejects(readFile(path.join(repo, "isolated.txt")));
   } finally { await rm(repo, { recursive: true, force: true }); }

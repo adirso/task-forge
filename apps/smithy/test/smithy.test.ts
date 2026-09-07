@@ -33,6 +33,7 @@ test("configuration rejects non-loopback execution hosts", () => {
   assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PROVIDERS: "{}" }).host, "127.0.0.1");
   assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PREFLIGHT: "true", SMITHY_PROVIDERS: JSON.stringify({ codex: { cmd: "codex exec {prompt}", healthCmd: "codex login status", webhookSecret: "secret", apiToken: "token" } }) }).preflight, true);
   assert.equal(loadConfig({ SMITHY_PROVIDERS: "{}" }).sandbox.mode, "required");
+  assert.deepEqual(loadConfig({ SMITHY_PROVIDERS: "{}" }).sandbox.networkAllow, []);
 });
 
 test("sandbox configuration validates allowlists and resource limits", () => {
@@ -55,6 +56,7 @@ test("sandbox command compilation is backend-neutral and fails closed", async ()
   const policy = { ...DEFAULT_SANDBOX_POLICY, networkAllow: ["github.com:443"], readPaths: ["/opt/provider-auth"], writePaths: ["/tmp/provider-cache"] };
   const mac = await buildSandboxInvocation("provider", ["run"], "/work/task", policy, {
     platform: "darwin",
+    extraReadPaths: ["/repo/.git"], extraWritePaths: ["/repo/.git/objects"], denyWritePaths: ["/repo/.git/hooks", "/repo/.git/config"],
     resolveExecutable: async (name) => name === "provider" ? "/usr/bin/provider" : name === "sandbox-exec" ? "/usr/bin/sandbox-exec" : null,
   });
   assert.equal(mac.executable, "/bin/sh");
@@ -62,9 +64,13 @@ test("sandbox command compilation is backend-neutral and fails closed", async ()
   assert.match(mac.args.join(" "), /github\.com:443/);
   assert.match(mac.args.join(" "), /\/work\/task/);
   assert.match(mac.args.join(" "), /ulimit|smithy-limits/);
+  assert.doesNotMatch(mac.args.join(" "), /\(allow process\*\)/);
+  assert.match(mac.args.join(" "), /\(allow process-exec\)/);
+  assert.match(mac.args.join(" "), /\(deny file-write\* .*\/repo\/\.git\/hooks/);
 
   const linux = await buildSandboxInvocation("provider", ["run"], "/work/task", { ...policy, networkAllow: ["*"] }, {
     platform: "linux", pathExists: async () => true,
+    extraReadPaths: ["/repo/.git"], extraWritePaths: ["/repo/.git/objects"], denyWritePaths: ["/repo/.git/hooks"],
     resolveExecutable: async (name) => ({ provider: "/usr/bin/provider", bwrap: "/usr/bin/bwrap", prlimit: "/usr/bin/prlimit" })[name] ?? null,
   });
   assert.equal(linux.executable, "/usr/bin/prlimit");
@@ -73,6 +79,11 @@ test("sandbox command compilation is backend-neutral and fails closed", async ()
   assert.ok(linux.args.includes(`--cpu=${policy.cpuSeconds}:${policy.cpuSeconds}`));
   assert.ok(linux.args.includes(`--as=${policy.memoryMb * 1024 * 1024}:${policy.memoryMb * 1024 * 1024}`));
   assert.ok(linux.args.includes(`--nproc=${policy.maxProcesses}:${policy.maxProcesses}`));
+  const linuxArguments = linux.args.join("\0");
+  assert.match(linuxArguments, /--ro-bind\0\/repo\/\.git\0\/repo\/\.git/);
+  assert.match(linuxArguments, /--bind\0\/repo\/\.git\/objects\0\/repo\/\.git\/objects/);
+  assert.doesNotMatch(linuxArguments, /--bind\0\/repo\/\.git\0\/repo\/\.git(?:\0|$)/);
+  assert.match(linuxArguments, /--ro-bind\0\/repo\/\.git\/hooks\0\/repo\/\.git\/hooks/);
   await assert.rejects(buildSandboxInvocation("provider", [], "/work/task", policy, {
     platform: "linux", pathExists: async () => true,
     resolveExecutable: async (name) => ({ provider: "/usr/bin/provider", bwrap: "/usr/bin/bwrap", prlimit: "/usr/bin/prlimit" })[name] ?? null,

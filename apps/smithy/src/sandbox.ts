@@ -24,9 +24,9 @@ export const DEFAULT_SANDBOX_POLICY: Readonly<SandboxPolicy> = Object.freeze({
   backend: "auto",
   readPaths: [],
   writePaths: [],
-  // Autonomous delivery needs TaskForge, GitHub, and dependency registries. An
-  // operator can replace this explicit wildcard with a backend-supported list.
-  networkAllow: ["*"],
+  // Network access is denied until an operator explicitly grants the provider
+  // endpoints required by their delivery workflow.
+  networkAllow: [],
   environmentAllow: [],
   cpuSeconds: 30 * 60,
   memoryMb: 4_096,
@@ -120,6 +120,7 @@ type InvocationOptions = {
   env?: NodeJS.ProcessEnv;
   extraReadPaths?: string[];
   extraWritePaths?: string[];
+  denyWritePaths?: string[];
   resolveExecutable?: (executable: string) => Promise<string | null>;
   pathExists?: (candidate: string) => Promise<boolean>;
 };
@@ -138,9 +139,10 @@ const exists = async (candidate: string) => { try { await access(candidate); ret
 const quote = (value: string) => JSON.stringify(value);
 const uniquePaths = (values: string[]) => [...new Set(values.map((value) => path.resolve(value)))].sort((left, right) => left.length - right.length);
 
-function macProfile(cwd: string, executable: string, policy: SandboxPolicy, extraReadPaths: string[], extraWritePaths: string[]) {
+function macProfile(cwd: string, executable: string, policy: SandboxPolicy, extraReadPaths: string[], extraWritePaths: string[], denyWritePaths: string[]) {
   const readPaths = uniquePaths(["/System", "/usr", "/bin", "/sbin", "/Library", "/private/etc", path.dirname(executable), cwd, ...policy.readPaths, ...extraReadPaths]);
   const writePaths = uniquePaths([cwd, process.env.TMPDIR ?? "/private/tmp", ...policy.writePaths, ...extraWritePaths]);
+  const deniedWrites = uniquePaths(denyWritePaths);
   const network = policy.networkAllow.length === 0
     ? []
     : policy.networkAllow[0] === "*"
@@ -149,13 +151,17 @@ function macProfile(cwd: string, executable: string, policy: SandboxPolicy, extr
   return [
     "(version 1)",
     "(deny default)",
-    "(allow process*)",
+    "(allow process-exec)",
+    "(allow process-fork)",
     "(allow signal (target self))",
     "(allow sysctl-read)",
-    "(allow mach-lookup)",
+    // Providers need preferences, trust, identity, logging, and DNS services;
+    // avoid the unrestricted mach-lookup capability.
+    ...["com.apple.cfprefsd.agent", "com.apple.SecurityServer", "com.apple.trustd.agent", "com.apple.system.logger", "com.apple.system.opendirectoryd.libinfo", "com.apple.dnssd.service"].map((service) => `(allow mach-lookup (global-name ${quote(service)}))`),
     "(allow file-read-metadata)",
     `(allow file-read* ${readPaths.map((entry) => `(subpath ${quote(entry)})`).join(" ")})`,
     `(allow file-write* ${writePaths.map((entry) => `(subpath ${quote(entry)})`).join(" ")})`,
+    ...deniedWrites.map((entry) => `(deny file-write* (literal ${quote(entry)}) (subpath ${quote(entry)}))`),
     ...network,
   ].join(" ");
 }
@@ -174,9 +180,10 @@ export async function buildSandboxInvocation(executable: string, args: string[],
   if (!sandboxExecutable) throw new SandboxPolicyError("backend", `${backend} is required by the Smithy sandbox policy but is not installed`);
   const extraReadPaths = options.extraReadPaths ?? [];
   const extraWritePaths = options.extraWritePaths ?? [];
+  const denyWritePaths = options.denyWritePaths ?? [];
 
   if (backend === "sandbox-exec") {
-    const profile = macProfile(cwd, providerExecutable, policy, extraReadPaths, extraWritePaths);
+    const profile = macProfile(cwd, providerExecutable, policy, extraReadPaths, extraWritePaths, denyWritePaths);
     // Darwin cannot reliably lower RLIMIT_AS for processes using its shared
     // region. CPU is enforced here; aggregate memory/process limits are
     // enforced by executeCommand's process-group watchdog.
@@ -203,6 +210,7 @@ export async function buildSandboxInvocation(executable: string, args: string[],
   for (const entry of destinationDirectories) bwrapArgs.push("--dir", entry);
   for (const entry of readPaths) bwrapArgs.push("--ro-bind", entry, entry);
   for (const entry of writePaths) bwrapArgs.push("--bind", entry, entry);
+  for (const entry of denyWritePaths) if (await pathExists(entry)) bwrapArgs.push("--ro-bind", entry, entry);
   bwrapArgs.push("--chdir", cwd, providerExecutable, ...args);
   return {
     executable: prlimit,

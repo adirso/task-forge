@@ -41,12 +41,32 @@ export function providerEnvironment(parent: NodeJS.ProcessEnv, credential?: { to
 
 const readGit = promisify(execFile);
 
-async function gitControlPaths(cwd: string) {
+export interface GitSandboxPaths { readPaths: string[]; writePaths: string[]; denyWritePaths: string[]; }
+
+export async function gitSandboxPaths(cwd: string): Promise<GitSandboxPaths> {
   try {
-    const result = await readGit("git", ["rev-parse", "--absolute-git-dir", "--git-common-dir"], { cwd });
-    return [...new Set(result.stdout.split(/\r?\n/).filter(Boolean).map((entry) => path.resolve(cwd, entry)))];
+    const [gitDirectory, commonDirectory] = await Promise.all([
+      readGit("git", ["rev-parse", "--absolute-git-dir"], { cwd }),
+      readGit("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd }),
+    ]);
+    const gitDir = path.resolve(cwd, gitDirectory.stdout.trim());
+    const commonDir = path.resolve(cwd, commonDirectory.stdout.trim());
+    return {
+      readPaths: [...new Set([gitDir, commonDir])],
+      // A linked worktree's private git directory may be written in full. The
+      // shared repository remains read-only except for Git's object/ref/log
+      // stores, which are required for commit and push. Hooks and config never
+      // receive a write grant.
+      writePaths: [...new Set([
+        ...(gitDir === commonDir ? [] : [gitDir]),
+        path.join(commonDir, "objects"),
+        path.join(commonDir, "refs"),
+        path.join(commonDir, "logs"),
+      ])],
+      denyWritePaths: [path.join(cwd, ".git"), path.join(commonDir, "config"), path.join(commonDir, "hooks")],
+    };
   } catch {
-    return [];
+    return { readPaths: [], writePaths: [], denyWritePaths: [] };
   }
 }
 
@@ -103,8 +123,8 @@ export async function executeCommand(
   const rendered = renderCommand(template, prompt);
   let invocation;
   try {
-    const gitPaths = policy.mode === "required" ? await gitControlPaths(cwd) : [];
-    invocation = await (dependencies.buildInvocation ?? buildSandboxInvocation)(rendered.executable, rendered.args, cwd, policy, { env: environment, extraReadPaths: gitPaths, extraWritePaths: gitPaths });
+    const gitPaths = policy.mode === "required" ? await gitSandboxPaths(cwd) : { readPaths: [], writePaths: [], denyWritePaths: [] };
+    invocation = await (dependencies.buildInvocation ?? buildSandboxInvocation)(rendered.executable, rendered.args, cwd, policy, { env: environment, extraReadPaths: gitPaths.readPaths, extraWritePaths: gitPaths.writePaths, denyWritePaths: gitPaths.denyWritePaths });
   } catch (error) {
     const message = error instanceof SandboxPolicyError
       ? `Sandbox ${error.category} policy prevented provider startup: ${error.message}`
