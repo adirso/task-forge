@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { TASK_CLAIM_SOURCE_STATUSES, TASK_CLAIM_TARGET_STATUS, TASK_REVIEW_STATUSES, type TaskStatus } from "@taskforge/contracts";
+import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_CLAIM_SOURCE_STATUSES, TASK_CLAIM_TARGET_STATUS, TASK_REVIEW_STATUSES, type TaskStatus } from "@taskforge/contracts";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext, TokenScope } from "./context.js";
 import type { PageRequest, TaskDependencyEntity, TaskEntity, TaskUpdateEntity } from "./models.js";
@@ -61,6 +61,11 @@ export class TaskApplicationService implements TaskService {
         const project = await repositories.projects.findById(existing.projectId);
         if (!project) throw new NotFoundError("Project");
         this.assertStatusAvailable(project.availableStatuses, input.status);
+        if (context.actor.kind === "AGENT" && input.status === TASK_CLAIM_TARGET_STATUS && TASK_CLAIM_SOURCE_STATUSES.includes(existing.status as (typeof TASK_CLAIM_SOURCE_STATUSES)[number])) {
+          const resolutionStatuses = project.dependencyResolutionStatuses ?? DEFAULT_DEPENDENCY_RESOLUTION_STATUSES;
+          const blockers = (await repositories.dependencies.listForTask(existing.id)).filter((dependency) => !resolutionStatuses.includes(dependency.status as (typeof resolutionStatuses)[number]));
+          if (blockers.length) throw new ValidationError(`Task is blocked by incomplete dependencies: ${blockers.map((dependency) => `${dependency.projectKey}-${dependency.number} (${dependency.status})`).join(", ")}`);
+        }
         const reviewHandoff = project.agentWorkflow?.reviewHandoff ?? "READY_FOR_REVIEW";
         if (input.status === reviewHandoff && context.actor.kind === "AGENT") {
           if (input.runId) {
@@ -109,7 +114,7 @@ export class TaskApplicationService implements TaskService {
       if (!sourceStatuses.length) {
         throw new ValidationError(`Task claiming requires at least one claim source status (${TASK_CLAIM_SOURCE_STATUSES.join(", ")}) to be enabled. Enable one in project settings before claiming tasks.`);
       }
-      const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS }, { ...options, taskId: run?.taskId });
+      const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS, dependencyResolutionStatuses: [...(project.dependencyResolutionStatuses ?? DEFAULT_DEPENDENCY_RESOLUTION_STATUSES)] }, { ...options, taskId: run?.taskId });
       if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
       if (task.assigneeId !== context.actor.userId) await enqueueTaskStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context, options?.runId ?? null, this.newId, this.now);

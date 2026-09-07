@@ -21,7 +21,7 @@ export interface ProjectRepository {
   allocateSortOrder(): Promise<number>;
   reorder(ids: string[]): Promise<void>;
   create(input: ProjectEntity): Promise<ProjectEntity>;
-  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget">>): Promise<ProjectEntity>;
+  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses">>): Promise<ProjectEntity>;
   delete(id: string): Promise<void>;
 }
 
@@ -50,7 +50,7 @@ export interface TaskRepository {
   listByProject(projectId: string, filters: TaskFilters | undefined, page: PageRequest): Promise<Page<TaskEntity>>;
   listForAssignee(assigneeId: string, status?: string): Promise<TaskEntity[]>;
   listUsedStatuses(projectId: string): Promise<TaskEntity["status"][]>;
-  claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"] }, options?: { phaseId?: string | null; priority?: string; taskId?: string }): Promise<(TaskEntity & { previousStatus?: TaskEntity["status"] }) | null>;
+  claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"]; dependencyResolutionStatuses: TaskEntity["status"][] }, options?: { phaseId?: string | null; priority?: string; taskId?: string }): Promise<(TaskEntity & { previousStatus?: TaskEntity["status"] }) | null>;
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   unassignForProjectMember(projectId: string, userId: string): Promise<void>;
   countByPhase(phaseId: string): Promise<number>;

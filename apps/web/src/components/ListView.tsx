@@ -79,7 +79,7 @@ export function ListView({ tasks, phases, project, onOpen }: { tasks: Task[]; ph
                       <td>{task.assignee ? <span className="assignee-cell"><Avatar user={task.assignee} size="sm" /> {task.assignee.name}</span> : <span className="muted">Unassigned</span>}</td>
                       <td><span className={`priority priority-${task.priority.toLowerCase()}`}>{priorityMeta[task.priority].symbol} {priorityMeta[task.priority].label}</span></td>
                       <td><TaskTagPills tags={task.tags} limit={3} />{!task.tags.length && <span className="muted">—</span>}</td>
-                      <td><TaskDependencyPills dependencies={task.dependencies} limit={2} />{!task.dependencies.length && <span className="muted">—</span>}</td>
+                      <td><div className="list-dependency-state"><TaskDependencyPills dependencies={task.dependencies} limit={2} />{!task.dependencies.length && <span className="muted">—</span>}{task.blockedReason && <small>{task.blockedReason}</small>}</div></td>
                       <td>{task.pullRequestUrl ? <a className={`list-pr pr-${task.pullRequestState?.toLowerCase() ?? "closed"}`} href={task.pullRequestUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} title={task.pullRequestTitle ?? task.pullRequestUrl}><GitPullRequest /> {task.pullRequestState ?? "PR"}</a> : <span className="muted">—</span>}</td>
                       <td>{task.dueDate ? <span className="date-cell"><CalendarDays /> {formatDate(task.dueDate)}</span> : <span className="muted">—</span>}</td>
                       <td>{task.estimatePoints ?? <span className="muted">—</span>}</td>

@@ -123,6 +123,14 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
     ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'hidden_empty_statuses'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'hidden_empty_statuses'", []));
   assert.equal(hasHiddenEmptyStatusesColumn, true);
+  const hasDependencyResolutionStatusesColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'dependency_resolution_statuses'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'dependency_resolution_statuses'", []));
+  assert.equal(hasDependencyResolutionStatusesColumn, true);
+  if (expectsLegacyTask) {
+    const project = await adapter.get<{ dependency_resolution_statuses: string }>("SELECT dependency_resolution_statuses FROM projects WHERE id = ?", ["project-1"]);
+    assert.deepEqual(JSON.parse(project!.dependency_resolution_statuses), ["DONE", "CANCELLED"]);
+  }
   const hasWebhookTable = driver === "sqlite"
     ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'webhook_deliveries'", []));

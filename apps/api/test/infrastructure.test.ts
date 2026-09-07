@@ -83,37 +83,42 @@ test("reporting repository owns portable reporting queries and row mapping", asy
   assert.ok(queries.some(({ sql, params }) => sql.includes("LIMIT 20") && params.at(-1) === "2026-08-22T08:00:00.000Z"), "stuck-task limits do not use prepared placeholders");
 });
 
-test("claim repository repeats enabled source eligibility in the atomic update", async () => {
-  const queries: Array<{ operation: "get" | "run" | "all"; sql: string; params: unknown[] }> = [];
-  const database: DatabasePort = {
-    dialect: "mysql",
-    prepare(sql) {
-      return {
-        async get(...params) {
-          queries.push({ operation: "get", sql, params });
-          if (sql.startsWith("SELECT id, status FROM tasks")) return { id: "task-49", status: "TODO" };
-          if (sql.startsWith("SELECT * FROM tasks")) return { id: "task-49", project_id: "project-1", number: 49, title: "Ready work", description: "", definition_of_done: "", status: "IN_PROGRESS", priority: "HIGH", type: "BUG", assignee_id: null, creator_id: "owner-1", parent_id: null, branch: null, due_date: null, estimate_points: null, phase_id: null, pull_request_url: null, pull_request_title: null, pull_request_state: null, position: 0, created_at: "2026-08-22T00:00:00.000Z", updated_at: "2026-08-22T01:00:00.000Z" };
-          return undefined;
-        },
-        async run(...params) { queries.push({ operation: "run", sql, params }); return { changes: 1 }; },
-        async all(...params) { queries.push({ operation: "all", sql, params }); return []; },
-      };
-    },
-    transaction(callback) { return callback; },
-  };
-  const claimed = await createRepositories(database).tasks.claimNext(
-    "project-1",
-    "agent-1",
-    { sourceStatuses: ["BACKLOG", "TODO"], targetStatus: "IN_PROGRESS" },
-  );
-  assert.equal(claimed?.status, "IN_PROGRESS");
-  const candidate = queries.find(({ operation, sql }) => operation === "get" && sql.startsWith("SELECT id, status FROM tasks"));
-  const update = queries.find(({ operation, sql }) => operation === "run" && sql.startsWith("UPDATE tasks SET assignee_id"));
-  assert.match(candidate?.sql ?? "", /status IN \(\?, \?\)/);
-  assert.deepEqual(candidate?.params.slice(0, 3), ["project-1", "BACKLOG", "TODO"]);
-  assert.match(update?.sql ?? "", /project_id = \? AND status IN \(\?, \?\) AND assignee_id IS NULL/);
-  assert.deepEqual(update?.params.slice(0, 2), ["agent-1", "IN_PROGRESS"]);
-  assert.deepEqual(update?.params.slice(-3), ["project-1", "BACKLOG", "TODO"]);
+test("claim repository rechecks source and dependency eligibility in the atomic update", async () => {
+  for (const dialect of ["sqlite", "mysql"] as const) {
+    const queries: Array<{ operation: "get" | "run" | "all"; sql: string; params: unknown[] }> = [];
+    const database: DatabasePort = {
+      dialect,
+      prepare(sql) {
+        return {
+          async get(...params) {
+            queries.push({ operation: "get", sql, params });
+            if (sql.startsWith("SELECT t.id, t.status FROM tasks")) return { id: "task-49", status: "TODO" };
+            if (sql.startsWith("SELECT * FROM tasks")) return { id: "task-49", project_id: "project-1", number: 49, title: "Ready work", description: "", definition_of_done: "", status: "IN_PROGRESS", priority: "HIGH", type: "BUG", assignee_id: null, creator_id: "owner-1", parent_id: null, branch: null, due_date: null, estimate_points: null, phase_id: null, pull_request_url: null, pull_request_title: null, pull_request_state: null, position: 0, created_at: "2026-08-22T00:00:00.000Z", updated_at: "2026-08-22T01:00:00.000Z" };
+            return undefined;
+          },
+          async run(...params) { queries.push({ operation: "run", sql, params }); return { changes: 1 }; },
+          async all(...params) { queries.push({ operation: "all", sql, params }); return []; },
+        };
+      },
+      transaction(callback) { return callback; },
+    };
+    const claimed = await createRepositories(database).tasks.claimNext(
+      "project-1",
+      "agent-1",
+      { sourceStatuses: ["BACKLOG", "TODO"], targetStatus: "IN_PROGRESS", dependencyResolutionStatuses: ["DONE", "CANCELLED"] },
+    );
+    assert.equal(claimed?.status, "IN_PROGRESS");
+    const candidate = queries.find(({ operation, sql }) => operation === "get" && sql.startsWith("SELECT t.id, t.status FROM tasks"));
+    const update = queries.find(({ operation, sql }) => operation === "run" && sql.startsWith("UPDATE tasks SET assignee_id"));
+    assert.match(candidate?.sql ?? "", /t\.status IN \(\?, \?\)/);
+    assert.match(candidate?.sql ?? "", /NOT EXISTS .*dependency\.status NOT IN \(\?, \?\)/);
+    assert.deepEqual(candidate?.params.slice(0, 5), ["project-1", "BACKLOG", "TODO", "DONE", "CANCELLED"]);
+    assert.match(update?.sql ?? "", /project_id = \? AND status IN \(\?, \?\) AND assignee_id IS NULL/);
+    assert.match(update?.sql ?? "", /NOT EXISTS .*dependency\.status NOT IN \(\?, \?\)/);
+    assert.deepEqual(update?.params.slice(0, 2), ["agent-1", "IN_PROGRESS"]);
+    assert.deepEqual(update?.params.slice(-2), ["DONE", "CANCELLED"]);
+    if (dialect === "mysql") assert.match(update?.sql ?? "", /id IN \(SELECT claimable\.id FROM \(SELECT eligible\.id.*GROUP BY eligible\.id/);
+  }
 });
 
 test("agent-run repository enforces expiry, task-scoped claims, and lease-independent cancellation", async () => {

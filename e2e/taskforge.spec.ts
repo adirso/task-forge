@@ -130,6 +130,35 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByRole("menuitem", { name: "Delete" })).toHaveCount(0);
   });
 
+  test("shows dependency blockers and configures cancellation semantics", async ({ page }) => {
+    await signIn(page);
+    const projectKey = `D${Date.now() % 1000000}`;
+    await createProject(page, `Dependency Workspace ${Date.now() % 10000}`, projectKey);
+
+    await page.getByRole("button", { name: "Create task" }).first().click();
+    await page.getByLabel("Task name").fill("Dependency blocker");
+    await page.getByLabel("Task status").selectOption("TODO");
+    await page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true }).click({ force: true });
+    await expect(page.getByRole("button", { name: new RegExp(`${projectKey}-\\d+: Dependency blocker`) })).toBeVisible();
+
+    await page.getByRole("button", { name: "Create task" }).first().click();
+    await page.getByLabel("Task name").fill("Blocked dependent task");
+    await page.getByLabel("Task status").selectOption("TODO");
+    await page.getByRole("button", { name: "Select a task dependency…" }).click();
+    await page.getByRole("listbox", { name: "Available dependencies" }).getByRole("option", { name: /Dependency blocker/ }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true }).click({ force: true });
+    await expect(page.getByText(new RegExp(`Waiting for dependencies: ${projectKey}-\\d+ \\(TODO\\)`))).toBeVisible();
+
+    await openProjectSettings(page);
+    const cancellationPolicy = page.getByLabel("Cancelled tasks satisfy dependencies");
+    await expect(cancellationPolicy).toBeChecked();
+    await cancellationPolicy.uncheck();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Project updated")).toBeVisible();
+    await openProjectSettings(page);
+    await expect(page.getByLabel("Cancelled tasks satisfy dependencies")).not.toBeChecked();
+  });
+
   test("shows live, stalled, failed, and completed Smithy run observability", async ({ page }) => {
     await signIn(page);
     await createProject(page, `Observability Workspace ${Date.now() % 10000}`, `O${Date.now() % 1000000}`);

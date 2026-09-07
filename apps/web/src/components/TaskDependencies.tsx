@@ -1,4 +1,4 @@
-import type { Task, TaskDependency } from "@taskforge/contracts";
+import type { DependencyResolutionStatus, Task, TaskDependency } from "@taskforge/contracts";
 import { useState } from "react";
 import { CheckCircle2, CircleAlert, X } from "lucide-react";
 import { statusMeta } from "../lib/ui";
@@ -14,7 +14,7 @@ export function TaskDependencyPills({ dependencies, limit }: { dependencies: Tas
   </span>;
 }
 
-export function TaskDependencyEditor({ value, tasks, projectKey, currentTaskId, onChange }: { value: string[]; tasks: Task[]; projectKey: string; currentTaskId?: string; onChange: (ids: string[]) => void }) {
+export function TaskDependencyEditor({ value, tasks, projectKey, currentTaskId, resolutionStatuses, onChange }: { value: string[]; tasks: Task[]; projectKey: string; currentTaskId?: string; resolutionStatuses: DependencyResolutionStatus[]; onChange: (ids: string[]) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
@@ -27,8 +27,8 @@ export function TaskDependencyEditor({ value, tasks, projectKey, currentTaskId, 
   const selected = value.map((id) => tasks.find((task) => task.id === id)).filter((task): task is Task => Boolean(task));
 
   return <div className="task-dependency-editor">
-    {selected.length > 0 && <div className="selected-task-dependencies">{selected.map((dependency) => <span className={`task-dependency-pill ${dependency.status === "DONE" || dependency.status === "CANCELLED" ? "is-resolved" : "is-blocking"}`} key={dependency.id}>
-      {dependency.status === "DONE" || dependency.status === "CANCELLED" ? <CheckCircle2 /> : <CircleAlert />} {projectKey}-{dependency.number} · {dependency.title} · {statusMeta[dependency.status].label}
+    {selected.length > 0 && <div className="selected-task-dependencies">{selected.map((dependency) => <span className={`task-dependency-pill ${resolutionStatuses.includes(dependency.status as DependencyResolutionStatus) ? "is-resolved" : "is-blocking"}`} key={dependency.id}>
+      {resolutionStatuses.includes(dependency.status as DependencyResolutionStatus) ? <CheckCircle2 /> : <CircleAlert />} {projectKey}-{dependency.number} · {dependency.title} · {statusMeta[dependency.status].label}
       <button type="button" aria-label={`Remove dependency ${dependency.title}`} onClick={() => onChange(value.filter((id) => id !== dependency.id))}><X /></button>
     </span>)}</div>}
     <div className="dependency-picker">
@@ -45,6 +45,6 @@ export function TaskDependencyEditor({ value, tasks, projectKey, currentTaskId, 
         </div>
       </div>}
     </div>
-    <small className="dependency-help">Incomplete dependencies block this task.</small>
+    <small className="dependency-help">Incomplete dependencies block agent claiming and start transitions. DONE always resolves a dependency{resolutionStatuses.includes("CANCELLED") ? "; CANCELLED also resolves it for this project" : "; CANCELLED remains blocking for this project"}.</small>
   </div>;
 }

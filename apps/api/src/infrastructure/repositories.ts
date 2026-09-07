@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
-import { agentWorkflowSchema } from "@taskforge/contracts";
+import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentWorkflowSchema, dependencyResolutionStatusesSchema, type TaskStatus } from "@taskforge/contracts";
 import type { ActivityEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunCredentialEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
 import type { AgentHandoffRepository, AgentLogRepository, AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, DeliveryMonitorRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskFindingRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
@@ -48,6 +47,14 @@ function configuredStatuses(value: unknown): TaskStatus[] {
   return [...DEFAULT_PROJECT_STATUSES];
 }
 
+function configuredDependencyResolutionStatuses(value: unknown) {
+  try {
+    const parsed = dependencyResolutionStatusesSchema.safeParse(typeof value === "string" ? JSON.parse(value) : value);
+    if (parsed.success) return parsed.data;
+  } catch { /* Legacy and malformed rows use the safe default. */ }
+  return [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES];
+}
+
 function toProject(row: Row): ProjectEntity {
   const availableStatuses = configuredStatuses(row.available_statuses);
   const configuredDefault = String(row.default_status ?? "TODO") as TaskStatus;
@@ -58,7 +65,7 @@ function toProject(row: Row): ProjectEntity {
   }
   let hiddenEmptyStatuses = availableStatuses;
   try { const parsed = JSON.parse(String(row.hidden_empty_statuses ?? "")); if (Array.isArray(parsed)) hiddenEmptyStatuses = availableStatuses.filter((status) => parsed.includes(status)); } catch { /* Migration default preserves existing hide-empty behavior. */ }
-  return { id: text(row.id), key: text(row.key), name: text(row.name), description: text(row.description), repoUrl: nullableText(row.repo_url), localRepoPath: nullableText(row.local_repo_path), color: text(row.color), sortOrder: Number(row.sort_order ?? 0), availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget: row.merge_target === "phase" ? "phase" : "main", ownerId: text(row.owner_id), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}) };
+  return { id: text(row.id), key: text(row.key), name: text(row.name), description: text(row.description), repoUrl: nullableText(row.repo_url), localRepoPath: nullableText(row.local_repo_path), color: text(row.color), sortOrder: Number(row.sort_order ?? 0), availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget: row.merge_target === "phase" ? "phase" : "main", dependencyResolutionStatuses: configuredDependencyResolutionStatuses(row.dependency_resolution_statuses), ownerId: text(row.owner_id), createdAt: date(row.created_at), updatedAt: date(row.updated_at), ...(row.task_count !== undefined ? { taskCount: Number(row.task_count) } : {}) };
 }
 
 function toPhase(row: Row): PhaseEntity {
@@ -99,7 +106,8 @@ function toTag(row: Row): TaskTagEntity {
 }
 
 function toDependency(row: Row): TaskDependencyEntity {
-  return { taskId: text(row.task_id), dependsOnTaskId: text(row.depends_on_task_id), projectId: text(row.project_id), projectKey: nullableText(row.project_key) ?? undefined, number: Number(row.number), title: text(row.title), status: row.status as TaskDependencyEntity["status"] };
+  const status = row.status as TaskDependencyEntity["status"];
+  return { taskId: text(row.task_id), dependsOnTaskId: text(row.depends_on_task_id), projectId: text(row.project_id), projectKey: nullableText(row.project_key) ?? undefined, number: Number(row.number), title: text(row.title), status, isBlocking: !configuredDependencyResolutionStatuses(row.dependency_resolution_statuses).includes(status as "DONE" | "CANCELLED") };
 }
 
 function toUpdate(row: Row): TaskUpdateEntity {
@@ -135,7 +143,7 @@ async function hydrateTasks(db: DatabasePort, tasks: TaskEntity[]): Promise<Task
   const phaseIds = [...new Set(tasks.map((task) => task.phaseId).filter((id): id is string => Boolean(id)))];
   const [tagRows, dependencyRows, attachmentRows, assigneeRows, phaseRows, durationRows] = await Promise.all([
     db.prepare(`SELECT tg.*, tt.task_id AS hydrated_task_id FROM tags tg JOIN task_tags tt ON tt.tag_id = tg.id WHERE tt.task_id IN (${placeholders}) ORDER BY tg.name`).all(...ids),
-    db.prepare(`SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.\`key\` AS project_key, dep.number, dep.title, dep.status FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id JOIN projects p ON p.id = dep.project_id WHERE td.task_id IN (${placeholders}) ORDER BY dep.number`).all(...ids),
+    db.prepare(`SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.\`key\` AS project_key, p.dependency_resolution_statuses, dep.number, dep.title, dep.status FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id JOIN projects p ON p.id = dep.project_id WHERE td.task_id IN (${placeholders}) ORDER BY dep.number`).all(...ids),
     db.prepare(`SELECT a.*, u.id AS uploaded_user_id, u.email AS uploaded_email, u.name AS uploaded_name, u.kind AS uploaded_kind, u.role AS uploaded_role, u.avatar_url AS uploaded_avatar_url, u.created_at AS uploaded_created_at FROM task_attachments a JOIN users u ON u.id = a.uploaded_by_id WHERE a.task_id IN (${placeholders}) ORDER BY a.created_at DESC, a.id`).all(...ids),
     assigneeIds.length ? db.prepare(`SELECT * FROM users WHERE id IN (${assigneeIds.map(() => "?").join(",")})`).all(...assigneeIds) : Promise.resolve([]),
     phaseIds.length ? db.prepare(`SELECT * FROM phases WHERE id IN (${phaseIds.map(() => "?").join(",")})`).all(...phaseIds) : Promise.resolve([]),
@@ -162,15 +170,20 @@ async function hydrateTasks(db: DatabasePort, tasks: TaskEntity[]): Promise<Task
     current[status] = (current[status] ?? 0) + stored + live;
     durations.set(text(row.task_id), current);
   }
-  return tasks.map((task) => ({
-    ...task,
-    tags: (tags.get(task.id) ?? []).map(toTag),
-    dependencies: (dependencies.get(task.id) ?? []).map((row) => { const dependency = toDependency(row); return { ...dependency, isBlocking: dependency.status !== "DONE" && dependency.status !== "CANCELLED" }; }),
-    attachments: (attachments.get(task.id) ?? []).map((row) => ({ ...toAttachment(row), uploadedBy: { id: text(row.uploaded_user_id), email: nullableText(row.uploaded_email), name: text(row.uploaded_name), kind: row.uploaded_kind as UserEntity["kind"], role: row.uploaded_role as UserEntity["role"], avatarUrl: nullableText(row.uploaded_avatar_url), createdAt: date(row.uploaded_created_at) } })),
-    assignee: task.assigneeId ? assignees.get(task.assigneeId) ?? null : null,
-    phase: task.phaseId ? phases.get(task.phaseId) ?? null : null,
-    ...(durations.has(task.id) ? { statusDurations: durations.get(task.id) } : {}),
-  }));
+  return tasks.map((task) => {
+    const taskDependencies = (dependencies.get(task.id) ?? []).map(toDependency);
+    const blockers = taskDependencies.filter((dependency) => dependency.isBlocking);
+    return {
+      ...task,
+      tags: (tags.get(task.id) ?? []).map(toTag),
+      dependencies: taskDependencies,
+      blockedReason: blockers.length ? `Waiting for dependencies: ${blockers.map((dependency) => `${dependency.projectKey}-${dependency.number} (${dependency.status})`).join(", ")}` : null,
+      attachments: (attachments.get(task.id) ?? []).map((row) => ({ ...toAttachment(row), uploadedBy: { id: text(row.uploaded_user_id), email: nullableText(row.uploaded_email), name: text(row.uploaded_name), kind: row.uploaded_kind as UserEntity["kind"], role: row.uploaded_role as UserEntity["role"], avatarUrl: nullableText(row.uploaded_avatar_url), createdAt: date(row.uploaded_created_at) } })),
+      assignee: task.assigneeId ? assignees.get(task.assigneeId) ?? null : null,
+      phase: task.phaseId ? phases.get(task.phaseId) ?? null : null,
+      ...(durations.has(task.id) ? { statusDurations: durations.get(task.id) } : {}),
+    };
+  });
 }
 
 function toToken(row: Row): ApiTokenEntity {
@@ -214,8 +227,8 @@ function createProjectRepository(db: DatabasePort): ProjectRepository {
     async listAccessible(actorId, isAdmin) { const rows = await db.prepare(`SELECT p.*, COUNT(t.id) AS task_count FROM projects p LEFT JOIN tasks t ON t.project_id = p.id WHERE ? = 1 OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?) GROUP BY p.id ORDER BY p.sort_order ASC, p.created_at DESC`).all(isAdmin ? 1 : 0, actorId); return rows.map(toProject); },
     async allocateSortOrder() { const row = await db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next_order FROM projects").get(); return Number(row?.next_order ?? -1); },
     async reorder(ids) { for (const [index, id] of ids.entries()) await db.prepare("UPDATE projects SET sort_order = ? WHERE id = ?").run(index, id); },
-    async create(input) { await db.prepare("INSERT INTO projects (id, `key`, name, description, repo_url, local_repo_path, color, sort_order, available_statuses, default_status, agent_workflow, hidden_empty_statuses, merge_target, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.key, input.name, input.description, input.repoUrl, input.localRepoPath, input.color, input.sortOrder, JSON.stringify(input.availableStatuses), input.defaultStatus, input.agentWorkflow ? JSON.stringify(input.agentWorkflow) : null, JSON.stringify(input.hiddenEmptyStatuses), input.mergeTarget, input.ownerId, input.createdAt, input.updatedAt); return input; },
-    async update(id, input) { const fields: string[] = []; const values: unknown[] = []; const columns: Record<string, string> = { name: "name", description: "description", repoUrl: "repo_url", localRepoPath: "local_repo_path", color: "color", availableStatuses: "available_statuses", defaultStatus: "default_status", agentWorkflow: "agent_workflow", hiddenEmptyStatuses: "hidden_empty_statuses", mergeTarget: "merge_target" }; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); const value = input[key as keyof typeof input]; values.push(key === "availableStatuses" || key === "agentWorkflow" || key === "hiddenEmptyStatuses" ? (value ? JSON.stringify(value) : null) : value ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString()); await db.prepare(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`).run(...values, id); } const row = await db.prepare("SELECT * FROM projects WHERE id = ?").get(id); if (!row) throw new Error("Project not found after update"); return toProject(row); },
+    async create(input) { await db.prepare("INSERT INTO projects (id, `key`, name, description, repo_url, local_repo_path, color, sort_order, available_statuses, default_status, agent_workflow, hidden_empty_statuses, merge_target, dependency_resolution_statuses, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.key, input.name, input.description, input.repoUrl, input.localRepoPath, input.color, input.sortOrder, JSON.stringify(input.availableStatuses), input.defaultStatus, input.agentWorkflow ? JSON.stringify(input.agentWorkflow) : null, JSON.stringify(input.hiddenEmptyStatuses), input.mergeTarget, JSON.stringify(input.dependencyResolutionStatuses), input.ownerId, input.createdAt, input.updatedAt); return input; },
+    async update(id, input) { const fields: string[] = []; const values: unknown[] = []; const columns: Record<string, string> = { name: "name", description: "description", repoUrl: "repo_url", localRepoPath: "local_repo_path", color: "color", availableStatuses: "available_statuses", defaultStatus: "default_status", agentWorkflow: "agent_workflow", hiddenEmptyStatuses: "hidden_empty_statuses", mergeTarget: "merge_target", dependencyResolutionStatuses: "dependency_resolution_statuses" }; for (const [key, column] of Object.entries(columns)) if (key in input) { fields.push(`${column} = ?`); const value = input[key as keyof typeof input]; values.push(key === "availableStatuses" || key === "agentWorkflow" || key === "hiddenEmptyStatuses" || key === "dependencyResolutionStatuses" ? (value ? JSON.stringify(value) : null) : value ?? null); } if (fields.length) { fields.push("updated_at = ?"); values.push(new Date().toISOString()); await db.prepare(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`).run(...values, id); } const row = await db.prepare("SELECT * FROM projects WHERE id = ?").get(id); if (!row) throw new Error("Project not found after update"); return toProject(row); },
     async delete(id) { await db.prepare("DELETE FROM projects WHERE id = ?").run(id); },
   };
 }
@@ -295,18 +308,26 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
     async listUsedStatuses(projectId) { return (await db.prepare("SELECT DISTINCT status FROM tasks WHERE project_id = ?").all(projectId)).map((row) => row.status as TaskStatus); },
     async hasIncompleteByPhase(phaseId) { return Boolean(await db.prepare("SELECT 1 FROM tasks WHERE phase_id = ? AND status NOT IN ('DONE','CANCELLED') LIMIT 1").get(phaseId)); },
     async claimNext(projectId, claimantId, workflow, options = {}) {
-      if (!workflow.sourceStatuses.length) return null;
+      if (!workflow.sourceStatuses.length || !workflow.dependencyResolutionStatuses.length) return null;
       const sourcePlaceholders = workflow.sourceStatuses.map(() => "?").join(", ");
-      const where = ["project_id = ?", `status IN (${sourcePlaceholders})`, "assignee_id IS NULL"];
-      const params: unknown[] = [projectId, ...workflow.sourceStatuses];
-      if (options.taskId) { where.push("id = ?"); params.push(options.taskId); }
-      if (options.phaseId !== undefined && options.phaseId !== null) { where.push("phase_id = ?"); params.push(options.phaseId); }
-      if (options.priority) { where.push("priority = ?"); params.push(options.priority); }
-      const orderExpr = "CASE priority WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, position";
-      const candidate = await db.prepare(`SELECT id, status FROM tasks WHERE ${where.join(" AND ")} ORDER BY ${orderExpr} LIMIT 1`).get(...params);
+      const resolutionPlaceholders = workflow.dependencyResolutionStatuses.map(() => "?").join(", ");
+      const where = ["t.project_id = ?", `t.status IN (${sourcePlaceholders})`, "t.assignee_id IS NULL", `NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dependency ON dependency.id = td.depends_on_task_id WHERE td.task_id = t.id AND dependency.status NOT IN (${resolutionPlaceholders}))`];
+      const params: unknown[] = [projectId, ...workflow.sourceStatuses, ...workflow.dependencyResolutionStatuses];
+      if (options.taskId) { where.push("t.id = ?"); params.push(options.taskId); }
+      if (options.phaseId !== undefined && options.phaseId !== null) { where.push("t.phase_id = ?"); params.push(options.phaseId); }
+      if (options.priority) { where.push("t.priority = ?"); params.push(options.priority); }
+      const orderExpr = "CASE t.priority WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, t.position";
+      const candidate = await db.prepare(`SELECT t.id, t.status FROM tasks t WHERE ${where.join(" AND ")} ORDER BY ${orderExpr} LIMIT 1`).get(...params);
       if (!candidate) return null;
       const now = new Date().toISOString();
-      const result = await db.prepare(`UPDATE tasks SET assignee_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND status IN (${sourcePlaceholders}) AND assignee_id IS NULL`).run(claimantId, workflow.targetStatus, now, candidate.id, projectId, ...workflow.sourceStatuses);
+      const dependencyEligibility = `NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dependency ON dependency.id = td.depends_on_task_id WHERE td.task_id = tasks.id AND dependency.status NOT IN (${resolutionPlaceholders}))`;
+      const updateSql = db.dialect === "mysql"
+        ? `UPDATE tasks SET assignee_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND status IN (${sourcePlaceholders}) AND assignee_id IS NULL AND id IN (SELECT claimable.id FROM (SELECT eligible.id FROM tasks eligible WHERE eligible.id = ? AND NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dependency ON dependency.id = td.depends_on_task_id WHERE td.task_id = eligible.id AND dependency.status NOT IN (${resolutionPlaceholders})) GROUP BY eligible.id) claimable)`
+        : `UPDATE tasks SET assignee_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND status IN (${sourcePlaceholders}) AND assignee_id IS NULL AND ${dependencyEligibility}`;
+      const updateParams = db.dialect === "mysql"
+        ? [claimantId, workflow.targetStatus, now, candidate.id, projectId, ...workflow.sourceStatuses, candidate.id, ...workflow.dependencyResolutionStatuses]
+        : [claimantId, workflow.targetStatus, now, candidate.id, projectId, ...workflow.sourceStatuses, ...workflow.dependencyResolutionStatuses];
+      const result = await db.prepare(updateSql).run(...updateParams);
       if (!result.changes) return null;
       const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(candidate.id);
       const hydrated = row ? (await hydrateTasks(db, [toTask(row)]))[0]! : null;
@@ -320,7 +341,7 @@ function createTagRepository(db: DatabasePort): TaskTagRepository {
 }
 
 function createDependencyRepository(db: DatabasePort): TaskDependencyRepository {
-  return { async listForTask(taskId) { return (await db.prepare("SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.`key` AS project_key, dep.number, dep.title, dep.status FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id JOIN projects p ON p.id = dep.project_id WHERE td.task_id = ? ORDER BY dep.number").all(taskId)).map(toDependency); }, async replaceForTask(taskId, dependencyIds, createdAt) { await db.prepare("DELETE FROM task_dependencies WHERE task_id = ?").run(taskId); for (const dependencyId of [...new Set(dependencyIds)]) await db.prepare("INSERT INTO task_dependencies (task_id, depends_on_task_id, created_at) VALUES (?, ?, ?)").run(taskId, dependencyId, createdAt); } };
+  return { async listForTask(taskId) { return (await db.prepare("SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.`key` AS project_key, p.dependency_resolution_statuses, dep.number, dep.title, dep.status FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id JOIN projects p ON p.id = dep.project_id WHERE td.task_id = ? ORDER BY dep.number").all(taskId)).map(toDependency); }, async replaceForTask(taskId, dependencyIds, createdAt) { await db.prepare("DELETE FROM task_dependencies WHERE task_id = ?").run(taskId); for (const dependencyId of [...new Set(dependencyIds)]) await db.prepare("INSERT INTO task_dependencies (task_id, depends_on_task_id, created_at) VALUES (?, ?, ?)").run(taskId, dependencyId, createdAt); } };
 }
 
 function createUpdateRepository(db: DatabasePort): TaskUpdateRepository {

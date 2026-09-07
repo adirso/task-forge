@@ -11,7 +11,17 @@ export const TASK_CLAIM_SOURCE_STATUSES = ["BACKLOG", "TODO"] as const;
 export const TASK_CLAIM_TARGET_STATUS = "IN_PROGRESS" as const;
 export const TASK_REVIEW_STATUSES = ["READY_FOR_REVIEW", "IN_REVIEW", "RE_REVIEW"] as const;
 export const TASK_COMPLETION_STATUS = "DONE" as const;
+export const DEPENDENCY_RESOLUTION_STATUSES = ["DONE", "CANCELLED"] as const;
+export const DEFAULT_DEPENDENCY_RESOLUTION_STATUSES = [...DEPENDENCY_RESOLUTION_STATUSES] as const;
 export const taskStatusSchema = z.enum(TASK_STATUSES);
+export const dependencyResolutionStatusSchema = z.enum(DEPENDENCY_RESOLUTION_STATUSES);
+export const dependencyResolutionStatusesSchema = z.array(dependencyResolutionStatusSchema)
+  .min(1, "DONE must resolve task dependencies")
+  .max(DEPENDENCY_RESOLUTION_STATUSES.length)
+  .refine((statuses) => new Set(statuses).size === statuses.length, "Dependency resolution statuses must be unique")
+  .refine((statuses) => statuses.includes("DONE"), "DONE must resolve task dependencies")
+  .transform((statuses) => DEPENDENCY_RESOLUTION_STATUSES.filter((status) => statuses.includes(status)));
+export type DependencyResolutionStatus = z.infer<typeof dependencyResolutionStatusSchema>;
 export const projectAvailableStatusesSchema = z.array(taskStatusSchema)
   .min(1, "At least one status must be available")
   .max(TASK_STATUSES.length)
@@ -147,6 +157,7 @@ export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).parti
   agentWorkflow: agentWorkflowSchema.nullable().optional(),
   hiddenEmptyStatuses: projectAvailableStatusesSchema.optional(),
   mergeTarget: projectMergeTargetSchema.optional(),
+  dependencyResolutionStatuses: dependencyResolutionStatusesSchema.optional(),
 });
 export const projectOrderSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(500) });
 
@@ -371,6 +382,7 @@ export interface Project {
   agentWorkflow: AgentWorkflow | null;
   hiddenEmptyStatuses: TaskStatus[];
   mergeTarget: ProjectMergeTarget;
+  dependencyResolutionStatuses: DependencyResolutionStatus[];
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -442,6 +454,7 @@ export interface Task {
   subtasks?: Task[];
   tags: Tag[];
   dependencies: TaskDependency[];
+  blockedReason?: string | null;
   attachments: Attachment[];
   updates?: TaskNote[];
   updatesPage?: PageInfo;

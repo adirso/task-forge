@@ -637,6 +637,14 @@ export const migrations: readonly Migration[] = [
       }
     },
   },
+  {
+    version: "0025_project_dependency_resolution_statuses",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE projects ADD COLUMN dependency_resolution_statuses VARCHAR(64) NOT NULL DEFAULT '[\"DONE\",\"CANCELLED\"]'"
+        : "ALTER TABLE projects ADD COLUMN dependency_resolution_statuses TEXT NOT NULL DEFAULT '[\"DONE\",\"CANCELLED\"]'", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

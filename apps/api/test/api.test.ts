@@ -95,6 +95,7 @@ test("human can log in and create a project", async () => {
   assert.equal(project.statusCode, 200);
   assert.equal(project.json().project.members[0].projectRole, "OWNER");
   assert.equal(project.json().project.mergeTarget, "main");
+  assert.deepEqual(project.json().project.dependencyResolutionStatuses, ["DONE", "CANCELLED"]);
   const phaseTarget = await app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { mergeTarget: "phase" } });
   assert.equal(phaseTarget.statusCode, 200, phaseTarget.body);
   assert.equal(phaseTarget.json().project.mergeTarget, "phase");
@@ -285,6 +286,126 @@ test("task claiming respects enabled project statuses and remains race-safe", as
     const removed = await app.inject({ method: "DELETE", url: `/api/projects/${id}`, headers: { authorization: `Bearer ${jwtToken}` } });
     assert.equal(removed.statusCode, 204, removed.body);
   }
+});
+
+test("task claiming skips dependency-blocked work and honors project resolution semantics", async () => {
+  const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `DEP${randomUUID().slice(0, 4)}`, name: "Dependency claiming", description: "Dependency-aware claim coverage", color: "#6554C0" } });
+  assert.equal(createdProject.statusCode, 201, createdProject.body);
+  const dependencyProjectId = createdProject.json().project.id as string;
+  const membership = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: agentId, role: "MEMBER" } });
+  assert.equal(membership.statusCode, 204, membership.body);
+  const humanMembership = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: memberId, role: "MEMBER" } });
+  assert.equal(humanMembership.statusCode, 204, humanMembership.body);
+  const issued = await app.inject({ method: "POST", url: `/api/users/${agentId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Dependency claim agent", expiresInDays: 1, permissions: ["task:claim", "task:update:status"] } });
+  assert.equal(issued.statusCode, 201, issued.body);
+  const dependencyAgentToken = issued.json().token as string;
+  const phases = await app.inject({ method: "GET", url: `/api/projects/${dependencyProjectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` } });
+  const activePhaseId = phases.json().phases[0].id as string;
+  const futurePhase = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/phases`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { number: 2, goal: "Future work", isActive: false } });
+  assert.equal(futurePhase.statusCode, 201, futurePhase.body);
+  const futurePhaseId = futurePhase.json().phase.id as string;
+  const createTask = async (title: string, payload: Record<string, unknown> = {}) => {
+    const response = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title, status: "TODO", phaseId: activePhaseId, ...payload } });
+    assert.equal(response.statusCode, 201, response.body);
+    return response.json().task;
+  };
+
+  const blockerOne = await createTask("First blocker", { assigneeId: agentId });
+  const blockerTwo = await createTask("Second blocker", { assigneeId: agentId });
+  const multiple = await createTask("Needs both blockers", { priority: "URGENT", dependencyIds: [blockerOne.id, blockerTwo.id] });
+  const chain = await createTask("Dependency chain", { priority: "HIGH", dependencyIds: [multiple.id] });
+  const eligible = await createTask("Immediately claimable", { priority: "MEDIUM" });
+  const future = await createTask("Future phase work", { priority: "URGENT", phaseId: futurePhaseId });
+
+  const blocked = await app.inject({ method: "GET", url: `/api/tasks/${multiple.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(blocked.statusCode, 200, blocked.body);
+  assert.match(blocked.json().task.blockedReason, new RegExp(`${createdProject.json().project.key}-${blockerOne.number} \\(TODO\\)`));
+  assert.match(blocked.json().task.blockedReason, new RegExp(`${createdProject.json().project.key}-${blockerTwo.number} \\(TODO\\)`));
+  assert.equal(blocked.json().task.dependencies.filter((dependency: { isBlocking: boolean }) => dependency.isBlocking).length, 2);
+
+  const directStart = await app.inject({ method: "PATCH", url: `/api/tasks/${multiple.id}`, headers: { authorization: `Bearer ${dependencyAgentToken}` }, payload: { status: "IN_PROGRESS" } });
+  assert.equal(directStart.statusCode, 400, directStart.body);
+  assert.match(directStart.json().error, /blocked by incomplete dependencies/);
+
+  const firstClaim = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/tasks/claim`, headers: { authorization: `Bearer ${dependencyAgentToken}` }, payload: { phaseId: activePhaseId } });
+  assert.equal(firstClaim.statusCode, 200, firstClaim.body);
+  assert.equal(firstClaim.json().task.id, eligible.id);
+  const noActiveWork = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/tasks/claim`, headers: { authorization: `Bearer ${dependencyAgentToken}` }, payload: { phaseId: activePhaseId } });
+  assert.equal(noActiveWork.statusCode, 404, noActiveWork.body);
+
+  await app.inject({ method: "PATCH", url: `/api/tasks/${blockerOne.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "DONE" } });
+  const stillBlocked = await app.inject({ method: "GET", url: `/api/tasks/${multiple.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.doesNotMatch(stillBlocked.json().task.blockedReason, new RegExp(`${createdProject.json().project.key}-${blockerOne.number}`));
+  assert.match(stillBlocked.json().task.blockedReason, new RegExp(`${createdProject.json().project.key}-${blockerTwo.number}`));
+  await app.inject({ method: "PATCH", url: `/api/tasks/${blockerTwo.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "CANCELLED" } });
+  const unblocked = await app.inject({ method: "GET", url: `/api/tasks/${multiple.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(unblocked.json().task.blockedReason, null);
+  const multipleClaim = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/tasks/claim`, headers: { authorization: `Bearer ${dependencyAgentToken}` }, payload: { phaseId: activePhaseId } });
+  assert.equal(multipleClaim.statusCode, 200, multipleClaim.body);
+  assert.equal(multipleClaim.json().task.id, multiple.id);
+
+  await app.inject({ method: "PATCH", url: `/api/tasks/${multiple.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "DONE" } });
+  const chainClaim = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/tasks/claim`, headers: { authorization: `Bearer ${dependencyAgentToken}` }, payload: { phaseId: activePhaseId } });
+  assert.equal(chainClaim.statusCode, 200, chainClaim.body);
+  assert.equal(chainClaim.json().task.id, chain.id);
+
+  const doneOnly = await app.inject({ method: "PATCH", url: `/api/projects/${dependencyProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyResolutionStatuses: ["DONE"] } });
+  assert.equal(doneOnly.statusCode, 200, doneOnly.body);
+  assert.deepEqual(doneOnly.json().project.dependencyResolutionStatuses, ["DONE"]);
+  const cancelledBlocker = await createTask("Cancelled but blocking", { status: "CANCELLED", assigneeId: agentId });
+  const cancellationDependent = await createTask("Cancellation policy dependent", { priority: "URGENT", dependencyIds: [cancelledBlocker.id] });
+  const cancellationBlocked = await app.inject({ method: "GET", url: `/api/tasks/${cancellationDependent.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.match(cancellationBlocked.json().task.blockedReason, /CANCELLED/);
+  const blockedClaim = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/tasks/claim`, headers: { authorization: `Bearer ${dependencyAgentToken}` }, payload: { phaseId: activePhaseId } });
+  assert.equal(blockedClaim.statusCode, 404, blockedClaim.body);
+  const invalidPolicy = await app.inject({ method: "PATCH", url: `/api/projects/${dependencyProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyResolutionStatuses: ["CANCELLED"] } });
+  assert.equal(invalidPolicy.statusCode, 400, invalidPolicy.body);
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  const forbiddenPolicy = await app.inject({ method: "PATCH", url: `/api/projects/${dependencyProjectId}`, headers: { authorization: `Bearer ${memberLogin.json().token}` }, payload: { dependencyResolutionStatuses: ["DONE", "CANCELLED"] } });
+  assert.equal(forbiddenPolicy.statusCode, 403, forbiddenPolicy.body);
+  const cancellationUnblocks = await app.inject({ method: "PATCH", url: `/api/projects/${dependencyProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyResolutionStatuses: ["DONE", "CANCELLED"] } });
+  assert.equal(cancellationUnblocks.statusCode, 200, cancellationUnblocks.body);
+  const cancellationClaim = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/tasks/claim`, headers: { authorization: `Bearer ${dependencyAgentToken}` }, payload: { phaseId: activePhaseId } });
+  assert.equal(cancellationClaim.statusCode, 200, cancellationClaim.body);
+  assert.equal(cancellationClaim.json().task.id, cancellationDependent.id);
+
+  const futureClaim = await app.inject({ method: "POST", url: `/api/projects/${dependencyProjectId}/tasks/claim`, headers: { authorization: `Bearer ${dependencyAgentToken}` }, payload: { phaseId: futurePhaseId } });
+  assert.equal(futureClaim.statusCode, 200, futureClaim.body);
+  assert.equal(futureClaim.json().task.id, future.id);
+  const removed = await app.inject({ method: "DELETE", url: `/api/projects/${dependencyProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(removed.statusCode, 204, removed.body);
+});
+
+test("dependency updates reject mutual and transitive cycles without changing persisted relationships", async () => {
+  const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `CYC${randomUUID().slice(0, 4)}`, name: "Dependency cycles", description: "Cycle validation coverage", color: "#FF5630" } });
+  assert.equal(createdProject.statusCode, 201, createdProject.body);
+  const cycleProjectId = createdProject.json().project.id as string;
+  const createTask = async (title: string) => {
+    const response = await app.inject({ method: "POST", url: `/api/projects/${cycleProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title, status: "TODO" } });
+    assert.equal(response.statusCode, 201, response.body);
+    return response.json().task;
+  };
+  const taskA = await createTask("Cycle task A");
+  const taskB = await createTask("Cycle task B");
+  const taskC = await createTask("Cycle task C");
+
+  const bDependsOnA = await app.inject({ method: "PATCH", url: `/api/tasks/${taskB.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyIds: [taskA.id] } });
+  assert.equal(bDependsOnA.statusCode, 200, bDependsOnA.body);
+  const mutualCycle = await app.inject({ method: "PATCH", url: `/api/tasks/${taskA.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyIds: [taskB.id] } });
+  assert.equal(mutualCycle.statusCode, 400, mutualCycle.body);
+  assert.match(mutualCycle.json().error, /create a cycle/);
+
+  const cDependsOnB = await app.inject({ method: "PATCH", url: `/api/tasks/${taskC.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyIds: [taskB.id] } });
+  assert.equal(cDependsOnB.statusCode, 200, cDependsOnB.body);
+  const transitiveCycle = await app.inject({ method: "PATCH", url: `/api/tasks/${taskA.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyIds: [taskC.id] } });
+  assert.equal(transitiveCycle.statusCode, 400, transitiveCycle.body);
+  assert.match(transitiveCycle.json().error, /create a cycle/);
+
+  const persistedA = await app.inject({ method: "GET", url: `/api/tasks/${taskA.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(persistedA.statusCode, 200, persistedA.body);
+  assert.deepEqual(persistedA.json().task.dependencies, []);
+  const removed = await app.inject({ method: "DELETE", url: `/api/projects/${cycleProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(removed.statusCode, 204, removed.body);
 });
 
 test("duplicate project keys return a conflict instead of an internal error", async () => {
