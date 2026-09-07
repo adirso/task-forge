@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { test } from "node:test";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +12,7 @@ import { checkProvider } from "../src/preflight.js";
 import { redact } from "../src/security.js";
 import { sign } from "../src/security.js";
 import { prepareWorktree } from "../src/worktree.js";
+import { DISABLED_SANDBOX_POLICY } from "../src/sandbox.js";
 
 const execFileAsync = promisify(execFile);
 const fixture = path.resolve("test/fixtures/fake-provider.mjs");
@@ -72,7 +73,7 @@ test("fake provider runner is idempotent and redacts callback logs", async () =>
       if (requestPath.endsWith("/agent-logs")) logs.push(String(init?.body ?? ""));
       return {};
     } };
-    const runner = new SmithyRunner({ custom: provider }, () => api as never, async (...args: Parameters<typeof executeCommand>) => { executions += 1; return executeCommand(...args); }, () => 1_700_000_000_000);
+    const runner = new SmithyRunner({ custom: provider }, () => api as never, async (...args: Parameters<typeof executeCommand>) => { executions += 1; return executeCommand(...args); }, () => 1_700_000_000_000, undefined, undefined, undefined, undefined, { ...DISABLED_SANDBOX_POLICY });
     const body = JSON.stringify(event);
     const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(provider.webhookSecret, 1700000000, body)}` };
     assert.equal((await runner.handle("custom", headers, body)).status, 202);
@@ -116,4 +117,18 @@ test("provider worktrees are isolated and reusable", async () => {
     await writeFile(path.join(first, "isolated.txt"), "only worktree\n");
     await assert.rejects(readFile(path.join(repo, "isolated.txt")));
   } finally { await rm(repo, { recursive: true, force: true }); }
+});
+
+test("provider worktrees reject traversal and symlink reuse", async () => {
+  const repo = await mkdtemp(path.join(os.tmpdir(), "smithy-worktree-policy-"));
+  const outside = await mkdtemp(path.join(os.tmpdir(), "smithy-worktree-outside-"));
+  try {
+    await assert.rejects(prepareWorktree(repo, null, "../outside"), /not safe/);
+    await mkdir(path.join(repo, ".smithy-worktrees"), { recursive: true });
+    await symlink(outside, path.join(repo, ".smithy-worktrees", "linked-task"));
+    await assert.rejects(prepareWorktree(repo, null, "linked-task"), /real directory/);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
 });

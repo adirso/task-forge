@@ -6,6 +6,7 @@ import { executeCommand, providerEnvironment } from "./command.js";
 import { redact, verifySignature } from "./security.js";
 import type { JobStore } from "./store.js";
 import { MemoryJobStore } from "./store.js";
+import { DEFAULT_SANDBOX_POLICY, type SandboxPolicy } from "./sandbox.js";
 
 export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string; pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null }; runId?: string | null; }
 export type RunnerResult = { status: number; body: string };
@@ -45,6 +46,7 @@ export class SmithyRunner {
     private readonly worktree: WorktreeFactory = noopWorktree,
     private readonly heartbeatIntervalMs = 30_000,
     private readonly apiUrl = process.env.TASKFORGE_API_URL ?? "http://127.0.0.1:4000",
+    private readonly sandboxPolicy: SandboxPolicy = DEFAULT_SANDBOX_POLICY,
   ) { this.store = store; }
 
   async resume() {
@@ -278,7 +280,7 @@ export class SmithyRunner {
         const text = redact(chunk.trim()).slice(0, 1_000).trim();
         if (!text) return;
         appendLog(stream, "output", text);
-      }, controller.signal, providerEnvironment(process.env, { token: runCredential.token, apiUrl: this.apiUrl, runId, taskId: task.id, projectId: context.project.id ?? projectKey }));
+      }, controller.signal, providerEnvironment(process.env, { token: runCredential.token, apiUrl: this.apiUrl, runId, taskId: task.id, projectId: context.project.id ?? projectKey }, this.sandboxPolicy.environmentAllow), this.sandboxPolicy);
       if (leaseLost) throw new Error("Run lease was lost; provider execution was stopped and recovery will resume the existing run");
       await logQueue;
       this.controllers.delete(event.id);
@@ -292,7 +294,9 @@ export class SmithyRunner {
         return;
       }
       if (result.code !== 0) {
-        const rawReason = result.timedOut ? "Provider command timed out" : (result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`));
+        const rawReason = result.policyViolation
+          ? `Provider sandbox policy violation (${result.policyViolation}): ${(result.error?.message ?? result.stderr) || "execution was stopped"}`
+          : result.timedOut ? "Provider command exceeded the sandbox runtime limit" : (result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`));
         const reason = /(git|github|gh\b|credential|authentication|permission denied|could not read username|push|pull request)/i.test(rawReason) ? `Provider publication or authentication failed: ${rawReason}` : rawReason;
         appendLog("system", "lifecycle", reason);
         throw new Error(redact(reason));

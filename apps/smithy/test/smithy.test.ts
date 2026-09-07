@@ -12,6 +12,7 @@ import { readFile } from "node:fs/promises";
 import { readProviders, writeProviders } from "../src/env-file.js";
 import { checkProvider, runProviderPreflight } from "../src/preflight.js";
 import { createSmithyServer } from "../src/server.js";
+import { buildSandboxInvocation, DEFAULT_SANDBOX_POLICY, DISABLED_SANDBOX_POLICY, parseSandboxPolicy } from "../src/sandbox.js";
 
 const secret = "runner-secret";
 const event = { id: "event-1", event: "task.assigned", task: { id: "00000000-0000-4000-8000-000000000064", number: 64, projectKey: "TAS", title: "Build runner", description: "Implement it", definitionOfDone: "Tests pass" } };
@@ -31,6 +32,54 @@ test("configuration rejects non-loopback execution hosts", () => {
   assert.throws(() => loadConfig({ SMITHY_HOST: "0.0.0.0", SMITHY_PROVIDERS: "{}" }), /loopback/);
   assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PROVIDERS: "{}" }).host, "127.0.0.1");
   assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PREFLIGHT: "true", SMITHY_PROVIDERS: JSON.stringify({ codex: { cmd: "codex exec {prompt}", healthCmd: "codex login status", webhookSecret: "secret", apiToken: "token" } }) }).preflight, true);
+  assert.equal(loadConfig({ SMITHY_PROVIDERS: "{}" }).sandbox.mode, "required");
+});
+
+test("sandbox configuration validates allowlists and resource limits", () => {
+  const sandbox = parseSandboxPolicy(JSON.stringify({
+    readPaths: ["~/provider-config"], writePaths: ["/tmp/smithy-cache"],
+    networkAllow: ["github.com:443"], environmentAllow: ["GH_CONFIG_DIR"],
+    cpuSeconds: 60, memoryMb: 512, runtimeMs: 10_000, maxProcesses: 8, maxOutputBytes: 2_048,
+  }), "/home/smithy");
+  assert.deepEqual(sandbox.readPaths, ["/home/smithy/provider-config"]);
+  assert.deepEqual(sandbox.networkAllow, ["github.com:443"]);
+  assert.equal(sandbox.maxProcesses, 8);
+  assert.throws(() => parseSandboxPolicy('{"readPaths":["/"]}'), /filesystem root/);
+  assert.throws(() => parseSandboxPolicy('{"environmentAllow":["SMITHY_PROVIDERS"]}'), /cannot be inherited/);
+  assert.throws(() => parseSandboxPolicy('{"networkAllow":["*","github.com:443"]}'), /wildcard/);
+  assert.throws(() => parseSandboxPolicy('{"networkAllow":["github.com:99999"]}'), /host:port/);
+  assert.throws(() => parseSandboxPolicy('{"memoryMb":1}'), /memoryMb/);
+});
+
+test("sandbox command compilation is backend-neutral and fails closed", async () => {
+  const policy = { ...DEFAULT_SANDBOX_POLICY, networkAllow: ["github.com:443"], readPaths: ["/opt/provider-auth"], writePaths: ["/tmp/provider-cache"] };
+  const mac = await buildSandboxInvocation("provider", ["run"], "/work/task", policy, {
+    platform: "darwin",
+    resolveExecutable: async (name) => name === "provider" ? "/usr/bin/provider" : name === "sandbox-exec" ? "/usr/bin/sandbox-exec" : null,
+  });
+  assert.equal(mac.executable, "/bin/sh");
+  assert.equal(mac.backend, "sandbox-exec");
+  assert.match(mac.args.join(" "), /github\.com:443/);
+  assert.match(mac.args.join(" "), /\/work\/task/);
+  assert.match(mac.args.join(" "), /ulimit|smithy-limits/);
+
+  const linux = await buildSandboxInvocation("provider", ["run"], "/work/task", { ...policy, networkAllow: ["*"] }, {
+    platform: "linux", pathExists: async () => true,
+    resolveExecutable: async (name) => ({ provider: "/usr/bin/provider", bwrap: "/usr/bin/bwrap", prlimit: "/usr/bin/prlimit" })[name] ?? null,
+  });
+  assert.equal(linux.executable, "/usr/bin/prlimit");
+  assert.equal(linux.backend, "bwrap");
+  assert.ok(linux.args.includes("--share-net"));
+  assert.ok(linux.args.includes(`--cpu=${policy.cpuSeconds}:${policy.cpuSeconds}`));
+  assert.ok(linux.args.includes(`--as=${policy.memoryMb * 1024 * 1024}:${policy.memoryMb * 1024 * 1024}`));
+  assert.ok(linux.args.includes(`--nproc=${policy.maxProcesses}:${policy.maxProcesses}`));
+  await assert.rejects(buildSandboxInvocation("provider", [], "/work/task", policy, {
+    platform: "linux", pathExists: async () => true,
+    resolveExecutable: async (name) => ({ provider: "/usr/bin/provider", bwrap: "/usr/bin/bwrap", prlimit: "/usr/bin/prlimit" })[name] ?? null,
+  }), /cannot enforce a host-level network allowlist/);
+  await assert.rejects(buildSandboxInvocation("provider", [], "/work/task", policy, {
+    platform: "darwin", resolveExecutable: async (name) => name === "provider" ? "/usr/bin/provider" : null,
+  }), /not installed/);
 });
 
 test("provider preflight is optional, provider-neutral, and redacts diagnostics", async () => {
@@ -49,11 +98,15 @@ test("provider preflight is optional, provider-neutral, and redacts diagnostics"
   assert.doesNotMatch(unauthenticated.message, /tf_private/);
   const denied = await checkProvider("cursor", providers.cursor!, async () => ({ code: null, stdout: "", stderr: "permission denied", error: Object.assign(new Error("permission denied"), { code: "EACCES" }) }) as never);
   assert.equal(denied.status, "PERMISSION_DENIED");
+  const sandboxed = await checkProvider("custom", providers.custom!, async () => ({ code: null, stdout: "", stderr: "", error: new Error("backend unavailable token=tf_private"), policyViolation: "sandbox" }) as never);
+  assert.equal(sandboxed.status, "FAILED");
+  assert.match(sandboxed.message, /sandbox policy check failed/);
+  assert.doesNotMatch(sandboxed.message, /tf_private/);
 });
 
 test("health endpoint runs on-demand checks even when startup preflight is disabled", async () => {
   const runner = { resume: async () => undefined, handle: async () => ({ status: 202, body: "{}" }) };
-  const config = { host: "127.0.0.1", port: 0, apiUrl: "http://127.0.0.1:4000", dbPath: ":memory:", preflight: false, providers: { claude: { cmd: `${process.execPath} {prompt}`, webhookSecret: "secret", apiToken: "tf_private" } } };
+  const config = { host: "127.0.0.1", port: 0, apiUrl: "http://127.0.0.1:4000", dbPath: ":memory:", preflight: false, sandbox: { ...DISABLED_SANDBOX_POLICY }, providers: { claude: { cmd: `${process.execPath} {prompt}`, webhookSecret: "secret", apiToken: "tf_private" } } };
   const server = createSmithyServer(config, runner as never);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -71,7 +124,7 @@ test("health endpoint runs on-demand checks even when startup preflight is disab
 test("Smithy exposes the provider force-cycle endpoint", async () => {
   let received: { provider: string; signature?: string; body: string } | null = null;
   const runner = { resume: async () => undefined, handle: async () => ({ status: 202, body: "{}" }), cancel: () => false, forceCycle: async (providerLabel: string, headers: Record<string, string | undefined>, body: string) => { received = { provider: providerLabel, signature: headers["x-taskforge-signature"], body }; return { status: 202, body: JSON.stringify({ accepted: true }) }; } };
-  const config = { host: "127.0.0.1", port: 0, apiUrl: "http://127.0.0.1:4000", dbPath: ":memory:", preflight: false, providers: { claude: provider } };
+  const config = { host: "127.0.0.1", port: 0, apiUrl: "http://127.0.0.1:4000", dbPath: ":memory:", preflight: false, sandbox: { ...DISABLED_SANDBOX_POLICY }, providers: { claude: provider } };
   const server = createSmithyServer(config, runner as never);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -179,7 +232,7 @@ test("command templates become argument arrays without shell execution", () => {
   assert.deepEqual(command.args, ["exec", "quote; echo unsafe"]);
 });
 
-test("provider environments expose only safe process values and the run credential", () => {
+test("provider environments expose only allowed process values and the run credential", () => {
   const environment = providerEnvironment({
     PATH: "/usr/bin",
     HOME: "/tmp/provider-home",
@@ -189,17 +242,36 @@ test("provider environments expose only safe process values and the run credenti
     TASKFORGE_WEBHOOK_SECRET: "whsec_private",
     GH_TOKEN: "github-private",
     OPENAI_API_KEY: "provider-private",
-  }, { token: "tfr_run_only", apiUrl: "http://127.0.0.1:4000", runId: "run-1", taskId: "task-1", projectId: "project-1" });
+    GH_CONFIG_DIR: "/tmp/gh-config",
+  }, { token: "tfr_run_only", apiUrl: "http://127.0.0.1:4000", runId: "run-1", taskId: "task-1", projectId: "project-1" }, ["GH_CONFIG_DIR", "SMITHY_PROVIDERS", "TASKFORGE_WEBHOOK_SECRET"]);
   assert.deepEqual(environment, {
     PATH: "/usr/bin",
     HOME: "/tmp/provider-home",
     LANG: "en_US.UTF-8",
+    GH_CONFIG_DIR: "/tmp/gh-config",
     TASKFORGE_TOKEN: "tfr_run_only",
     TASKFORGE_API_URL: "http://127.0.0.1:4000",
     TASKFORGE_RUN_ID: "run-1",
     TASKFORGE_TASK_ID: "task-1",
     TASKFORGE_PROJECT_ID: "project-1",
   });
+});
+
+test("provider output limits stop noisy processes with an explicit policy violation", async () => {
+  const result = await executeCommand(`${process.execPath} -e "process.stdout.write('x'.repeat(4096)); setTimeout(() => {}, 1000)"`, "ignored", process.cwd(), 2_000, undefined, undefined, undefined, { ...DISABLED_SANDBOX_POLICY, maxOutputBytes: 1_024 });
+  assert.equal(result.policyViolation, "output");
+  assert.equal(Buffer.byteLength(result.stdout), 1_024);
+  assert.match(result.error?.message ?? "", /1024-byte sandbox limit/);
+});
+
+test("provider memory, process, and runtime policies terminate the process group", async () => {
+  const directInvocation = async (executable: string, args: string[]) => ({ executable, args, backend: "disabled" as const });
+  const memory = await executeCommand(`${process.execPath} -e "setTimeout(() => {}, 1000)"`, "ignored", process.cwd(), 2_000, undefined, undefined, undefined, { ...DEFAULT_SANDBOX_POLICY, memoryMb: 64 }, { buildInvocation: directInvocation, processGroupUsage: async () => ({ processes: 1, memoryKb: 65 * 1024 }) });
+  assert.equal(memory.policyViolation, "memory");
+  const processes = await executeCommand(`${process.execPath} -e "setTimeout(() => {}, 1000)"`, "ignored", process.cwd(), 2_000, undefined, undefined, undefined, { ...DEFAULT_SANDBOX_POLICY, maxProcesses: 1 }, { buildInvocation: directInvocation, processGroupUsage: async () => ({ processes: 2, memoryKb: 1 }) });
+  assert.equal(processes.policyViolation, "process");
+  const runtime = await executeCommand(`${process.execPath} -e "setTimeout(() => {}, 1000)"`, "ignored", process.cwd(), 2_000, undefined, undefined, undefined, { ...DEFAULT_SANDBOX_POLICY, runtimeMs: 20 }, { buildInvocation: directInvocation, processGroupUsage: async () => ({ processes: 1, memoryKb: 1 }) });
+  assert.equal(runtime.timedOut, true);
 });
 
 test("provider commands cannot hang on stdin and stream output", async () => {
@@ -288,6 +360,25 @@ test("runner reports redacted publication authentication failures", async () => 
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(update, /publication or authentication failed/);
   assert.doesNotMatch(update, /tf_private/);
+});
+
+test("runner reports sandbox violations with redacted actionable diagnostics", async () => {
+  let activity = "";
+  const api = { request: async (requestPath: string, init?: RequestInit) => {
+    if (requestPath.endsWith("/credential")) return runCredential;
+    if (requestPath.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task };
+    if (requestPath.endsWith("/runs")) return { run: { id: "run-sandbox" } };
+    if (requestPath.endsWith("/updates") || requestPath.endsWith("/agent-logs")) activity += String(init?.body ?? "");
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: null, stdout: "", stderr: "", error: new Error("denied token=tf_private"), policyViolation: "sandbox" as const }), () => 1_700_000_000_000);
+  const sandboxEvent = { ...event, id: "event-sandbox" };
+  const body = JSON.stringify(sandboxEvent);
+  await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` }, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(activity, /sandbox policy violation \(sandbox\)/i);
+  assert.doesNotMatch(activity, /tf_private/);
+  assert.match(activity, /\[REDACTED\]/);
 });
 
 test("runner ignores an out-of-order status event after the task has moved on", async () => {

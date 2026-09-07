@@ -1,3 +1,5 @@
+import { parseSandboxPolicy, type SandboxPolicy } from "./sandbox.js";
+
 /** Provider names are routing labels; Smithy does not contain provider-specific code. */
 export type ProviderLabel = string;
 
@@ -23,6 +25,7 @@ export interface SmithyConfig {
   apiUrl: string;
   dbPath: string;
   preflight: boolean;
+  sandbox: SandboxPolicy;
   providers: Record<ProviderLabel, ProviderConfig>;
 }
 
@@ -53,5 +56,5 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SmithyConfig {
   }
   const host = env.SMITHY_HOST ?? "127.0.0.1";
   if (!(["127.0.0.1", "::1", "localhost"] as string[]).includes(host)) throw new Error("Smithy must bind to loopback; non-loopback SMITHY_HOST is not allowed");
-  return { host, port: Number(env.SMITHY_PORT ?? 4500), apiUrl: (env.TASKFORGE_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, ""), dbPath: env.SMITHY_DB_PATH ?? "./data/smithy.sqlite", preflight: ["1", "true", "yes", "on"].includes((env.SMITHY_PREFLIGHT ?? "").toLowerCase()), providers };
+  return { host, port: Number(env.SMITHY_PORT ?? 4500), apiUrl: (env.TASKFORGE_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, ""), dbPath: env.SMITHY_DB_PATH ?? "./data/smithy.sqlite", preflight: ["1", "true", "yes", "on"].includes((env.SMITHY_PREFLIGHT ?? "").toLowerCase()), sandbox: parseSandboxPolicy(env.SMITHY_SANDBOX_POLICY, env.HOME), providers };
 }
