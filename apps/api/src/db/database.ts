@@ -625,6 +625,18 @@ export const migrations: readonly Migration[] = [
         : "CREATE TABLE IF NOT EXISTS agent_cycle_grants (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, prior_count INTEGER NOT NULL, new_limit INTEGER NOT NULL, request_id TEXT NOT NULL UNIQUE, smithy_event_id TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, PRIMARY KEY (task_id, prior_count))", []);
     },
   },
+  {
+    version: "0024_agent_run_credentials",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS agent_run_credentials (run_id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, project_id CHAR(36) NOT NULL, user_id CHAR(36) NOT NULL, run_attempt INT NOT NULL, token_prefix VARCHAR(32) NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, token_ciphertext TEXT NOT NULL, permissions TEXT NOT NULL, expires_at VARCHAR(30) NOT NULL, last_used_at VARCHAR(30), revoked_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_agent_run_credentials_hash (token_hash), INDEX idx_agent_run_credentials_expiry (expires_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS agent_run_credentials (run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, run_attempt INTEGER NOT NULL, token_prefix TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_ciphertext TEXT NOT NULL, permissions TEXT NOT NULL, expires_at TEXT NOT NULL, last_used_at TEXT, revoked_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)", []);
+      if (dialect === "sqlite") {
+        await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_run_credentials_hash ON agent_run_credentials(token_hash)", []);
+        await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_run_credentials_expiry ON agent_run_credentials(expires_at)", []);
+      }
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

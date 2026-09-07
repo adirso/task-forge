@@ -4,10 +4,18 @@ import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { AgentRunApplicationService } from "../application/run-service.js";
 import { config } from "../config.js";
-import { decryptSecret } from "../lib/token-crypto.js";
 import { dispatchForceCycle } from "../lib/force-cycle.js";
+import { AgentRunCredentialApplicationService } from "../application/run-credential-service.js";
+import { createRunCredential, hashToken } from "../lib/auth.js";
+import { decryptSecret, encryptSecret } from "../lib/token-crypto.js";
 
 const service = new AgentRunApplicationService(createUnitOfWork(db));
+const credentialService = new AgentRunCredentialApplicationService(createUnitOfWork(db), {
+  create: createRunCredential,
+  hash: hashToken,
+  encrypt: (token) => encryptSecret(token, config.tokenEncryptionKey),
+  decrypt: (ciphertext) => decryptSecret(ciphertext, config.tokenEncryptionKey),
+});
 export const expireAgentRuns = () => service.expire();
 const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: request.authUser.tokenScopes as import("../application/context.js").TokenScope[] | null } });
 const createSchema = z.object({ kind: z.enum(["IMPLEMENTATION", "REVIEW", "RE_REVIEW", "FIX"]), maxAttempts: z.number().int().min(1).max(10).optional(), timeoutAt: z.string().datetime().nullable().optional() });
@@ -30,6 +38,8 @@ export async function runRoutes(app: FastifyInstance) {
     return reply.code(202).send({ cycle: { count: result.grant.priorCount, limit: result.grant.newLimit, limitFailure: false }, duplicate: result.duplicate });
   });
   app.post<{ Params: { id: string } }>("/runs/:id/claim", async (request) => ({ run: await service.claim(context(request), request.params.id, leaseSchema.parse(request.body ?? {}).leaseMs) }));
+  app.post<{ Params: { id: string } }>("/runs/:id/credential", { schema: { tags: ["Agent runs"], summary: "Issue the current lease owner a short-lived run credential" } }, async (request) => ({ credential: await credentialService.issue(context(request), request.params.id) }));
+  app.delete<{ Params: { id: string } }>("/runs/:id/credential", { schema: { tags: ["Agent runs"], summary: "Revoke a run credential" } }, async (request, reply) => { await credentialService.revoke(context(request), request.params.id); return reply.code(204).send(); });
   app.post<{ Params: { id: string } }>("/runs/:id/heartbeat", async (request) => ({ run: await service.heartbeat(context(request), request.params.id, leaseSchema.parse(request.body ?? {}).leaseMs) }));
   app.post<{ Params: { id: string } }>("/runs/:id/complete", async (request) => ({ run: await service.complete(context(request), request.params.id, completeSchema.parse(request.body).status, completeSchema.parse(request.body).error) }));
 }

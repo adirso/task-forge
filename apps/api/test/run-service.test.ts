@@ -17,7 +17,7 @@ function base(overrides: Partial<RepositorySet> = {}): RepositorySet {
     runs: {} as never,
     users: {} as never, phases: {} as never, tags: {} as never, dependencies: {} as never, updates: {} as never,
     attachments: {} as never, automations: {} as never, notifications: {} as never, activity: {} as never,
-    webhookDeliveries: {} as never, reporting: {} as never, tokens: {} as never, search: {} as never,
+    webhookDeliveries: {} as never, reporting: {} as never, tokens: { revokeRunCredential: async () => undefined } as never, search: {} as never,
     ...overrides,
   };
 }

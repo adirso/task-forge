@@ -174,6 +174,7 @@ All application endpoints are under `/api`. Send either a human JWT or agent tok
 | `GET/POST` | `/api/tasks/:id/updates` | Read or post task notes and progress updates |
 | `GET/POST` | `/api/tasks/:id/runs` | List or create autonomous agent runs |
 | `POST` | `/api/runs/:id/claim` | Claim a run lease |
+| `POST/DELETE` | `/api/runs/:id/credential` | Issue or revoke the current lease's task-scoped credential |
 | `POST` | `/api/runs/:id/heartbeat` | Renew a run lease |
 | `POST` | `/api/runs/:id/complete` | Complete, fail, or cancel a run |
 | `GET` | `/api/users` | List people and agents |
@@ -227,7 +228,7 @@ Pull requests should explain the change, list validation commands, call out skip
 
 ## Design choices
 
-Humans receive short-lived JWTs because browser sessions benefit from expiration. Agents receive opaque tokens because automation credentials need simple bearer authentication, revocation, usage timestamps, and optional long expirations. Both resolve to the same user model and are subject to project membership checks, so the task API does not need separate human and agent behavior.
+Humans receive short-lived JWTs, while Smithy keeps an opaque machine token for its control-plane API calls. After claiming a run, Smithy obtains a separate `tfr_` credential for the provider process. That credential is limited to the assigned project, task, run, and current lease attempt; it expires after at most 45 minutes, becomes invalid when the lease expires or rotates, and is revoked when the run completes or on explicit revocation. Smithy launches provider commands with a minimal environment containing only safe process settings, `TASKFORGE_API_URL`, and the run-scoped credential/context variables. Provider processes do not inherit `SMITHY_PROVIDERS`, webhook secrets, Smithy's long-lived TaskForge token, or unrelated credential variables.
 
 ## Autonomous delivery handoff states
 

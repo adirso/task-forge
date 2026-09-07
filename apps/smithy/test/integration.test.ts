@@ -66,6 +66,7 @@ test("fake provider runner is idempotent and redacts callback logs", async () =>
     const logs: string[] = [];
     let executions = 0;
     const api = { request: async (requestPath: string, init?: RequestInit) => {
+      if (requestPath.endsWith("/credential")) return { credential: { token: "tfr_matrix_scoped", expiresAt: "2099-01-01T00:00:00.000Z" } };
       if (requestPath.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task };
       if (requestPath.endsWith("/runs")) return { run: { id: "matrix-run" } };
       if (requestPath.endsWith("/agent-logs")) logs.push(String(init?.body ?? ""));

@@ -4,7 +4,7 @@ import type { AgentHandoffEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
 
 const sha = /^[0-9a-f]{7,64}$/i;
-function redact(value: string) { return value.replace(/(authorization\s*:\s*bearer\s+|\b(?:token|password|secret|api[_-]?key)\s*[=:]\s*)([^\s,;]+)/gi, "$1[REDACTED]").replace(/\btf_[A-Za-z0-9_-]+\b/g, "tf_[REDACTED]").replace(/\b(?:sk|whsec)_[A-Za-z0-9_-]+\b/g, "[REDACTED]"); }
+function redact(value: string) { return value.replace(/(authorization\s*:\s*bearer\s+|\b(?:token|password|secret|api[_-]?key)\s*[=:]\s*)([^\s,;]+)/gi, "$1[REDACTED]").replace(/\btfr?_[A-Za-z0-9_-]+\b/g, "tf_[REDACTED]").replace(/\b(?:sk|whsec)_[A-Za-z0-9_-]+\b/g, "[REDACTED]"); }
 export class AgentHandoffApplicationService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now = () => new Date().toISOString()) {}
   async get(context: RequestContext, runId: string) { return this.unitOfWork.run(async r => { const run = await r.runs.findById(runId); if (!run) throw new NotFoundError("Agent run"); await this.authorize(r, context, run.projectId); return r.handoffs.findByRun(runId); }); }

@@ -6,7 +6,7 @@ import { SqliteJobStore } from "./store.js";
 import { prepareWorktree } from "./worktree.js";
 import { runProviderPreflight } from "./preflight.js";
 
-export function createSmithyServer(config = loadConfig(), runner = new SmithyRunner(config.providers, (provider) => new ApiClient(config.apiUrl, provider.apiToken), undefined, undefined, new SqliteJobStore(config.dbPath), prepareWorktree)) {
+export function createSmithyServer(config = loadConfig(), runner = new SmithyRunner(config.providers, (provider) => new ApiClient(config.apiUrl, provider.apiToken), undefined, undefined, new SqliteJobStore(config.dbPath), prepareWorktree, undefined, config.apiUrl)) {
   const server = createServer((request, response) => {
     if (request.method === "GET" && request.url === "/health/providers") {
       void runProviderPreflight(config.providers).then((providers) => { response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ enabled: true, providers })); }).catch(() => { response.writeHead(500, { "Content-Type": "application/json" }); response.end(JSON.stringify({ enabled: true, providers: [], error: "Provider health checks failed" })); });

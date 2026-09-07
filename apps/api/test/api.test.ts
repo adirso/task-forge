@@ -916,6 +916,76 @@ test("agent observability API exposes run health fields alongside logs", async (
   assert.equal(typeof logs.json().page.hasMore, "boolean");
 });
 
+test("Smithy agents receive revocable credentials bound to one run, task, project, and attempt", async () => {
+  const scopedProjectKey = `RC${randomUUID().slice(0, 5)}`;
+  const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: scopedProjectKey, name: "Run credential project", description: "Isolated security boundary", color: "#6554C0" } });
+  assert.equal(createdProject.statusCode, 201, createdProject.body);
+  const scopedProjectId = createdProject.json().project.id as string;
+  const membership = await app.inject({ method: "POST", url: `/api/projects/${scopedProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: agentId, role: "MEMBER" } });
+  assert.equal(membership.statusCode, 204, membership.body);
+  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${scopedProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Run credential boundary", status: "TODO", assigneeId: agentId, branch: "agent/run-credential" } });
+  assert.equal(createdTask.statusCode, 201, createdTask.body);
+  const scopedTask = createdTask.json().task as { id: string; number: number };
+  const createdRun = await app.inject({ method: "POST", url: `/api/tasks/${scopedTask.id}/runs`, headers: { authorization: `Bearer ${agentToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  assert.equal(createdRun.statusCode, 201, createdRun.body);
+  const runId = createdRun.json().run.id as string;
+  const claimed = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${agentToken}` }, payload: { leaseMs: 120_000 } });
+  assert.equal(claimed.statusCode, 200, claimed.body);
+
+  const issued = await app.inject({ method: "POST", url: `/api/runs/${runId}/credential`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(issued.statusCode, 200, issued.body);
+  const credential = issued.json().credential as { token: string; expiresAt: string };
+  assert.match(credential.token, /^tfr_/);
+  assert.notEqual(credential.token, agentToken);
+  assert.ok(Date.parse(credential.expiresAt) > Date.now());
+  const repeated = await app.inject({ method: "POST", url: `/api/runs/${runId}/credential`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(repeated.json().credential.token, credential.token, "issuance is idempotent within one lease attempt");
+
+  const ownContext = await app.inject({ method: "GET", url: `/api/context?project=${scopedProjectKey}&task=${scopedProjectKey}-${scopedTask.number}`, headers: { authorization: `Bearer ${credential.token}` } });
+  assert.equal(ownContext.statusCode, 200, ownContext.body);
+  const ownUpdate = await app.inject({ method: "POST", url: `/api/tasks/${scopedTask.id}/updates`, headers: { authorization: `Bearer ${credential.token}` }, payload: { body: "Provider progress without a long-lived token." } });
+  assert.equal(ownUpdate.statusCode, 201, ownUpdate.body);
+  const ownBranch = await app.inject({ method: "PATCH", url: `/api/tasks/${scopedTask.id}`, headers: { authorization: `Bearer ${credential.token}` }, payload: { branch: "agent/run-credential-published" } });
+  assert.equal(ownBranch.statusCode, 200, ownBranch.body);
+
+  const otherTask = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${credential.token}` } });
+  assert.equal(otherTask.statusCode, 403, otherTask.body);
+  const projectDenied = await app.inject({ method: "GET", url: `/api/projects/${scopedProjectId}`, headers: { authorization: `Bearer ${credential.token}` } });
+  assert.equal(projectDenied.statusCode, 403, projectDenied.body);
+  const metadataDenied = await app.inject({ method: "PATCH", url: `/api/tasks/${scopedTask.id}`, headers: { authorization: `Bearer ${credential.token}` }, payload: { title: "Escaped scope" } });
+  assert.equal(metadataDenied.statusCode, 403, metadataDenied.body);
+  const runControlDenied = await app.inject({ method: "POST", url: `/api/runs/${runId}/heartbeat`, headers: { authorization: `Bearer ${credential.token}` }, payload: { leaseMs: 120_000 } });
+  assert.equal(runControlDenied.statusCode, 403, runControlDenied.body);
+  for (const response of [otherTask, projectDenied, metadataDenied, runControlDenied]) assert.doesNotMatch(response.body, /tfr_|tf_[A-Za-z0-9]/);
+
+  await db.prepare("UPDATE agent_run_credentials SET expires_at = ? WHERE run_id = ?").run("2000-01-01T00:00:00.000Z", runId);
+  const expired = await app.inject({ method: "GET", url: `/api/tasks/${scopedTask.id}`, headers: { authorization: `Bearer ${credential.token}` } });
+  assert.equal(expired.statusCode, 401, expired.body);
+  const renewed = await app.inject({ method: "POST", url: `/api/runs/${runId}/credential`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(renewed.statusCode, 200, renewed.body);
+  assert.notEqual(renewed.json().credential.token, credential.token);
+  const renewedToken = renewed.json().credential.token as string;
+  await db.prepare("UPDATE agent_runs SET lease_expires_at = ? WHERE id = ?").run("2000-01-01T00:00:00.000Z", runId);
+  const reclaimed = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${agentToken}` }, payload: { leaseMs: 120_000 } });
+  assert.equal(reclaimed.statusCode, 200, reclaimed.body);
+  const rotated = await app.inject({ method: "POST", url: `/api/runs/${runId}/credential`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(rotated.statusCode, 200, rotated.body);
+  assert.notEqual(rotated.json().credential.token, renewedToken, "a new lease attempt rotates the run credential");
+  const staleAttempt = await app.inject({ method: "GET", url: `/api/tasks/${scopedTask.id}`, headers: { authorization: `Bearer ${renewedToken}` } });
+  assert.equal(staleAttempt.statusCode, 401, staleAttempt.body);
+  const rotatedToken = rotated.json().credential.token as string;
+  const revoked = await app.inject({ method: "DELETE", url: `/api/runs/${runId}/credential`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(revoked.statusCode, 204, revoked.body);
+  const afterRevoke = await app.inject({ method: "GET", url: `/api/tasks/${scopedTask.id}`, headers: { authorization: `Bearer ${rotatedToken}` } });
+  assert.equal(afterRevoke.statusCode, 401, afterRevoke.body);
+  const audits = await db.prepare("SELECT action, metadata FROM activity WHERE task_id = ? AND action LIKE 'agent_run.credential_%' ORDER BY created_at").all(scopedTask.id);
+  assert.ok(audits.some((entry) => entry.action === "agent_run.credential_issued"));
+  assert.ok(audits.some((entry) => entry.action === "agent_run.credential_revoked"));
+  assert.doesNotMatch(JSON.stringify(audits), /tfr_|tf_[A-Za-z0-9]/);
+  const deletedProject = await app.inject({ method: "DELETE", url: `/api/projects/${scopedProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deletedProject.statusCode, 204, deletedProject.body);
+});
+
 test("force-cycle API authorizes, audits, dispatches once, and preserves the raised cap", async () => {
   const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `FC${randomUUID().slice(0, 4)}`, name: "Force cycle", description: "Cycle grant integration", color: "#BF2600" } });
   assert.equal(createdProject.statusCode, 201, createdProject.body);

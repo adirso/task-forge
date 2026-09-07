@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ProviderConfig, ProviderLabel } from "./config.js";
 import { ApiClient } from "./api.js";
-import { executeCommand } from "./command.js";
+import { executeCommand, providerEnvironment } from "./command.js";
 import { redact, verifySignature } from "./security.js";
 import type { JobStore } from "./store.js";
 import { MemoryJobStore } from "./store.js";
@@ -12,7 +12,7 @@ export type RunnerResult = { status: number; body: string };
 type AgentWorkflow = { implementationQueue: string; implementationStart: string; reviewHandoff: string; reviewStart: string; approved: string; fixNeeded: string; fixStart: string; reReview: string };
 type TaskFinding = { severity?: string; title?: string; body?: string; disposition?: string; filePath?: string | null; lineNumber?: number | null };
 type VerifiedHandoff = { branch?: string | null; headSha?: string | null; branchPublished?: boolean; pullRequestUrl?: string | null; pullRequestState?: string | null; status?: string };
-type ContextResponse = { project: { key: string; availableStatuses: string[]; localRepoPath?: string | null; agentWorkflow?: AgentWorkflow | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }>; findings?: TaskFinding[] } };
+type ContextResponse = { project: { id?: string; key: string; availableStatuses: string[]; localRepoPath?: string | null; agentWorkflow?: AgentWorkflow | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }>; findings?: TaskFinding[] } };
 type WorktreeFactory = (repo: string, branch: string | null, taskId: string) => Promise<string>;
 
 // Legacy projects have no persisted mapping. Keep their historical routing
@@ -44,6 +44,7 @@ export class SmithyRunner {
     store: JobStore = new MemoryJobStore(),
     private readonly worktree: WorktreeFactory = noopWorktree,
     private readonly heartbeatIntervalMs = 30_000,
+    private readonly apiUrl = process.env.TASKFORGE_API_URL ?? "http://127.0.0.1:4000",
   ) { this.store = store; }
 
   async resume() {
@@ -223,6 +224,11 @@ export class SmithyRunner {
         this.store.setRunId(event.id, runId);
       }
       await api.request(`/api/runs/${runId}/claim`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) });
+      const credentialResponse = await api.request(`/api/runs/${runId}/credential`, { method: "POST" }) as unknown as { credential?: { token?: string; expiresAt?: string } };
+      const runCredential = credentialResponse.credential;
+      if (!runCredential?.token?.startsWith("tfr_") || !runCredential.expiresAt || Date.parse(runCredential.expiresAt) <= this.now()) {
+        throw new Error("TaskForge did not issue a valid short-lived run credential");
+      }
       let verifiedHandoff: VerifiedHandoff | null = null;
       if (kind === "REVIEW" || kind === "RE_REVIEW") {
         try {
@@ -258,7 +264,7 @@ export class SmithyRunner {
       const prTask = task as typeof task & { pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null; headSha?: string | null; branchPublished?: boolean; status?: string };
       const publication = verifiedHandoff ?? prTask;
       const publicationState = publication.status === "PUBLISHED" && publication.branchPublished && publication.branch && publication.headSha && publication.pullRequestUrl ? "verified" : "incomplete or unverified";
-      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, `Branch: ${task.branch?.trim() || "(no branch configured)"}`, `Canonical publication (${publicationState}): branch ${redact(publication.branch ?? task.branch ?? "(not recorded)")}; head SHA ${redact(publication.headSha ?? "(not recorded)")}; pull request ${redact(publication.pullRequestUrl ?? prTask.pullRequestUrl ?? "(not recorded)")} (${redact(publication.pullRequestState ?? prTask.pullRequestState ?? "unknown")})`, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...(task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
+      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, `Branch: ${task.branch?.trim() || "(no branch configured)"}`, `Canonical publication (${publicationState}): branch ${redact(publication.branch ?? task.branch ?? "(not recorded)")}; head SHA ${redact(publication.headSha ?? "(not recorded)")}; pull request ${redact(publication.pullRequestUrl ?? prTask.pullRequestUrl ?? "(not recorded)")} (${redact(publication.pullRequestState ?? prTask.pullRequestState ?? "unknown")})`, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...(task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), "TaskForge access is available through TASKFORGE_API_URL and the short-lived TASKFORGE_TOKEN. The credential is bound to this task and run; never print, persist, or copy it.", "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
@@ -272,7 +278,7 @@ export class SmithyRunner {
         const text = redact(chunk.trim()).slice(0, 1_000).trim();
         if (!text) return;
         appendLog(stream, "output", text);
-      }, controller.signal);
+      }, controller.signal, providerEnvironment(process.env, { token: runCredential.token, apiUrl: this.apiUrl, runId, taskId: task.id, projectId: context.project.id ?? projectKey }));
       if (leaseLost) throw new Error("Run lease was lost; provider execution was stopped and recovery will resume the existing run");
       await logQueue;
       this.controllers.delete(event.id);

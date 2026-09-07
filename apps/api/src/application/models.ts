@@ -54,6 +54,22 @@ export interface AgentRunEntity {
   updatedAt: string;
   completedAt: string | null;
 }
+export interface AgentRunCredentialEntity {
+  runId: string;
+  taskId: string;
+  projectId: string;
+  userId: string;
+  runAttempt: number;
+  prefix: string;
+  hash: string;
+  ciphertext: string;
+  permissions: string[];
+  expiresAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 export interface AgentCycleStateEntity {
   count: number;
   limit: number;

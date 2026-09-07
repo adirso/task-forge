@@ -11,7 +11,7 @@ const MAX_LOGS_PER_TASK = 5_000;
 function redact(value: string) {
   return value
     .replace(/(authorization\s*:\s*bearer\s+|\b(?:token|password|secret|api[_-]?key)\s*[=:]\s*)([^\s,;]+)/gi, "$1[REDACTED]")
-    .replace(/\btf_[A-Za-z0-9_-]+\b/g, "tf_[REDACTED]")
+    .replace(/\btfr?_[A-Za-z0-9_-]+\b/g, "tf_[REDACTED]")
     .replace(/\b(?:sk|whsec)_[A-Za-z0-9_-]+\b/g, "[REDACTED]");
 }
 

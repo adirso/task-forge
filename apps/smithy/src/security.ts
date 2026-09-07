@@ -21,5 +21,5 @@ export function redact(value: string) {
   return value
     .replace(/(bearer\s+)[^\s]+/gi, "$1[REDACTED]")
     .replace(/(token|secret|password|api[_-]?key)(\s*[:=]\s*)[^\s,;]+/gi, "$1$2[REDACTED]")
-    .replace(/tf_[A-Za-z0-9_-]+/g, "tf_[REDACTED]");
+    .replace(/tfr?_[A-Za-z0-9_-]+/g, "tf_[REDACTED]");
 }

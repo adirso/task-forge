@@ -157,6 +157,10 @@ for (const driver of ["sqlite", "mysql"] as const) {
           ? await adapter.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_handoffs'", [])
           : await adapter.get("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_run_handoffs'", []);
         assert.ok(handoffTable);
+        const credentialTable = driver === "sqlite"
+          ? await adapter.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_credentials'", [])
+          : await adapter.get("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_run_credentials'", []);
+        assert.ok(credentialTable);
         await runMigrations(adapter, driver);
         assert.equal((await adapter.all("SELECT version FROM schema_migrations", [])).length, migrations.length);
       });
