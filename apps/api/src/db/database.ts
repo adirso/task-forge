@@ -645,6 +645,29 @@ export const migrations: readonly Migration[] = [
         : "ALTER TABLE projects ADD COLUMN dependency_resolution_statuses TEXT NOT NULL DEFAULT '[\"DONE\",\"CANCELLED\"]'", []);
     },
   },
+  {
+    version: "0026_independent_review_policy",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE projects ADD COLUMN review_policy JSON NULL"
+        : "ALTER TABLE projects ADD COLUMN review_policy TEXT NULL", []);
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE agent_runs ADD COLUMN executed_by_id CHAR(36) NULL"
+        : "ALTER TABLE agent_runs ADD COLUMN executed_by_id TEXT NULL REFERENCES users(id)", []);
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE task_gate_evidence ADD COLUMN implementation_run_id CHAR(36) NULL"
+        : "ALTER TABLE task_gate_evidence ADD COLUMN implementation_run_id TEXT NULL REFERENCES agent_runs(id)", []);
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE task_gate_evidence ADD COLUMN implementation_agent_id CHAR(36) NULL"
+        : "ALTER TABLE task_gate_evidence ADD COLUMN implementation_agent_id TEXT NULL REFERENCES users(id)", []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE task_gate_approvals (task_id CHAR(36) NOT NULL, head_sha CHAR(64) NOT NULL, reviewer_id CHAR(36) NOT NULL, approved_at VARCHAR(30) NOT NULL, PRIMARY KEY (task_id, head_sha, reviewer_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (reviewer_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE task_gate_approvals (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, head_sha TEXT NOT NULL, reviewer_id TEXT NOT NULL REFERENCES users(id), approved_at TEXT NOT NULL, PRIMARY KEY (task_id, head_sha, reviewer_id))", []);
+      await executor.run(dialect === "mysql"
+        ? "INSERT IGNORE INTO task_gate_approvals (task_id, head_sha, reviewer_id, approved_at) SELECT task_id, approved_head_sha, approved_by_id, approved_at FROM task_gate_evidence WHERE approved_head_sha IS NOT NULL AND approved_by_id IS NOT NULL AND approved_at IS NOT NULL"
+        : "INSERT OR IGNORE INTO task_gate_approvals (task_id, head_sha, reviewer_id, approved_at) SELECT task_id, approved_head_sha, approved_by_id, approved_at FROM task_gate_evidence WHERE approved_head_sha IS NOT NULL AND approved_by_id IS NOT NULL AND approved_at IS NOT NULL", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

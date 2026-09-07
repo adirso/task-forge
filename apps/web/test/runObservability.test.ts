@@ -4,7 +4,7 @@ import { formatCountdown, getRunHealth, latestRunLog, runIsWaitingForInput, runL
 import type { AgentLog, AgentRun } from "../src/lib/api.js";
 
 const now = Date.parse("2026-08-25T12:00:00.000Z");
-const run = (overrides: Partial<AgentRun> = {}): AgentRun => ({ id: "run-1", taskId: "task-1", projectId: "project-1", requestedById: "agent-1", kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: "2026-08-25T12:02:00.000Z", heartbeatAt: "2026-08-25T11:59:30.000Z", timeoutAt: "2026-08-25T12:10:00.000Z", lastError: null, createdAt: "2026-08-25T11:58:00.000Z", updatedAt: "2026-08-25T11:59:30.000Z", completedAt: null, ...overrides });
+const run = (overrides: Partial<AgentRun> = {}): AgentRun => ({ id: "run-1", taskId: "task-1", projectId: "project-1", requestedById: "agent-1", executedById: "agent-1", kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: "2026-08-25T12:02:00.000Z", heartbeatAt: "2026-08-25T11:59:30.000Z", timeoutAt: "2026-08-25T12:10:00.000Z", lastError: null, createdAt: "2026-08-25T11:58:00.000Z", updatedAt: "2026-08-25T11:59:30.000Z", completedAt: null, ...overrides });
 const log = (content: string, sequence: number): AgentLog => ({ id: `log-${sequence}`, taskId: "task-1", runId: "run-1", provider: "codex", stream: "stdout", category: "output", sequence, eventId: null, content, createdAt: `2026-08-25T11:${59 - sequence}:00.000Z` });
 
 test("classifies active and waiting-for-input runs", () => {

@@ -1,7 +1,7 @@
 import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
-  id: string; taskId: string; projectId: string; requestedById: string; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
+  id: string; taskId: string; projectId: string; requestedById: string; executedById: string | null; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
   status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED"; attemptCount: number; maxAttempts: number;
   leaseOwner: string | null; leaseExpiresAt: string | null; heartbeatAt: string | null; timeoutAt: string | null; lastError: string | null;
   createdAt: string; updatedAt: string; completedAt: string | null;
@@ -64,6 +64,7 @@ let mockProjects: Project[] = [{
   agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW },
   mergeTarget: "phase",
   dependencyResolutionStatuses: [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES],
+  reviewPolicy: { requireIndependentReview: true, requiredReviewerCount: 1, allowedReviewerAgentIds: [] },
   ownerId: MOCK_USER.id,
   createdAt: MOCK_NOW,
   updatedAt: MOCK_NOW,
@@ -113,7 +114,7 @@ const mockNotifications: Notification[] = [
   { id: "n1", userId: MOCK_USER.id, projectId: "p_mobile", taskId: "t3", type: "TASK_UPDATED", title: "Task moved to review", message: "Collapse filters on phones is ready for review.", readAt: null, createdAt: MOCK_NOW, projectName: "Mobile Refresh", projectKey: "MOB", taskNumber: 3 },
 ];
 const mockRuns: Record<string, AgentRun[]> = {
-  t1: [{ id: "run-demo-1", taskId: "t1", projectId: "p_mobile", requestedById: MOCK_USER.id, kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy-demo", leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(), heartbeatAt: MOCK_NOW, timeoutAt: new Date(Date.now() + 900_000).toISOString(), lastError: null, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, completedAt: null }],
+  t1: [{ id: "run-demo-1", taskId: "t1", projectId: "p_mobile", requestedById: MOCK_USER.id, executedById: MOCK_AGENT.id, kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy-demo", leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(), heartbeatAt: MOCK_NOW, timeoutAt: new Date(Date.now() + 900_000).toISOString(), lastError: null, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, completedAt: null }],
 };
 const mockAgentLogs: Record<string, AgentLog[]> = {
   t1: [{ id: "log-demo-1", taskId: "t1", runId: "run-demo-1", provider: "codex", stream: "stdout", category: "progress", sequence: 1, eventId: "demo-event-1", content: "Implementation started on agent/mob-1", createdAt: MOCK_NOW }],
@@ -436,7 +437,7 @@ export const api = {
   mergePhaseToMain: (projectId: string, phaseId: string) => request<{ merge: { phaseId: string; branchName: string; target: "main" } }>(`/projects/${projectId}/phases/${phaseId}/merge-to-main`, { method: "POST" }),
   createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
-  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"]; mergeTarget?: Project["mergeTarget"]; dependencyResolutionStatuses?: Project["dependencyResolutionStatuses"] }) =>
+  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"]; mergeTarget?: Project["mergeTarget"]; dependencyResolutionStatuses?: Project["dependencyResolutionStatuses"]; reviewPolicy?: Project["reviewPolicy"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),
   enableAgentWorkflow: (id: string) => request<{ project: Project }>(`/projects/${id}/agent-workflow/enable`, { method: "POST" }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),

@@ -40,11 +40,14 @@ test.describe("workspace browser smoke", () => {
     await openProjectSettings(page);
 
     await expect(page.getByText("Agent workflow", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Require independent review")).toBeChecked();
+    await page.getByLabel("Required reviewer count").fill("2");
     await expect(page.getByLabel("Implementation Queue")).toHaveValue("TODO");
     await page.getByLabel("Implementation Queue").selectOption("IN_PROGRESS");
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByText("Project updated")).toBeVisible();
     await openProjectSettings(page);
+    await expect(page.getByLabel("Required reviewer count")).toHaveValue("2");
 
     await page.getByRole("checkbox", { name: "Available status: Backlog" }).uncheck();
     await page.getByRole("checkbox", { name: "Available status: Refining" }).uncheck();

@@ -19,7 +19,7 @@ function setup() {
 
 test("finding dispositions are audited and FIX_NEEDED creates a new fix run", async () => {
   const { service, runs, activities, deliveries, gateState } = setup();
-  gateState.value = { taskId: task.id, headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", requiredChecks: ["Quality"], checks: [], approvedHeadSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", approvedById: "codex", approvedAt: "2026-08-24T11:00:00.000Z", mergedHeadSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", mergedById: "owner", mergedAt: "2026-08-24T11:30:00.000Z", updatedAt: "2026-08-24T11:30:00.000Z" };
+  gateState.value = { taskId: task.id, headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", requiredChecks: ["Quality"], checks: [], implementationRunId: "run-1", implementationAgentId: "agent-1", approvals: [{ reviewerId: "codex", approvedAt: "2026-08-24T11:00:00.000Z" }], approvedHeadSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", approvedById: "codex", approvedAt: "2026-08-24T11:00:00.000Z", mergedHeadSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", mergedById: "owner", mergedAt: "2026-08-24T11:30:00.000Z", updatedAt: "2026-08-24T11:30:00.000Z" };
   const finding = await service.create(owner, task.id, { severity: "P1", title: "Missing guard", body: "The transition is not checked." });
   const updated = await service.dispose(owner, finding.id, { disposition: "FIX_NEEDED", reason: "Must be fixed before approval" });
   assert.equal(updated.disposition, "FIX_NEEDED"); assert.equal(runs[0]?.kind, "FIX"); assert.equal(activities.at(-1)?.action, "task.finding_disposed");

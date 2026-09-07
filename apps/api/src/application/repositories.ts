@@ -21,7 +21,7 @@ export interface ProjectRepository {
   allocateSortOrder(): Promise<number>;
   reorder(ids: string[]): Promise<void>;
   create(input: ProjectEntity): Promise<ProjectEntity>;
-  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses">>): Promise<ProjectEntity>;
+  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses" | "reviewPolicy">>): Promise<ProjectEntity>;
   delete(id: string): Promise<void>;
 }
 
@@ -146,12 +146,12 @@ export interface AgentRunRepository {
   complete(id: string, owner: string, status: "SUCCEEDED" | "FAILED" | "CANCELLED", now: string, error?: string | null): Promise<boolean>;
   cancel(id: string, now: string, error?: string | null): Promise<boolean>;
 }
-export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
+export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; findPublishedByTaskHead(taskId: string, headSha: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
 export interface DeliveryMonitorRepository { health(now: string, pollIntervalMs: number): Promise<DeliveryMonitorHealthEntity>; taskCheckpoint(taskId: string): Promise<Record<string, unknown> | null>; }
 export interface TaskGateRepository {
   findByTask(taskId: string): Promise<TaskGateEntity | null>;
   save(input: TaskGateEntity): Promise<TaskGateEntity>;
-  approve(taskId: string, headSha: string, actorId: string, now: string): Promise<TaskGateEntity | null>;
+  approve(taskId: string, headSha: string, actorId: string, requiredReviewerCount: number, now: string): Promise<TaskGateEntity | null>;
   merge(taskId: string, headSha: string, actorId: string, now: string): Promise<TaskGateEntity | null>;
 }
 export interface TaskFindingRepository {
