@@ -320,7 +320,14 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       const candidate = await db.prepare(`SELECT t.id, t.status FROM tasks t WHERE ${where.join(" AND ")} ORDER BY ${orderExpr} LIMIT 1`).get(...params);
       if (!candidate) return null;
       const now = new Date().toISOString();
-      const result = await db.prepare(`UPDATE tasks SET assignee_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND status IN (${sourcePlaceholders}) AND assignee_id IS NULL`).run(claimantId, workflow.targetStatus, now, candidate.id, projectId, ...workflow.sourceStatuses);
+      const dependencyEligibility = `NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dependency ON dependency.id = td.depends_on_task_id WHERE td.task_id = tasks.id AND dependency.status NOT IN (${resolutionPlaceholders}))`;
+      const updateSql = db.dialect === "mysql"
+        ? `UPDATE tasks SET assignee_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND status IN (${sourcePlaceholders}) AND assignee_id IS NULL AND id IN (SELECT claimable.id FROM (SELECT eligible.id FROM tasks eligible WHERE eligible.id = ? AND NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dependency ON dependency.id = td.depends_on_task_id WHERE td.task_id = eligible.id AND dependency.status NOT IN (${resolutionPlaceholders})) GROUP BY eligible.id) claimable)`
+        : `UPDATE tasks SET assignee_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND status IN (${sourcePlaceholders}) AND assignee_id IS NULL AND ${dependencyEligibility}`;
+      const updateParams = db.dialect === "mysql"
+        ? [claimantId, workflow.targetStatus, now, candidate.id, projectId, ...workflow.sourceStatuses, candidate.id, ...workflow.dependencyResolutionStatuses]
+        : [claimantId, workflow.targetStatus, now, candidate.id, projectId, ...workflow.sourceStatuses, ...workflow.dependencyResolutionStatuses];
+      const result = await db.prepare(updateSql).run(...updateParams);
       if (!result.changes) return null;
       const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(candidate.id);
       const hydrated = row ? (await hydrateTasks(db, [toTask(row)]))[0]! : null;

@@ -376,6 +376,38 @@ test("task claiming skips dependency-blocked work and honors project resolution 
   assert.equal(removed.statusCode, 204, removed.body);
 });
 
+test("dependency updates reject mutual and transitive cycles without changing persisted relationships", async () => {
+  const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `CYC${randomUUID().slice(0, 4)}`, name: "Dependency cycles", description: "Cycle validation coverage", color: "#FF5630" } });
+  assert.equal(createdProject.statusCode, 201, createdProject.body);
+  const cycleProjectId = createdProject.json().project.id as string;
+  const createTask = async (title: string) => {
+    const response = await app.inject({ method: "POST", url: `/api/projects/${cycleProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title, status: "TODO" } });
+    assert.equal(response.statusCode, 201, response.body);
+    return response.json().task;
+  };
+  const taskA = await createTask("Cycle task A");
+  const taskB = await createTask("Cycle task B");
+  const taskC = await createTask("Cycle task C");
+
+  const bDependsOnA = await app.inject({ method: "PATCH", url: `/api/tasks/${taskB.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyIds: [taskA.id] } });
+  assert.equal(bDependsOnA.statusCode, 200, bDependsOnA.body);
+  const mutualCycle = await app.inject({ method: "PATCH", url: `/api/tasks/${taskA.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyIds: [taskB.id] } });
+  assert.equal(mutualCycle.statusCode, 400, mutualCycle.body);
+  assert.match(mutualCycle.json().error, /create a cycle/);
+
+  const cDependsOnB = await app.inject({ method: "PATCH", url: `/api/tasks/${taskC.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyIds: [taskB.id] } });
+  assert.equal(cDependsOnB.statusCode, 200, cDependsOnB.body);
+  const transitiveCycle = await app.inject({ method: "PATCH", url: `/api/tasks/${taskA.id}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { dependencyIds: [taskC.id] } });
+  assert.equal(transitiveCycle.statusCode, 400, transitiveCycle.body);
+  assert.match(transitiveCycle.json().error, /create a cycle/);
+
+  const persistedA = await app.inject({ method: "GET", url: `/api/tasks/${taskA.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(persistedA.statusCode, 200, persistedA.body);
+  assert.deepEqual(persistedA.json().task.dependencies, []);
+  const removed = await app.inject({ method: "DELETE", url: `/api/projects/${cycleProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(removed.statusCode, 204, removed.body);
+});
+
 test("duplicate project keys return a conflict instead of an internal error", async () => {
   const duplicate = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "API", name: "Duplicate project", description: "", color: "#6554C0" } });
   assert.equal(duplicate.statusCode, 409);
