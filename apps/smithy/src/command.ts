@@ -16,10 +16,26 @@ export function renderCommand(template: string, prompt: string) {
 export interface CommandResult { code: number | null; stdout: string; stderr: string; error?: Error; timedOut?: boolean; cancelled?: boolean; }
 export type CommandOutput = (stream: "stdout" | "stderr", chunk: string) => void;
 
-export function executeCommand(template: string, prompt: string, cwd: string, timeoutMs = 30 * 60_000, onOutput?: CommandOutput, signal?: AbortSignal): Promise<CommandResult> {
+const SAFE_PROVIDER_ENV = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "NO_COLOR", "PATH", "SHELL", "TERM", "TMP", "TMPDIR", "TEMP", "USER"] as const;
+
+/** Build a minimal environment for an untrusted provider process. */
+export function providerEnvironment(parent: NodeJS.ProcessEnv, credential?: { token: string; apiUrl: string; runId: string; taskId: string; projectId: string }) {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const name of SAFE_PROVIDER_ENV) if (parent[name] !== undefined) environment[name] = parent[name];
+  if (credential) {
+    environment.TASKFORGE_TOKEN = credential.token;
+    environment.TASKFORGE_API_URL = credential.apiUrl;
+    environment.TASKFORGE_RUN_ID = credential.runId;
+    environment.TASKFORGE_TASK_ID = credential.taskId;
+    environment.TASKFORGE_PROJECT_ID = credential.projectId;
+  }
+  return environment;
+}
+
+export function executeCommand(template: string, prompt: string, cwd: string, timeoutMs = 30 * 60_000, onOutput?: CommandOutput, signal?: AbortSignal, environment = providerEnvironment(process.env)): Promise<CommandResult> {
   const { executable, args } = renderCommand(template, prompt);
   return new Promise((resolve) => {
-    const child = spawn(executable, args, { cwd, shell: false, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(executable, args, { cwd, shell: false, env: environment, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let timedOut = false;

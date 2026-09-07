@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunCredentialEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -105,6 +105,9 @@ export interface ApiTokenRepository {
   listForUser(userId: string): Promise<ApiTokenEntity[]>;
   findById(id: string): Promise<(ApiTokenEntity & { userId: string; ciphertext: string | null }) | null>;
   revoke(id: string): Promise<void>;
+  findRunCredential(runId: string): Promise<AgentRunCredentialEntity | null>;
+  saveRunCredential(input: AgentRunCredentialEntity): Promise<AgentRunCredentialEntity>;
+  revokeRunCredential(runId: string, revokedAt: string): Promise<void>;
 }
 
 export interface SearchRepository {

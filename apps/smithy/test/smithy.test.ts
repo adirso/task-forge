@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { executeCommand, renderCommand } from "../src/command.js";
+import { executeCommand, providerEnvironment, renderCommand } from "../src/command.js";
 import { SmithyRunner } from "../src/runner.js";
 import { sign, verifySignature, redact } from "../src/security.js";
 import { MemoryJobStore } from "../src/store.js";
@@ -16,6 +16,7 @@ import { createSmithyServer } from "../src/server.js";
 const secret = "runner-secret";
 const event = { id: "event-1", event: "task.assigned", task: { id: "00000000-0000-4000-8000-000000000064", number: 64, projectKey: "TAS", title: "Build runner", description: "Implement it", definitionOfDone: "Tests pass" } };
 const provider = { cmd: "claude -p {prompt}", repo: "/tmp/repo", webhookSecret: secret, apiToken: "tf_test" };
+const runCredential = { credential: { token: "tfr_test_scoped", expiresAt: "2099-01-01T00:00:00.000Z" } };
 
 test("signature verification enforces timestamp and exact body", () => {
   const timestamp = 1_700_000_000;
@@ -120,6 +121,7 @@ test("force-cycle authentication grants one retry of the exact failed event", as
   store.markComplete(event.id, "FAILED");
   let executions = 0;
   const api = { request: async (requestPath: string) => {
+    if (requestPath.endsWith("/credential")) return runCredential;
     if (requestPath.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task };
     if (requestPath.endsWith("/runs")) return { run: { id: "forced-run" } };
     if (requestPath.endsWith("/findings")) return { findings: [] };
@@ -177,6 +179,29 @@ test("command templates become argument arrays without shell execution", () => {
   assert.deepEqual(command.args, ["exec", "quote; echo unsafe"]);
 });
 
+test("provider environments expose only safe process values and the run credential", () => {
+  const environment = providerEnvironment({
+    PATH: "/usr/bin",
+    HOME: "/tmp/provider-home",
+    LANG: "en_US.UTF-8",
+    SMITHY_PROVIDERS: "contains-webhook-and-api-secrets",
+    TASKFORGE_TOKEN: "tf_long_lived",
+    TASKFORGE_WEBHOOK_SECRET: "whsec_private",
+    GH_TOKEN: "github-private",
+    OPENAI_API_KEY: "provider-private",
+  }, { token: "tfr_run_only", apiUrl: "http://127.0.0.1:4000", runId: "run-1", taskId: "task-1", projectId: "project-1" });
+  assert.deepEqual(environment, {
+    PATH: "/usr/bin",
+    HOME: "/tmp/provider-home",
+    LANG: "en_US.UTF-8",
+    TASKFORGE_TOKEN: "tfr_run_only",
+    TASKFORGE_API_URL: "http://127.0.0.1:4000",
+    TASKFORGE_RUN_ID: "run-1",
+    TASKFORGE_TASK_ID: "task-1",
+    TASKFORGE_PROJECT_ID: "project-1",
+  });
+});
+
 test("provider commands cannot hang on stdin and stream output", async () => {
   const output: string[] = [];
   const result = await executeCommand(
@@ -210,8 +235,9 @@ test("provider command cancellation terminates the child", async () => {
 test("runner routes signed events, executes once, and deduplicates delivery", async () => {
   const calls: string[] = [];
   const bodies: Record<string, string> = {};
-  const api = { request: async (path: string, init?: RequestInit) => { calls.push(path); bodies[path] = String(init?.body ?? ""); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return path.endsWith("/runs") ? { run: { id: "run-1" } } : {}; } };
-  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "ok", stderr: "" }), () => 1_700_000_000_000);
+  let providerEnv: NodeJS.ProcessEnv | undefined;
+  const api = { request: async (path: string, init?: RequestInit) => { calls.push(path); bodies[path] = String(init?.body ?? ""); if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return path.endsWith("/runs") ? { run: { id: "run-1" } } : {}; } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (...args: unknown[]) => { providerEnv = args[6] as NodeJS.ProcessEnv; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
   const body = JSON.stringify(event);
   const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
   assert.equal((await runner.handle("claude", headers, body)).status, 202);
@@ -220,15 +246,19 @@ test("runner routes signed events, executes once, and deduplicates delivery", as
   assert.ok(calls.includes(`/api/context?project=TAS&task=TAS-64`));
   assert.ok(calls.includes(`/api/tasks/${event.task.id}/runs`));
   assert.ok(calls.includes("/api/runs/run-1/claim"));
+  assert.ok(calls.includes("/api/runs/run-1/credential"));
   assert.ok(calls.includes("/api/runs/run-1/complete"));
   assert.equal(bodies["/api/runs/run-1/claim"], JSON.stringify({ leaseMs: 120000 }));
   assert.ok(calls.includes(`/api/tasks/${event.task.id}/agent-logs`));
+  assert.equal(providerEnv?.TASKFORGE_TOKEN, "tfr_test_scoped");
+  assert.equal(providerEnv?.SMITHY_PROVIDERS, undefined);
+  assert.equal(providerEnv?.TASKFORGE_WEBHOOK_SECRET, undefined);
   assert.doesNotMatch(String((JSON.parse(bodies[`/api/tasks/${event.task.id}/updates`] ?? "{}") as { body?: string }).body), /Provider response/);
 });
 
 test("runner rejects unknown providers, bad signatures, and missing local commands", async () => {
   const calls: Array<{ path: string; body?: string }> = [];
-  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return path.endsWith("/runs") ? { run: { id: "run-failed" } } : {}; } };
+  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return path.endsWith("/runs") ? { run: { id: "run-failed" } } : {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: null, stdout: "", stderr: "", error: new Error("spawn ENOENT token=tf_private") }), () => 1_700_000_000_000);
   const body = JSON.stringify(event);
   assert.equal((await runner.handle("cursor", {}, body)).status, 404);
@@ -245,6 +275,7 @@ test("runner rejects unknown providers, bad signatures, and missing local comman
 test("runner reports redacted publication authentication failures", async () => {
   let update = "";
   const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.endsWith("/credential")) return runCredential;
     if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task };
     if (path.endsWith("/runs")) return { run: { id: "run-publish-auth" } };
     if (path.endsWith("/updates")) update = String(init?.body ?? "");
@@ -274,7 +305,7 @@ test("runner ignores an out-of-order status event after the task has moved on", 
 
 test("runner processes a status event when context is still at the previous status", async () => {
   const calls: string[] = [];
-  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["IN_PROGRESS", "IN_REVIEW"] }, task: { ...event.task, status: "IN_PROGRESS" } }; return path.endsWith("/runs") ? { run: { id: "run-lagged" } } : {}; } };
+  const api = { request: async (path: string) => { calls.push(path); if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["IN_PROGRESS", "IN_REVIEW"] }, task: { ...event.task, status: "IN_PROGRESS" } }; return path.endsWith("/runs") ? { run: { id: "run-lagged" } } : {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "ok", stderr: "" }), () => 1_700_000_000_000);
   const valid = { ...event, event: "task.status_changed", previousStatus: "IN_PROGRESS", task: { ...event.task, status: "IN_REVIEW" } };
   const body = JSON.stringify(valid); const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
@@ -303,6 +334,7 @@ test("runner leaves task transitions to the assigned agent and explains the work
   const statusUpdates: string[] = [];
   let prompt = "";
   const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.endsWith("/credential")) return runCredential;
     if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["BACKLOG", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW"] }, task: { ...event.task, status: "BACKLOG" } };
     if (path.includes("/api/tasks/") && init?.method === "PATCH") statusUpdates.push(String(init.body));
     if (path.endsWith("/runs")) return { run: { id: "run-backlog" } };
@@ -327,6 +359,7 @@ test("runner gives fix and re-review jobs focused, status-aware prompts", async 
   for (const [status, expected] of [["FIX_NEEDED", /existing branch/], ["RE_REVIEW", /previously reviewed/] ] as const) {
     let prompt = "";
     const api = { request: async (path: string) => {
+      if (path.endsWith("/credential")) return runCredential;
       if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["IN_PROGRESS", "READY_FOR_REVIEW", "RE_REVIEW", "FIX_NEEDED"] }, task: { ...event.task, branch: "agent/tas-64-existing", status } };
       if (path.endsWith("/runs")) return { run: { id: `run-${status.toLowerCase()}` } };
       return {};
@@ -350,6 +383,7 @@ test("runner gives fix and re-review jobs focused, status-aware prompts", async 
 test("review prompts include verified publication handoff context", async () => {
   let prompt = "";
   const api = { request: async (path: string) => {
+    if (path.endsWith("/credential")) return runCredential;
     if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["READY_FOR_REVIEW", "IN_REVIEW", "APPROVED"] }, task: { ...event.task, status: "READY_FOR_REVIEW", branch: "agent/published" } };
     if (path.endsWith("/runs")) return path.includes("/tasks/") ? { runs: [{ id: "run-review-published" }, { id: "run-publisher" }] } : { run: { id: "run-review-published" } };
     if (path.endsWith("/handoff")) return path.includes("run-publisher") ? { handoff: { status: "PUBLISHED", branch: "agent/published", headSha: "a".repeat(40), branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/9", pullRequestState: "OPEN" } } : { handoff: null };
@@ -371,6 +405,7 @@ test("runner uses the project workflow mapping and ignores ordinary updates", as
   let contextStatus = "QUEUE";
   const workflow = { implementationQueue: "QUEUE", implementationStart: "BUILDING", reviewHandoff: "HANDOFF", reviewStart: "REVIEWING", approved: "APPROVED", fixNeeded: "CHANGES", fixStart: "FIXING", reReview: "RECHECK" };
   const api = { request: async (path: string) => {
+    if (path.endsWith("/credential")) return runCredential;
     calls.push(path);
     if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: Object.values(workflow), agentWorkflow: workflow }, task: { ...event.task, status: contextStatus, branch: "agent/custom" } };
     if (path.endsWith("/findings")) return { findings: [{ severity: "P2", disposition: "OPEN", title: "Review item", body: "Inspect this path." }] };
@@ -408,6 +443,7 @@ test("runner executes the configured implementation-review-fix-re-review loop wi
   const calls: Array<{ path: string; body?: string }> = [];
   const prompts: string[] = [];
   const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.endsWith("/credential")) return runCredential;
     calls.push({ path, body: String(init?.body ?? "") });
     if (path.includes("/api/context")) {
       return { project: { key: "TAS", availableStatuses: Object.values(workflow), agentWorkflow: workflow }, task: { ...event.task, status: currentStatus, branch: "agent/tas-83-loop" } };
@@ -442,6 +478,7 @@ test("runner includes redacted findings in fix prompts and rejects invalid mappi
   let prompt = "";
   const workflow = { implementationQueue: "QUEUE", implementationStart: "BUILDING", reviewHandoff: "HANDOFF", reviewStart: "REVIEWING", approved: "APPROVED", fixNeeded: "CHANGES", fixStart: "FIXING", reReview: "RECHECK" };
   const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.endsWith("/credential")) return runCredential;
     if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: Object.values(workflow), agentWorkflow: workflow }, task: { ...event.task, status: "CHANGES", branch: "agent/custom" } };
     if (path.endsWith("/findings")) return { findings: [{ severity: "P1", disposition: "OPEN", title: "Leaked token", body: "token=secret-value" }] };
     if (path.endsWith("/runs")) return { run: { id: "run-findings" } };
@@ -496,6 +533,7 @@ test("runner does not invent a transition when the workflow lacks semantic statu
   let prompt = "";
   const patches: string[] = [];
   const api = { request: async (path: string, init?: RequestInit) => {
+    if (path.endsWith("/credential")) return runCredential;
     if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO"] }, task: { ...event.task, status: "TODO" } };
     if (init?.method === "PATCH") patches.push(path);
     if (path.endsWith("/runs")) return { run: { id: "run-minimal" } };
@@ -515,7 +553,7 @@ test("runner does not invent a transition when the workflow lacks semantic statu
 test("runner resumes a persisted pending job with the same event and run correlation", async () => {
   const store = new MemoryJobStore(); const accepted = store.accept("event-resume", "claude", event.task.id, JSON.stringify(event)); store.setRunId("event-resume", "run-existing");
   const calls: string[] = [];
-  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return {}; } };
+  const api = { request: async (path: string) => { calls.push(path); if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; return {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "ok", stderr: "" }), () => 1_700_000_000_000, store);
   await runner.resume(); await new Promise((resolve) => setImmediate(resolve));
   assert.equal(accepted.job.runId, "run-existing");
@@ -528,7 +566,7 @@ test("runner only resumes stale RUNNING jobs after the lease window", async () =
   const fresh = freshStore.accept("event-fresh-running", "claude", event.task.id, JSON.stringify(event)).job;
   freshStore.markRunning(fresh.eventId);
   let freshExecutions = 0;
-  const api = { request: async (path: string) => { if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-recovered" } }; return {}; } };
+  const api = { request: async (path: string) => { if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-recovered" } }; return {}; } };
   const freshRunner = new SmithyRunner({ claude: provider }, () => api as never, async () => { freshExecutions += 1; return { code: 0, stdout: "", stderr: "" }; }, () => Date.parse(fresh.updatedAt) + 60_000, freshStore);
   await freshRunner.resume();
   await new Promise((resolve) => setImmediate(resolve));
@@ -556,6 +594,7 @@ test("lease loss requeues a SQLite job and resumes the same run without terminal
   let runCreates = 0;
   let completions = 0;
   const api = { request: async (path: string) => {
+    if (path.endsWith("/credential")) return runCredential;
     if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task };
     if (path.endsWith("/runs")) { runCreates += 1; return { run: { id: "run-lease-recovery" } }; }
     if (path.endsWith("/heartbeat")) { heartbeats += 1; if (heartbeats === 1) throw new Error('TaskForge API returned HTTP 400: {"error":"Agent run lease is not owned by this actor"}'); return {}; }
@@ -583,7 +622,7 @@ test("lease loss requeues a SQLite job and resumes the same run without terminal
 test("runner replays a failed duplicate without creating a second run", async () => {
   let executions = 0;
   const calls: string[] = [];
-  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-retry" } }; return {}; } };
+  const api = { request: async (path: string) => { calls.push(path); if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-retry" } }; return {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { executions += 1; return executions === 1 ? { code: 1, stdout: "", stderr: "first failure" } : { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
   const body = JSON.stringify({ ...event, id: "event-retry" });
   const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
@@ -599,7 +638,7 @@ test("runner replays a failed duplicate without creating a second run", async ()
 
 test("runner bounds failed duplicate replays to three local attempts", async () => {
   let executions = 0;
-  const api = { request: async (path: string) => { if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-bounded" } }; return {}; } };
+  const api = { request: async (path: string) => { if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-bounded" } }; return {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { executions += 1; return { code: 1, stdout: "", stderr: "failure" }; }, () => 1_700_000_000_000);
   const body = JSON.stringify({ ...event, id: "event-bounded" });
   const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };
@@ -619,7 +658,7 @@ test("runner prevents concurrent jobs for the same task", async () => {
   let release!: () => void;
   const running = new Promise<void>((resolve) => { release = resolve; });
   const calls: string[] = [];
-  const api = { request: async (path: string) => { calls.push(path); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: `run-${calls.length}` } }; return {}; } };
+  const api = { request: async (path: string) => { calls.push(path); if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: `run-${calls.length}` } }; return {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { executions += 1; await running; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
   const first = { ...event, id: "event-concurrent-1" };
   const second = { ...event, id: "event-concurrent-2" };
@@ -636,7 +675,7 @@ test("runner prevents concurrent jobs for the same task", async () => {
 test("runner cancellation aborts the provider and completes the correlated run", async () => {
   let signal!: AbortSignal;
   const calls: Array<{ path: string; body?: string }> = [];
-  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-cancel" } }; return {}; } };
+  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-cancel" } }; return {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async (...args: unknown[]) => {
     signal = args[5] as AbortSignal;
     await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
@@ -658,7 +697,7 @@ test("runner cancellation during worktree preparation prevents provider start", 
   let release!: () => void;
   const preparing = new Promise<void>((resolve) => { release = resolve; });
   const calls: Array<{ path: string; body?: string }> = [];
-  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-pre-cancel" } }; return {}; } };
+  const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-pre-cancel" } }; return {}; } };
   const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => { executions += 1; return { code: 0, stdout: "", stderr: "" }; }, () => 1_700_000_000_000, new MemoryJobStore(), async () => { await preparing; return "/tmp/repo"; });
   const body = JSON.stringify({ ...event, id: "event-pre-cancel" });
   const headers = { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` };

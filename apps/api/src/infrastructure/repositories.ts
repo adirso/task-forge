@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, type TaskStatus } from "@taskforge/contracts";
 import { agentWorkflowSchema } from "@taskforge/contracts";
-import type { ActivityEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
+import type { ActivityEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunCredentialEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
 import type { AgentHandoffRepository, AgentLogRepository, AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, DeliveryMonitorRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskFindingRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 import { decodeCursor, toPage } from "./pagination.js";
@@ -178,6 +178,18 @@ function toToken(row: Row): ApiTokenEntity {
   let permissions: string[] | null = null;
   if (row.permissions) { try { permissions = JSON.parse(String(row.permissions)); } catch { permissions = null; } }
   return { id: text(row.id), userId: text(row.user_id), name: text(row.name), prefix: text(row.token_prefix ?? row.prefix), expiresAt: nullableText(row.expires_at ?? row.expiresAt), lastUsedAt: nullableText(row.last_used_at ?? row.lastUsedAt), revokedAt: nullableText(row.revoked_at ?? row.revokedAt), createdAt: date(row.created_at ?? row.createdAt), revealable: Boolean(ciphertext), ciphertext, permissions };
+}
+
+function toRunCredential(row: Row): AgentRunCredentialEntity {
+  let permissions: string[] = [];
+  try { permissions = JSON.parse(String(row.permissions ?? "[]")); } catch { permissions = []; }
+  return {
+    runId: text(row.run_id), taskId: text(row.task_id), projectId: text(row.project_id), userId: text(row.user_id),
+    runAttempt: Number(row.run_attempt), prefix: text(row.token_prefix), hash: text(row.token_hash),
+    ciphertext: text(row.token_ciphertext), permissions, expiresAt: date(row.expires_at),
+    lastUsedAt: nullableText(row.last_used_at), revokedAt: nullableText(row.revoked_at),
+    createdAt: date(row.created_at), updatedAt: date(row.updated_at),
+  };
 }
 
 function createUserRepository(db: DatabasePort): UserRepository {
@@ -380,7 +392,22 @@ function createNotificationRepository(db: DatabasePort): NotificationRepository 
 }
 
 function createTokenRepository(db: DatabasePort): ApiTokenRepository {
-  return { async create(input) { await db.prepare("INSERT INTO api_tokens (id, user_id, name, token_prefix, token_hash, token_ciphertext, permissions, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.userId, input.name, input.prefix, input.hash, input.ciphertext, input.permissions ? JSON.stringify(input.permissions) : null, input.expiresAt, input.createdAt); }, async listForUser(userId) { return (await db.prepare("SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC").all(userId)).map((row) => { const token = toToken(row); const { ciphertext: _ciphertext, ...metadata } = token; return metadata; }); }, async findById(id) { const row = await db.prepare("SELECT * FROM api_tokens WHERE id = ?").get(id); return row ? { ...toToken(row), userId: String(row.user_id), ciphertext: nullableText(row.token_ciphertext) } : null; }, async revoke(id) { await db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE id = ?").run(new Date().toISOString(), id); } };
+  return {
+    async create(input) { await db.prepare("INSERT INTO api_tokens (id, user_id, name, token_prefix, token_hash, token_ciphertext, permissions, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.userId, input.name, input.prefix, input.hash, input.ciphertext, input.permissions ? JSON.stringify(input.permissions) : null, input.expiresAt, input.createdAt); },
+    async listForUser(userId) { return (await db.prepare("SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC").all(userId)).map((row) => { const token = toToken(row); const { ciphertext: _ciphertext, ...metadata } = token; return metadata; }); },
+    async findById(id) { const row = await db.prepare("SELECT * FROM api_tokens WHERE id = ?").get(id); return row ? { ...toToken(row), userId: String(row.user_id), ciphertext: nullableText(row.token_ciphertext) } : null; },
+    async revoke(id) { await db.prepare("UPDATE api_tokens SET revoked_at = ? WHERE id = ?").run(new Date().toISOString(), id); },
+    async findRunCredential(runId) { const row = await db.prepare("SELECT * FROM agent_run_credentials WHERE run_id = ?").get(runId); return row ? toRunCredential(row) : null; },
+    async saveRunCredential(input) {
+      const values = [input.runId, input.taskId, input.projectId, input.userId, input.runAttempt, input.prefix, input.hash, input.ciphertext, JSON.stringify(input.permissions), input.expiresAt, input.lastUsedAt, input.revokedAt, input.createdAt, input.updatedAt];
+      const sql = db.dialect === "mysql"
+        ? "INSERT INTO agent_run_credentials (run_id, task_id, project_id, user_id, run_attempt, token_prefix, token_hash, token_ciphertext, permissions, expires_at, last_used_at, revoked_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE task_id = VALUES(task_id), project_id = VALUES(project_id), user_id = VALUES(user_id), run_attempt = VALUES(run_attempt), token_prefix = VALUES(token_prefix), token_hash = VALUES(token_hash), token_ciphertext = VALUES(token_ciphertext), permissions = VALUES(permissions), expires_at = VALUES(expires_at), last_used_at = VALUES(last_used_at), revoked_at = VALUES(revoked_at), created_at = VALUES(created_at), updated_at = VALUES(updated_at)"
+        : "INSERT INTO agent_run_credentials (run_id, task_id, project_id, user_id, run_attempt, token_prefix, token_hash, token_ciphertext, permissions, expires_at, last_used_at, revoked_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET task_id = excluded.task_id, project_id = excluded.project_id, user_id = excluded.user_id, run_attempt = excluded.run_attempt, token_prefix = excluded.token_prefix, token_hash = excluded.token_hash, token_ciphertext = excluded.token_ciphertext, permissions = excluded.permissions, expires_at = excluded.expires_at, last_used_at = excluded.last_used_at, revoked_at = excluded.revoked_at, created_at = excluded.created_at, updated_at = excluded.updated_at";
+      await db.prepare(sql).run(...values);
+      return input;
+    },
+    async revokeRunCredential(runId, revokedAt) { await db.prepare("UPDATE agent_run_credentials SET revoked_at = COALESCE(revoked_at, ?), updated_at = ? WHERE run_id = ?").run(revokedAt, revokedAt, runId); },
+  };
 }
 
 function createActivityRepository(db: DatabasePort): ActivityRepository {
