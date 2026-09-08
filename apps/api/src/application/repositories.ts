@@ -151,6 +151,7 @@ export interface DeliveryMonitorRepository { health(now: string, pollIntervalMs:
 export interface TaskGateRepository {
   findByTask(taskId: string): Promise<TaskGateEntity | null>;
   save(input: TaskGateEntity): Promise<TaskGateEntity>;
+  invalidateApprovals(taskId: string): Promise<void>;
   approve(taskId: string, headSha: string, actorId: string, policy: { requiredReviewerCount: number; excludedReviewerId: string | null; allowedReviewerIds: string[] }, now: string): Promise<TaskGateEntity | null>;
   merge(taskId: string, headSha: string, actorId: string, now: string): Promise<TaskGateEntity | null>;
 }

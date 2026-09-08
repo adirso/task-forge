@@ -541,9 +541,10 @@ function createTaskGateRepository(db: DatabasePort): TaskGateRepository {
       const values = [input.headSha, JSON.stringify(input.requiredChecks), JSON.stringify(input.checks), input.implementationRunId, input.implementationAgentId, input.approvedHeadSha, input.approvedById, input.approvedAt, input.mergedHeadSha, input.mergedById, input.mergedAt, input.updatedAt, input.taskId];
       if (existing) await db.prepare("UPDATE task_gate_evidence SET head_sha = ?, required_checks = ?, checks_json = ?, implementation_run_id = ?, implementation_agent_id = ?, approved_head_sha = ?, approved_by_id = ?, approved_at = ?, merged_head_sha = ?, merged_by_id = ?, merged_at = ?, updated_at = ? WHERE task_id = ?").run(...values);
       else await db.prepare("INSERT INTO task_gate_evidence (head_sha, required_checks, checks_json, implementation_run_id, implementation_agent_id, approved_head_sha, approved_by_id, approved_at, merged_head_sha, merged_by_id, merged_at, updated_at, task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(...values);
-      if (existing && (text(existing.head_sha) !== input.headSha || input.approvedHeadSha == null)) await db.prepare("DELETE FROM task_gate_approvals WHERE task_id = ?").run(input.taskId);
+      if (existing && (text(existing.head_sha) !== input.headSha || (nullableText(existing.approved_head_sha) !== null && input.approvedHeadSha === null))) await db.prepare("DELETE FROM task_gate_approvals WHERE task_id = ?").run(input.taskId);
       return this.findByTask(input.taskId) as Promise<TaskGateEntity>;
     },
+    async invalidateApprovals(taskId) { await db.prepare("DELETE FROM task_gate_approvals WHERE task_id = ?").run(taskId); },
     async approve(taskId, headSha, actorId, policy, now) {
       const gate = await db.prepare("SELECT task_id FROM task_gate_evidence WHERE task_id = ? AND head_sha = ?").get(taskId, headSha);
       if (!gate) return null;

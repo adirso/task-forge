@@ -980,10 +980,14 @@ test("FIX_NEEDED invalidates same-head approvals and requires a fresh eligible q
   assert.equal(evidence.statusCode, 200, evidence.body);
   const selfReview = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${implementerToken}` }, payload: { headSha } });
   assert.equal(selfReview.statusCode, 403, selfReview.body);
-  for (const token of [reviewerOneToken, reviewerTwoToken]) {
-    const approval = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${token}` }, payload: { headSha } });
-    assert.equal(approval.statusCode, 200, approval.body);
-  }
+  const firstApproval = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${reviewerOneToken}` }, payload: { headSha } });
+  assert.equal(firstApproval.statusCode, 200, firstApproval.body);
+  assert.equal(firstApproval.json().gate.approvedHeadSha, null);
+  const refreshedEvidence = await app.inject({ method: "PUT", url: `/api/tasks/${invalidationTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha }] } });
+  assert.equal(refreshedEvidence.statusCode, 200, refreshedEvidence.body);
+  assert.deepEqual(refreshedEvidence.json().gate.approvals.map((approval: { reviewerId: string }) => approval.reviewerId), [reviewerOneId]);
+  const secondApproval = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${reviewerTwoToken}` }, payload: { headSha } });
+  assert.equal(secondApproval.statusCode, 200, secondApproval.body);
   const approved = await app.inject({ method: "GET", url: `/api/tasks/${invalidationTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(approved.json().gate.approvedHeadSha, headSha);
   assert.equal(approved.json().gate.approvals.length, 2);
