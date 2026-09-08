@@ -127,6 +127,18 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
     ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'dependency_resolution_statuses'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'dependency_resolution_statuses'", []));
   assert.equal(hasDependencyResolutionStatusesColumn, true);
+  const hasReviewPolicyColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'review_policy'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'review_policy'", []));
+  assert.equal(hasReviewPolicyColumn, true);
+  const hasExecutedByColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('agent_runs') WHERE name = 'executed_by_id'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'agent_runs' AND column_name = 'executed_by_id'", []));
+  assert.equal(hasExecutedByColumn, true);
+  const hasGateApprovals = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'task_gate_approvals'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'task_gate_approvals'", []));
+  assert.equal(hasGateApprovals, true);
   if (expectsLegacyTask) {
     const project = await adapter.get<{ dependency_resolution_statuses: string }>("SELECT dependency_resolution_statuses FROM projects WHERE id = ?", ["project-1"]);
     assert.deepEqual(JSON.parse(project!.dependency_resolution_statuses), ["DONE", "CANCELLED"]);

@@ -40,11 +40,14 @@ test.describe("workspace browser smoke", () => {
     await openProjectSettings(page);
 
     await expect(page.getByText("Agent workflow", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Require independent review")).toBeChecked();
+    await page.getByLabel("Required reviewer count").fill("2");
     await expect(page.getByLabel("Implementation Queue")).toHaveValue("TODO");
     await page.getByLabel("Implementation Queue").selectOption("IN_PROGRESS");
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByText("Project updated")).toBeVisible();
     await openProjectSettings(page);
+    await expect(page.getByLabel("Required reviewer count")).toHaveValue("2");
 
     await page.getByRole("checkbox", { name: "Available status: Backlog" }).uncheck();
     await page.getByRole("checkbox", { name: "Available status: Refining" }).uncheck();
@@ -128,6 +131,39 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: "Project actions" }).click();
     await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0);
     await expect(page.getByRole("menuitem", { name: "Delete" })).toHaveCount(0);
+  });
+
+  test("an implementation agent cannot self-review while an independent agent can approve", async ({ page, request }) => {
+    await signIn(page);
+    const adminToken = await page.evaluate(() => localStorage.getItem("taskforge_token"));
+    expect(adminToken).toBeTruthy();
+    const call = async (method: string, url: string, token: string, data?: unknown) => {
+      const response = await request.fetch(url, { method, headers: { authorization: `Bearer ${token}` }, data });
+      expect(response.ok(), `${method} ${url} returned ${response.status()}`).toBeTruthy();
+      return response.status() === 204 ? null : response.json();
+    };
+    const suffix = String(Date.now());
+    const implementer = (await call("POST", "/api/users/agents", adminToken!, { name: `Browser implementer ${suffix}` })).user;
+    const reviewer = (await call("POST", "/api/users/agents", adminToken!, { name: `Browser reviewer ${suffix}` })).user;
+    const project = (await call("POST", "/api/projects", adminToken!, { key: `R${Date.now() % 1000000}`, name: `Independent review ${suffix}`, description: "Browser-backed separation of duties", color: "#0052CC" })).project;
+    for (const userId of [implementer.id, reviewer.id]) await call("POST", `/api/projects/${project.id}/members`, adminToken!, { userId, role: "MEMBER" });
+    await call("PATCH", `/api/projects/${project.id}`, adminToken!, { reviewPolicy: { requireIndependentReview: true, requiredReviewerCount: 1, allowedReviewerAgentIds: [reviewer.id] } });
+    const implementerToken = (await call("POST", `/api/users/${implementer.id}/tokens`, adminToken!, { name: "Browser implementation token", permissions: ["task:gate:approve"] })).token;
+    const reviewerToken = (await call("POST", `/api/users/${reviewer.id}/tokens`, adminToken!, { name: "Browser reviewer token", permissions: ["task:gate:approve"] })).token;
+    const task = (await call("POST", `/api/projects/${project.id}/tasks`, adminToken!, { title: "Independent browser approval", status: "IN_REVIEW", assigneeId: implementer.id, branch: `agent/browser-review-${suffix}` })).task;
+    const run = (await call("POST", `/api/tasks/${task.id}/runs`, adminToken!, { kind: "IMPLEMENTATION" })).run;
+    await call("POST", `/api/runs/${run.id}/claim`, implementerToken, { leaseMs: 60_000 });
+    const headSha = "5555555555555555555555555555555555555555";
+    await call("PUT", `/api/runs/${run.id}/handoff`, implementerToken, { branch: task.branch, headSha, branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/55", pullRequestTitle: "Independent browser approval", pullRequestState: "OPEN", status: "PUBLISHED" });
+    await call("PUT", `/api/tasks/${task.id}/gate`, adminToken!, { headSha, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha }] });
+
+    const selfReview = await request.post(`/api/tasks/${task.id}/gate/approve`, { headers: { authorization: `Bearer ${implementerToken}` }, data: { headSha } });
+    expect(selfReview.status()).toBe(403);
+    expect((await selfReview.json()).error).toMatch(/implementing agent cannot approve/i);
+    const independentReview = await call("POST", `/api/tasks/${task.id}/gate/approve`, reviewerToken, { headSha });
+    expect(independentReview.gate.approvedHeadSha).toBe(headSha);
+    expect(independentReview.gate.approvals.map((approval: { reviewerId: string }) => approval.reviewerId)).toEqual([reviewer.id]);
+    await call("DELETE", `/api/projects/${project.id}`, adminToken!);
   });
 
   test("shows dependency blockers and configures cancellation semantics", async ({ page }) => {

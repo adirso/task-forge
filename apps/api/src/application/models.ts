@@ -1,4 +1,4 @@
-import type { AgentWorkflow, DependencyResolutionStatus, ProjectMergeTarget, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
+import type { AgentWorkflow, DependencyResolutionStatus, ProjectMergeTarget, ProjectReviewPolicy, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
 
 export interface UserEntity {
   id: string;
@@ -41,6 +41,7 @@ export interface AgentRunEntity {
   taskId: string;
   projectId: string;
   requestedById: string;
+  executedById: string | null;
   kind: AgentRunKind;
   status: AgentRunStatus;
   attemptCount: number;
@@ -103,6 +104,9 @@ export interface TaskGateEntity {
   headSha: string;
   requiredChecks: string[];
   checks: Array<{ name: string; status: GateCheckStatus; headSha: string; detailsUrl?: string | null }>;
+  implementationRunId: string | null;
+  implementationAgentId: string | null;
+  approvals: Array<{ reviewerId: string; approvedAt: string }>;
   approvedHeadSha: string | null;
   approvedById: string | null;
   approvedAt: string | null;
@@ -202,6 +206,7 @@ export interface ProjectEntity {
   hiddenEmptyStatuses: TaskStatus[];
   mergeTarget: ProjectMergeTarget;
   dependencyResolutionStatuses: DependencyResolutionStatus[];
+  reviewPolicy: ProjectReviewPolicy;
   ownerId: string;
   createdAt: string;
   updatedAt: string;

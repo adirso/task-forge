@@ -96,6 +96,7 @@ test("human can log in and create a project", async () => {
   assert.equal(project.json().project.members[0].projectRole, "OWNER");
   assert.equal(project.json().project.mergeTarget, "main");
   assert.deepEqual(project.json().project.dependencyResolutionStatuses, ["DONE", "CANCELLED"]);
+  assert.deepEqual(project.json().project.reviewPolicy, { requireIndependentReview: true, requiredReviewerCount: 1, allowedReviewerAgentIds: [] });
   const phaseTarget = await app.inject({ method: "PATCH", url: `/api/projects/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { mergeTarget: "phase" } });
   assert.equal(phaseTarget.statusCode, 200, phaseTarget.body);
   assert.equal(phaseTarget.json().project.mergeTarget, "phase");
@@ -872,8 +873,11 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
     const membership = await app.inject({ method: "POST", url: `/api/projects/${loopProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId, role: "MEMBER" } });
     assert.equal(membership.statusCode, 204, membership.body);
   }
+  const invalidReviewer = await app.inject({ method: "PATCH", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { reviewPolicy: { requireIndependentReview: true, requiredReviewerCount: 1, allowedReviewerAgentIds: [adminId] } } });
+  assert.equal(invalidReviewer.statusCode, 400, invalidReviewer.body);
+  assert.match(invalidReviewer.json().error, /agent members/);
   const workflowStatuses = ["TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "APPROVED", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW"];
-  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: workflowStatuses, defaultStatus: "TODO", agentWorkflow: { implementationQueue: "TODO", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "FIX_IN_PROGRESS", reReview: "RE_REVIEW" } } });
+  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: workflowStatuses, defaultStatus: "TODO", agentWorkflow: { implementationQueue: "TODO", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "FIX_IN_PROGRESS", reReview: "RE_REVIEW" }, reviewPolicy: { requireIndependentReview: true, requiredReviewerCount: 1, allowedReviewerAgentIds: [reviewerId] } } });
   assert.equal(configured.statusCode, 200, configured.body);
   const reviewerWebhook = await app.inject({ method: "PATCH", url: `/api/users/${reviewerId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "http://127.0.0.1:4500/agents/reviewer" } });
   assert.equal(reviewerWebhook.statusCode, 200, reviewerWebhook.body);
@@ -890,8 +894,12 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
   const runResponse = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
   assert.equal(runResponse.statusCode, 201, runResponse.body);
   const runId = runResponse.json().run.id as string;
-  const claimedRun = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { leaseMs: 60_000 } });
+  const claimedRun = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${agentToken}` }, payload: { leaseMs: 60_000 } });
   assert.equal(claimedRun.statusCode, 200, claimedRun.body);
+  assert.equal(claimedRun.json().run.executedById, agentId);
+  const headSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const handoff = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${agentToken}` }, payload: { branch: "agent/autonomous-loop", headSha, branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/1", pullRequestTitle: "Autonomous loop", pullRequestState: "OPEN", status: "PUBLISHED" } });
+  assert.equal(handoff.statusCode, 200, handoff.body);
   const move = async (status: string, assignee: string) => {
     const response = await app.inject({ method: "PATCH", url: `/api/tasks/${loopTaskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status, runId } });
     assert.equal(response.statusCode, 200, response.body);
@@ -908,20 +916,93 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
   const deliveries = await db.prepare("SELECT event_type, agent_id, payload FROM webhook_deliveries WHERE task_id = ? ORDER BY created_at ASC").all(loopTaskId) as Array<{ event_type: string; agent_id: string; payload: string | object }>;
   assert.ok(deliveries.some((delivery) => delivery.event_type === "task.status_changed" && delivery.agent_id === reviewerId));
   assert.ok(deliveries.some((delivery) => (typeof delivery.payload === "string" ? JSON.parse(delivery.payload) : delivery.payload as { runId?: string }).runId === runId));
-  const evidence = await app.inject({ method: "PUT", url: `/api/tasks/${loopTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }] } });
+  const evidence = await app.inject({ method: "PUT", url: `/api/tasks/${loopTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha }] } });
   assert.equal(evidence.statusCode, 200, evidence.body);
+  assert.equal(evidence.json().gate.implementationAgentId, agentId);
   const scoped = await app.inject({ method: "POST", url: `/api/users/${reviewerId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Gate reviewer", permissions: ["task:gate:approve"] } });
   assert.equal(scoped.statusCode, 201, scoped.body);
   const scopedToken = scoped.json().token as string;
-  const agentMerge = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/merge`, headers: { authorization: `Bearer ${scopedToken}` }, payload: { headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } });
+  const implementingReviewer = await app.inject({ method: "POST", url: `/api/users/${agentId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name: "Implementer review attempt", permissions: ["task:gate:approve"] } });
+  assert.equal(implementingReviewer.statusCode, 201, implementingReviewer.body);
+  const selfApproval = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/approve`, headers: { authorization: `Bearer ${implementingReviewer.json().token}` }, payload: { headSha } });
+  assert.equal(selfApproval.statusCode, 403, selfApproval.body);
+  assert.match(selfApproval.json().error, /implementing agent cannot approve/i);
+  const agentMerge = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/merge`, headers: { authorization: `Bearer ${scopedToken}` }, payload: { headSha } });
   assert.equal(agentMerge.statusCode, 403, agentMerge.body);
-  const approval = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/approve`, headers: { authorization: `Bearer ${scopedToken}` }, payload: { headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } });
+  const approval = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/approve`, headers: { authorization: `Bearer ${scopedToken}` }, payload: { headSha } });
   assert.equal(approval.statusCode, 200, approval.body);
-  const merge = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/merge`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } });
+  const merge = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/merge`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha } });
   assert.equal(merge.statusCode, 200, merge.body);
-  const completedRun = await app.inject({ method: "POST", url: `/api/runs/${runId}/complete`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "SUCCEEDED" } });
+  const completedRun = await app.inject({ method: "POST", url: `/api/runs/${runId}/complete`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "SUCCEEDED" } });
   assert.equal(completedRun.statusCode, 200, completedRun.body);
   const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deleted.statusCode, 204, deleted.body);
+});
+
+test("FIX_NEEDED invalidates same-head approvals and requires a fresh eligible quorum", async () => {
+  const implementerId = randomUUID();
+  const reviewerOneId = randomUUID();
+  const reviewerTwoId = randomUUID();
+  const now = new Date().toISOString();
+  for (const [id, label] of [[implementerId, "Implementer"], [reviewerOneId, "Reviewer one"], [reviewerTwoId, "Reviewer two"]] as const) {
+    await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)")
+      .run(id, `${id}@example.com`, label, now);
+  }
+  const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `INV${randomUUID().slice(0, 4)}`, name: "Approval invalidation", description: "Same-head review invalidation", color: "#0052CC" } });
+  assert.equal(created.statusCode, 201, created.body);
+  const invalidationProjectId = created.json().project.id as string;
+  for (const userId of [implementerId, reviewerOneId, reviewerTwoId]) {
+    const membership = await app.inject({ method: "POST", url: `/api/projects/${invalidationProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId, role: "MEMBER" } });
+    assert.equal(membership.statusCode, 204, membership.body);
+  }
+  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${invalidationProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { reviewPolicy: { requireIndependentReview: true, requiredReviewerCount: 2, allowedReviewerAgentIds: [reviewerOneId, reviewerTwoId] } } });
+  assert.equal(configured.statusCode, 200, configured.body);
+  const issueToken = async (userId: string, name: string) => {
+    const issued = await app.inject({ method: "POST", url: `/api/users/${userId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name, permissions: ["task:gate:approve"] } });
+    assert.equal(issued.statusCode, 201, issued.body);
+    return issued.json().token as string;
+  };
+  const implementerToken = await issueToken(implementerId, "Implementation agent");
+  const reviewerOneToken = await issueToken(reviewerOneId, "First reviewer");
+  const reviewerTwoToken = await issueToken(reviewerTwoId, "Second reviewer");
+  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${invalidationProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Invalidate approved head", status: "IN_REVIEW", assigneeId: implementerId, branch: "agent/invalidate-approved-head" } });
+  assert.equal(createdTask.statusCode, 201, createdTask.body);
+  const invalidationTaskId = createdTask.json().task.id as string;
+  const runResponse = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  assert.equal(runResponse.statusCode, 201, runResponse.body);
+  const runId = runResponse.json().run.id as string;
+  const claimed = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${implementerToken}` }, payload: { leaseMs: 60_000 } });
+  assert.equal(claimed.statusCode, 200, claimed.body);
+  const headSha = "4444444444444444444444444444444444444444";
+  const handoff = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${implementerToken}` }, payload: { branch: "agent/invalidate-approved-head", headSha, branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/44", pullRequestTitle: "Invalidate approved head", pullRequestState: "OPEN", status: "PUBLISHED" } });
+  assert.equal(handoff.statusCode, 200, handoff.body);
+  const evidence = await app.inject({ method: "PUT", url: `/api/tasks/${invalidationTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha }] } });
+  assert.equal(evidence.statusCode, 200, evidence.body);
+  const selfReview = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${implementerToken}` }, payload: { headSha } });
+  assert.equal(selfReview.statusCode, 403, selfReview.body);
+  const firstApproval = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${reviewerOneToken}` }, payload: { headSha } });
+  assert.equal(firstApproval.statusCode, 200, firstApproval.body);
+  assert.equal(firstApproval.json().gate.approvedHeadSha, null);
+  const refreshedEvidence = await app.inject({ method: "PUT", url: `/api/tasks/${invalidationTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha }] } });
+  assert.equal(refreshedEvidence.statusCode, 200, refreshedEvidence.body);
+  assert.deepEqual(refreshedEvidence.json().gate.approvals.map((approval: { reviewerId: string }) => approval.reviewerId), [reviewerOneId]);
+  const secondApproval = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${reviewerTwoToken}` }, payload: { headSha } });
+  assert.equal(secondApproval.statusCode, 200, secondApproval.body);
+  const approved = await app.inject({ method: "GET", url: `/api/tasks/${invalidationTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(approved.json().gate.approvedHeadSha, headSha);
+  assert.equal(approved.json().gate.approvals.length, 2);
+
+  const finding = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/findings`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { severity: "P3", title: "Same-head fix", body: "Invalidate every prior reviewer approval." } });
+  assert.equal(finding.statusCode, 201, finding.body);
+  const disposition = await app.inject({ method: "POST", url: `/api/findings/${finding.json().finding.id}/disposition`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { disposition: "FIX_NEEDED", reason: "A same-head correction needs fresh approval." } });
+  assert.equal(disposition.statusCode, 200, disposition.body);
+  const remaining = await db.prepare("SELECT COUNT(*) AS count FROM task_gate_approvals WHERE task_id = ? AND head_sha = ?").get(invalidationTaskId, headSha) as { count: number };
+  assert.equal(Number(remaining.count), 0);
+  const freshApproval = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${reviewerOneToken}` }, payload: { headSha } });
+  assert.equal(freshApproval.statusCode, 200, freshApproval.body);
+  assert.equal(freshApproval.json().gate.approvedHeadSha, null);
+  assert.deepEqual(freshApproval.json().gate.approvals.map((approval: { reviewerId: string }) => approval.reviewerId), [reviewerOneId]);
+  const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${invalidationProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(deleted.statusCode, 204, deleted.body);
 });
 

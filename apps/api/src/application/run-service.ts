@@ -20,7 +20,7 @@ export class AgentRunApplicationService {
       const cycle = await r.runs.cycleState(taskId);
       if (cycle.count >= cycle.limit) throw new ValidationError("Task has reached the maximum autonomous delivery cycle limit");
       const now = this.now();
-      const run: AgentRunEntity = { id: this.newId(), taskId, projectId: task.projectId, requestedById: context.actor.userId, kind: input.kind, status: "PENDING", attemptCount: 0, maxAttempts: Math.max(1, Math.min(10, input.maxAttempts ?? 3)), leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: input.timeoutAt ?? null, lastError: null, createdAt: now, updatedAt: now, completedAt: null };
+      const run: AgentRunEntity = { id: this.newId(), taskId, projectId: task.projectId, requestedById: context.actor.userId, executedById: null, kind: input.kind, status: "PENDING", attemptCount: 0, maxAttempts: Math.max(1, Math.min(10, input.maxAttempts ?? 3)), leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: input.timeoutAt ?? null, lastError: null, createdAt: now, updatedAt: now, completedAt: null };
       return r.runs.create(run);
     });
   }

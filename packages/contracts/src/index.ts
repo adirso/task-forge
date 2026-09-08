@@ -39,6 +39,22 @@ export const agentWorkflowSchema = z.object({
 });
 export const projectMergeTargetSchema = z.enum(["main", "phase"]);
 export type ProjectMergeTarget = z.infer<typeof projectMergeTargetSchema>;
+export const projectReviewPolicySchema = z.object({
+  requireIndependentReview: z.boolean(),
+  requiredReviewerCount: z.number().int().min(1).max(10),
+  allowedReviewerAgentIds: z.array(z.string().uuid()).max(50)
+    .refine((ids) => new Set(ids).size === ids.length, "Allowed reviewer agents must be unique"),
+}).superRefine((policy, context) => {
+  if (policy.allowedReviewerAgentIds.length > 0 && policy.requiredReviewerCount > policy.allowedReviewerAgentIds.length) {
+    context.addIssue({ code: "custom", path: ["requiredReviewerCount"], message: "Reviewer count cannot exceed the allowed reviewer agent count" });
+  }
+});
+export type ProjectReviewPolicy = z.infer<typeof projectReviewPolicySchema>;
+export const DEFAULT_PROJECT_REVIEW_POLICY: ProjectReviewPolicy = {
+  requireIndependentReview: true,
+  requiredReviewerCount: 1,
+  allowedReviewerAgentIds: [],
+};
 export function phaseBranchName(projectKey: string, phaseNumber: number) {
   return `phase/${projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-")}-${phaseNumber}`;
 }
@@ -158,6 +174,7 @@ export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).parti
   hiddenEmptyStatuses: projectAvailableStatusesSchema.optional(),
   mergeTarget: projectMergeTargetSchema.optional(),
   dependencyResolutionStatuses: dependencyResolutionStatusesSchema.optional(),
+  reviewPolicy: projectReviewPolicySchema.optional(),
 });
 export const projectOrderSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(500) });
 
@@ -383,6 +400,7 @@ export interface Project {
   hiddenEmptyStatuses: TaskStatus[];
   mergeTarget: ProjectMergeTarget;
   dependencyResolutionStatuses: DependencyResolutionStatus[];
+  reviewPolicy: ProjectReviewPolicy;
   ownerId: string;
   createdAt: string;
   updatedAt: string;

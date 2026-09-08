@@ -1,4 +1,4 @@
-import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentWorkflowSchema, dependencyResolutionStatusesSchema, type Project, type Tag, type Task, type TaskDependency, type User } from "@taskforge/contracts";
+import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentWorkflowSchema, dependencyResolutionStatusesSchema, projectReviewPolicySchema, type Project, type Tag, type Task, type TaskDependency, type User } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 
 type Row = Record<string, unknown>;
@@ -31,6 +31,8 @@ export function toProject(row: Row): Project {
   try { const parsed = JSON.parse(String(row.hidden_empty_statuses ?? "")); if (Array.isArray(parsed)) hiddenEmptyStatuses = availableStatuses.filter((status) => parsed.includes(status)); } catch { /* Legacy projects preserve the existing hide-empty behavior. */ }
   let dependencyResolutionStatuses: Project["dependencyResolutionStatuses"] = [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES];
   try { const parsed = dependencyResolutionStatusesSchema.safeParse(JSON.parse(String(row.dependency_resolution_statuses ?? "[]"))); if (parsed.success) dependencyResolutionStatuses = parsed.data; } catch { /* Legacy projects use the safe default. */ }
+  let reviewPolicy: Project["reviewPolicy"] = { ...DEFAULT_PROJECT_REVIEW_POLICY, requireIndependentReview: false, allowedReviewerAgentIds: [] };
+  try { const parsed = projectReviewPolicySchema.safeParse(JSON.parse(String(row.review_policy ?? "null"))); if (parsed.success) reviewPolicy = parsed.data; } catch { /* Legacy projects opt in explicitly. */ }
   return {
     id: String(row.id),
     key: String(row.key),
@@ -46,6 +48,7 @@ export function toProject(row: Row): Project {
     hiddenEmptyStatuses,
     mergeTarget: row.merge_target === "phase" ? "phase" : "main",
     dependencyResolutionStatuses,
+    reviewPolicy,
     ownerId: String(row.owner_id),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),

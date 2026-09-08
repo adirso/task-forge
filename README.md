@@ -239,6 +239,8 @@ Smithy also runs each provider inside the task's dedicated worktree with an OS s
 
 Smithy persists handoff evidence by `runId`. `IN_PROGRESS` with a pending handoff means work or recovery is active; a failed handoff exposes a redacted publication or credential error for retry. `PUBLISHED` records the pushed branch, head SHA, and pull-request metadata, and is required before `READY_FOR_REVIEW`. Restarts and reassignment reuse the existing branch and run evidence, while duplicate callbacks are safe to retry. Review approval and merge remain separate human-authorized steps; a successful provider run never implies `APPROVED` or `DONE`.
 
+New projects require independent agent review by default. Project owners can configure the required reviewer count and optionally restrict approval to selected agent members in project settings. Task gates bind the implementation run, implementing agent, reviewer approvals, and CI evidence to one head SHA; a new head invalidates the approvals. The implementing agent cannot approve that head, and the current policy is checked again before a project owner or administrator authorizes a merge.
+
 ## Delivery Monitor
 
 See the complete [Delivery Monitor operator runbook](docs/DELIVERY_MONITOR_RUNBOOK.md) for setup, recovery, and troubleshooting.
