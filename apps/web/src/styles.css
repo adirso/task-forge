@@ -865,6 +865,13 @@ html[data-text-size="large"] body { zoom: 1.08; }
 .task-status-duration-meta small { min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
 .run-health-paused { background: #eae6ff; color: #403294; }
 .run-health-waiting_for_input { background: #fffae6; color: #974f0c; }
+.agent-capability-form { margin: 16px 24px; padding: 18px; display: grid; gap: 12px; border: 1px solid #dfe1e6; border-radius: 9px; background: #fff; }
+.agent-capability-form > label, .agent-capability-form .pr-fields-row > label { display: grid; gap: 5px; font-size: 10px; color: #42526e; }
+.agent-capability-form input, .agent-capability-form textarea, .agent-capability-form select, .task-routing-control input { min-height: 34px; border: 1px solid #dfe1e6; border-radius: 6px; padding: 7px 9px; background: #fff; color: #172b4d; font: inherit; }
+.agent-capability-form fieldset { border: 0; padding: 0; margin: 0; }.agent-capability-form legend { margin-bottom: 7px; font-size: 10px; color: #42526e; }
+.capability-task-types { display: flex; flex-wrap: wrap; gap: 6px 12px; }.capability-task-types label { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; color: #42526e; }.capability-task-types input { min-height: 0; }
+.agent-capability-form > .button { justify-self: start; }
+.task-routing-control { display: grid; gap: 6px; padding: 10px; border: 1px solid #dfe1e6; border-radius: 7px; background: #fff; }.task-routing-control label { display: grid; gap: 4px; }.task-routing-control small { color: #6b778c; font-size: 9px; line-height: 1.4; }
 .run-input-request { display: grid; gap: 5px; border: 1px solid #ffe380; border-radius: 6px; background: #fffae6; padding: 8px; }
 .run-input-request strong { color: #6f4e00; font-size: 9px; }
 .run-input-request p { margin: 0; color: #42526e; font-size: 10px; white-space: pre-wrap; }

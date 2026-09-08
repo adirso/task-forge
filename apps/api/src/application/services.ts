@@ -1,4 +1,4 @@
-import type { AgentOpsEntry, DashboardSummary, WebhookDelivery, WebhookDeliveryStatus } from "@taskforge/contracts";
+import type { AgentCapabilityProfile, AgentOpsEntry, AgentRoutingRequest, DashboardSummary, WebhookDelivery, WebhookDeliveryStatus } from "@taskforge/contracts";
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { ActivityEntity, AgentHandoffEntity, AgentLogEntity, ApiTokenEntity, AttachmentEntity, FindingDisposition, FindingSeverity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
@@ -58,6 +58,7 @@ export interface TaskService {
   listUpdates(context: RequestContext, taskId: string, page: PageRequest): Promise<Page<TaskUpdateEntity>>;
   listTags(context: ProjectContext): Promise<Array<{ id: string; projectId: string; name: string; createdAt: string; taskCount: number }>>;
   claimTask(context: ProjectContext, options?: { phaseId?: string | null; priority?: string; runId?: string | null }): Promise<TaskEntity>;
+  routeTask(context: RequestContext, taskId: string, input: AgentRoutingRequest): Promise<{ task: TaskEntity; selectedAgentId: string; override: boolean; duplicate: boolean }>;
 }
 export interface AgentLogService {
   list(context: RequestContext, taskId: string, page: PageRequest): Promise<Page<AgentLogEntity>>;
@@ -87,6 +88,7 @@ export interface UserService {
   list(context: RequestContext): Promise<UserEntity[]>;
   updateProfile(context: RequestContext, input: { name: string; email: string }): Promise<UserEntity>;
   updateAvatar(context: RequestContext, userId: string, avatarUrl: string | null): Promise<UserEntity>;
+  updateAgentCapabilities(context: RequestContext, agentId: string, profile: AgentCapabilityProfile): Promise<UserEntity>;
   updateAgentWebhook(context: RequestContext, agentId: string, webhookUrl: string | null): Promise<{ user: UserEntity; webhookSecret?: string }>;
   rotateAgentWebhookSecret(context: RequestContext, agentId: string): Promise<{ user: UserEntity; webhookSecret: string }>;
   createAgent(context: RequestContext, input: { name: string; email?: string }): Promise<UserEntity>;

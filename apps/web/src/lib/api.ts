@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentCapabilityProfile, type AgentOpsEntry, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
   id: string; taskId: string; projectId: string; requestedById: string; executedById: string | null; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
@@ -49,6 +49,7 @@ const MOCK_AGENT: User = {
   kind: "AGENT",
   role: "MEMBER",
   avatarUrl: null,
+  capabilityProfile: { provider: "codex", model: "gpt-5", skills: ["typescript", "ui"], taskTypes: ["FEATURE", "BUG", "UPDATE"], repositories: ["github.com/example/mobile-refresh"], maxConcurrency: 3, availability: "AVAILABLE", health: "HEALTHY" },
   createdAt: MOCK_NOW,
 };
 let mockProjects: Project[] = [{
@@ -310,6 +311,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
         role: MOCK_AGENT.role,
         avatarUrl: null,
         webhookUrl: null,
+        capabilityProfile: MOCK_AGENT.capabilityProfile ?? null,
         createdAt: MOCK_AGENT.createdAt,
         lastActiveAt: MOCK_NOW,
         openTaskCount: mockTasks.filter((task) => task.assigneeId === MOCK_AGENT.id && task.status !== "DONE" && task.status !== "CANCELLED").length,
@@ -333,6 +335,14 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
     if (index < 0) throw new ApiError("Task not found", 404);
     mockTasks[index] = { ...mockTasks[index]!, ...(options.body as Partial<Task>), updatedAt: new Date().toISOString() };
     return { task: mockTasks[index] } as T;
+  }
+  if (/^\/tasks\/[^/]+\/route$/.test(pathname) && method === "POST") {
+    const id = pathname.split("/")[2]!;
+    const task = mockTasks.find((item) => item.id === id);
+    if (!task) throw new ApiError("Task not found", 404);
+    task.assigneeId = (options.body as AgentRoutingRequest).overrideAgentId ?? MOCK_AGENT.id;
+    task.assignee = MOCK_AGENT;
+    return { task, selectedAgentId: task.assigneeId, override: Boolean((options.body as AgentRoutingRequest).overrideAgentId), duplicate: false } as T;
   }
   if (/^\/tasks\/[^/]+$/.test(pathname) && method === "DELETE") {
     const id = pathname.split("/")[2]!;
@@ -395,6 +405,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
   }
   if (/^\/attachments\/[^/]+$/.test(pathname) && method === "DELETE") return undefined as T;
   if (/^\/users\/[^/]+\/tokens$/.test(pathname) && method === "GET") return { tokens: [] } as T;
+  if (/^\/users\/[^/]+\/capabilities$/.test(pathname) && method === "PATCH") return { user: { ...MOCK_AGENT, capabilityProfile: options.body as AgentCapabilityProfile } } as T;
   if (/^\/users\/[^/]+\/tokens$/.test(pathname) && method === "POST") return { token: "tf_mock_token", prefix: "tf_mock", expiresAt: null, warning: "Mock mode token" } as T;
   if (/^\/users\/[^/]+\/tokens\/[^/]+\/reveal$/.test(pathname) && method === "POST") return { token: "tf_mock_token" } as T;
   if (/^\/users\/tokens\/[^/]+$/.test(pathname) && method === "DELETE") return undefined as T;
@@ -472,6 +483,7 @@ export const api = {
   task: (id: string) => request<{ task: Task }>(`/tasks/${id}`),
   createTask: (projectId: string, input: TaskCreate) => request<{ task: Task }>(`/projects/${projectId}/tasks`, { method: "POST", body: input }),
   updateTask: (id: string, input: TaskUpdate) => request<{ task: Task }>(`/tasks/${id}`, { method: "PATCH", body: input }),
+  routeTask: (id: string, input: AgentRoutingRequest) => request<{ task: Task; selectedAgentId: string; override: boolean; duplicate: boolean }>(`/tasks/${id}/route`, { method: "POST", body: input }),
   deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: "DELETE" }),
   taskUpdates: async (id: string) => {
     const updates: TaskNote[] = [];
@@ -502,6 +514,7 @@ export const api = {
   users: () => request<{ users: User[] }>("/users"),
   updateProfile: (input: { name: string; email: string }) => request<{ user: User }>("/users/me", { method: "PATCH", body: input }),
   createAgent: (input: { name: string; email?: string }) => request<{ user: User }>("/users/agents", { method: "POST", body: input }),
+  updateAgentCapabilities: (userId: string, input: AgentCapabilityProfile) => request<{ user: User }>(`/users/${userId}/capabilities`, { method: "PATCH", body: input }),
   uploadUserAvatar: (userId: string, input: { mimeType: string; data: string }) => request<{ user: User }>(`/users/${userId}/avatar`, { method: "POST", body: input }),
   deleteUserAvatar: (userId: string) => request<{ user: User }>(`/users/${userId}/avatar`, { method: "DELETE" }),
   deleteAgent: (userId: string) => request<void>(`/users/${userId}`, { method: "DELETE" }),

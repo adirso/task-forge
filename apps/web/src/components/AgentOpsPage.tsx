@@ -76,6 +76,7 @@ export function AgentOpsPage({ onOpenAgent }: { onOpenAgent?: (agentId: string) 
               {agent.webhookUrl && (
                 <span title={agent.webhookUrl}><Webhook /> Webhook configured</span>
               )}
+              {agent.capabilityProfile && <span><Bot /> {agent.capabilityProfile.provider} · {agent.capabilityProfile.model} · {agent.capabilityProfile.availability.toLowerCase()} · {agent.openTaskCount}/{agent.capabilityProfile.maxConcurrency}</span>}
             </div>
 
             {agent.inProgressTasks.length > 0 && (

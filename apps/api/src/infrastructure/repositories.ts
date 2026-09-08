@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentWorkflowSchema, dependencyResolutionStatusesSchema, projectReviewPolicySchema, type TaskStatus } from "@taskforge/contracts";
+import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentCapabilityProfileSchema, agentWorkflowSchema, dependencyResolutionStatusesSchema, projectReviewPolicySchema, type TaskStatus } from "@taskforge/contracts";
 import type { ActivityEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunCredentialEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
 import type { AgentHandoffRepository, AgentLogRepository, AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, DeliveryMonitorRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskFindingRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
@@ -22,7 +22,12 @@ const date = (value: unknown) => String(value);
 const queryLimit = (value: number) => Math.max(0, Math.trunc(Number.isFinite(value) ? value : 0));
 
 function toUser(row: Row): UserEntity {
-  return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), webhookUrl: nullableText(row.webhook_url), webhookSecretConfigured: Boolean(row.webhook_secret_ciphertext), createdAt: date(row.created_at) };
+  let capabilityProfile: UserEntity["capabilityProfile"] = null;
+  try {
+    const parsed = agentCapabilityProfileSchema.safeParse(typeof row.capability_profile === "string" ? JSON.parse(row.capability_profile) : row.capability_profile);
+    if (parsed.success) capabilityProfile = parsed.data;
+  } catch { /* Malformed legacy profiles are ignored until an administrator saves them again. */ }
+  return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), webhookUrl: nullableText(row.webhook_url), webhookSecretConfigured: Boolean(row.webhook_secret_ciphertext), capabilityProfile, createdAt: date(row.created_at) };
 }
 
 function toWebhookDelivery(row: Row): WebhookDeliveryEntity {
@@ -220,6 +225,7 @@ function createUserRepository(db: DatabasePort): UserRepository {
     async list() { return (await db.prepare("SELECT * FROM users ORDER BY kind, name").all()).map(toUser); },
     async saveProfile(id, input) { await db.prepare("UPDATE users SET name = ?, email = ? WHERE id = ?").run(input.name, input.email.toLowerCase(), id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after update"); return toUser(row); },
     async updateAvatar(id, avatarUrl) { await db.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(avatarUrl, id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after avatar update"); return toUser(row); },
+    async updateCapabilityProfile(id, profile) { await db.prepare("UPDATE users SET capability_profile = ? WHERE id = ?").run(JSON.stringify(profile), id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("Agent not found after capability update"); return toUser(row); },
     async getWebhookConfiguration(id) { const row = await db.prepare("SELECT webhook_url, webhook_secret_ciphertext, webhook_secret_version FROM users WHERE id = ?").get(id); return row ? { webhookUrl: nullableText(row.webhook_url), secretCiphertext: nullableText(row.webhook_secret_ciphertext), secretVersion: Number(row.webhook_secret_version ?? 0) } : null; },
     async updateWebhookConfiguration(id, input) { const fields: string[] = []; const values: unknown[] = []; if ("webhookUrl" in input) { fields.push("webhook_url = ?"); values.push(input.webhookUrl ?? null); } if (input.secretCiphertext !== undefined) { fields.push("webhook_secret_ciphertext = ?"); values.push(input.secretCiphertext); } if (input.secretVersion !== undefined) { fields.push("webhook_secret_version = ?"); values.push(input.secretVersion); } if (fields.length) await db.prepare(`UPDATE users SET ${fields.join(", ")} WHERE id = ?`).run(...values, id); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(id); if (!row) throw new Error("User not found after webhook configuration update"); return toUser(row); },
     async createAgent(input) { await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)").run(input.id, input.email.toLowerCase(), input.name, input.createdAt); const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(input.id); if (!row) throw new Error("Agent not found after create"); return toUser(row); },
@@ -304,6 +310,25 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       const changedAt = new Date().toISOString(); if (fields.length) { fields.push("updated_at = ?"); values.push(changedAt, id); await db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values); }
       if (input.status && input.status !== existing.status) await recordStatusTransition(id, String(existing.status), input.status, changedAt, date(existing.created_at));
       const row = await db.prepare("SELECT * FROM tasks WHERE id = ?").get(id); if (!row) throw new Error("Task not found after update"); return (await hydrateTasks(db, [toTask(row)]))[0]!;
+    },
+    async activeAssignmentCounts(agentIds) {
+      const counts = new Map(agentIds.map((id) => [id, 0]));
+      if (!agentIds.length) return counts;
+      const placeholders = agentIds.map(() => "?").join(", ");
+      const rows = await db.prepare(`SELECT assignee_id, COUNT(*) AS count FROM tasks WHERE assignee_id IN (${placeholders}) AND status NOT IN ('DONE','CANCELLED','FAILED') GROUP BY assignee_id`).all(...agentIds);
+      for (const row of rows) counts.set(text(row.assignee_id), Number(row.count));
+      return counts;
+    },
+    async assignIfCapacity(taskId, agentId, maxConcurrency) {
+      if (db.dialect === "mysql") await db.prepare("SELECT id FROM users WHERE id = ? FOR UPDATE").get(agentId);
+      const task = await db.prepare("SELECT assignee_id FROM tasks WHERE id = ?").get(taskId);
+      if (!task) throw new Error("Task not found");
+      if (task.assignee_id === agentId) return "ALREADY_ASSIGNED";
+      if (task.assignee_id) return "TASK_TAKEN";
+      const workload = await db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE assignee_id = ? AND status NOT IN ('DONE','CANCELLED','FAILED')").get(agentId);
+      if (Number(workload?.count ?? 0) >= maxConcurrency) return "AT_CAPACITY";
+      const result = await db.prepare("UPDATE tasks SET assignee_id = ?, updated_at = ? WHERE id = ? AND assignee_id IS NULL").run(agentId, new Date().toISOString(), taskId);
+      return Number(result.changes ?? 0) === 1 ? "ASSIGNED" : "TASK_TAKEN";
     },
     async delete(id) { await db.prepare("DELETE FROM tasks WHERE id = ?").run(id); },
     async listForAssignee(assigneeId, status) {

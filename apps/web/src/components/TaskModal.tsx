@@ -13,9 +13,10 @@ import { canForceCycle, FORCE_CYCLE_FAILURE_MESSAGE, forceCycleRequestId } from 
 
 type TaskModalTab = "details" | "updates" | "agents";
 
-export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete }: {
+export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete, onRouted }: {
   task: Task | null; initialStatus: TaskStatus; defaultPhaseId: string | null; project: Project; currentUser: User; members: User[]; phases: Phase[]; availableTags: Tag[]; tasks: Task[];
   onClose: () => void; onSave: (input: TaskCreate) => Promise<void>; onDelete: (() => Promise<void>) | null;
+  onRouted?: (task: Task) => void;
 }) {
   const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", type: "FEATURE", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: defaultPhaseId, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, tags: [], dependencyIds: [] });
   const [saving, setSaving] = useState(false);
@@ -38,6 +39,8 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [observedAt, setObservedAt] = useState(() => Date.now());
+  const [routingSkills, setRoutingSkills] = useState("");
+  const [routing, setRouting] = useState(false);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -85,6 +88,16 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
     const url = new URL(window.location.href);
     url.search = ""; url.searchParams.set("project", project.key); url.searchParams.set("task", `${project.key}-${task.number}`);
     await navigator.clipboard.writeText(url.toString()); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 1800);
+  }
+  async function autoRoute() {
+    if (!task) return;
+    setRouting(true); setError("");
+    try {
+      const result = await api.routeTask(task.id, { requiredSkills: routingSkills.split(",").map((value) => value.trim()).filter(Boolean) });
+      set("assigneeId", result.selectedAgentId);
+      onRouted?.(result.task);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not route task"); }
+    finally { setRouting(false); }
   }
   async function forceCycle() {
     if (!task || !cycle || !canForceCycle(currentUser, project, cycle)) return;
@@ -179,6 +192,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
                 <label>Phase<select value={form.phaseId ?? ""} onChange={(e) => set("phaseId", e.target.value || null)}><option value="">No phase</option>{phases.map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select></label>
                 <label>Status<select aria-label="Task status" value={form.status ?? initialStatus} onChange={(e) => set("status", e.target.value as TaskStatus)}>{project.availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select></label>
                 <label>Assignee<select value={form.assigneeId ?? ""} onChange={(e) => set("assigneeId", e.target.value || null)}><option value="">Unassigned</option>{members.map((user) => <option key={user.id} value={user.id}>{user.name}{user.kind === "AGENT" ? " (Agent)" : ""}</option>)}</select></label>
+                {task && currentUser.kind === "HUMAN" && (currentUser.role === "ADMIN" || currentUser.id === project.ownerId) && <div className="task-routing-control"><label>Required agent skills<input value={routingSkills} onChange={(event) => setRoutingSkills(event.target.value)} placeholder="typescript, security" /></label><button type="button" className="button button-secondary" disabled={routing} onClick={() => void autoRoute()}><Sparkles /> {routing ? "Routing…" : "Auto-route"}</button><small>Chooses an available project agent by capability and capacity. Selecting an assignee above is the operator override.</small></div>}
                 <label>Priority<select aria-label="Task priority" value={form.priority} onChange={(e) => set("priority", e.target.value as TaskPriority)}>{Object.entries(priorityMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
                 <label>Parent task<select value={form.parentId ?? ""} onChange={(e) => set("parentId", e.target.value || null)}><option value="">None</option>{tasks.filter((candidate) => candidate.id !== task?.id).map((candidate) => <option key={candidate.id} value={candidate.id}>{project.key}-{candidate.number} · {candidate.title}</option>)}</select></label>
                 <label>Due date<input type="date" value={form.dueDate ?? ""} onChange={(e) => set("dueDate", e.target.value || null)} /></label>
@@ -231,6 +245,8 @@ function activityLabel(action: string, metadata: Record<string, unknown>): strin
   switch (action) {
     case "task.created": return "created this task";
     case "task.claimed": return "claimed this task";
+    case "task.auto_routed": return `auto-routed this task to agent ${String(metadata.selectedAgentId)}`;
+    case "task.routing_overridden": return `overrode routing to agent ${String(metadata.selectedAgentId)}`;
     case "task.note_added": return "posted an update";
     case "task.agent_cycle_forced": return `authorized one additional agent cycle (${String(metadata.priorCount)} → limit ${String(metadata.newLimit)})`;
     case "task.updated": {
