@@ -11,7 +11,7 @@ function setup(reviewPolicy = project.reviewPolicy) {
   const set = { projects: { findById: async () => ({ ...project, reviewPolicy }) }, memberships: { isMember: async () => true }, users: { findById: async (id: string) => ({ id, kind: "AGENT" }) }, tasks: { findById: async () => task, update: async (_id: string, input: unknown) => ({ ...task, ...input }) }, handoffs: { findPublishedByTaskHead: async () => ({ runId: "run-1" }) }, runs: { findById: async () => implementationRun }, findings: { listForTask: async () => findings }, activity: { record: async () => undefined }, gates: {
     findByTask: async () => gate,
     save: async (input: any) => { gate = input; return input; },
-    approve: async (_id: string, headSha: string, actorId: string, requiredReviewerCount: number, now: string) => { if (!gate || gate.headSha !== headSha) return null; const approvals = gate.approvals.some((item: any) => item.reviewerId === actorId) ? gate.approvals : [...gate.approvals, { reviewerId: actorId, approvedAt: now }]; gate = { ...gate, approvals, approvedHeadSha: approvals.length >= requiredReviewerCount ? headSha : null, approvedById: approvals.length >= requiredReviewerCount ? actorId : null, approvedAt: approvals.length >= requiredReviewerCount ? now : null }; return gate; },
+    approve: async (_id: string, headSha: string, actorId: string, approvalPolicy: { requiredReviewerCount: number; excludedReviewerId: string | null; allowedReviewerIds: string[] }, now: string) => { if (!gate || gate.headSha !== headSha) return null; const approvals = gate.approvals.some((item: any) => item.reviewerId === actorId) ? gate.approvals : [...gate.approvals, { reviewerId: actorId, approvedAt: now }]; const eligible = approvals.filter((item: any) => (!approvalPolicy.excludedReviewerId || item.reviewerId !== approvalPolicy.excludedReviewerId) && (!approvalPolicy.allowedReviewerIds.length || approvalPolicy.allowedReviewerIds.includes(item.reviewerId))); gate = { ...gate, approvals, approvedHeadSha: eligible.length >= approvalPolicy.requiredReviewerCount ? headSha : null, approvedById: eligible.length >= approvalPolicy.requiredReviewerCount ? actorId : null, approvedAt: eligible.length >= approvalPolicy.requiredReviewerCount ? now : null }; return gate; },
     merge: async (_id: string, headSha: string, actorId: string, now: string) => { if (!gate || gate.headSha !== headSha || gate.approvedHeadSha !== headSha) return null; gate = { ...gate, mergedHeadSha: headSha, mergedById: actorId, mergedAt: now }; return gate; },
   } } as unknown as RepositorySet;
   return { set, findings, service: new TaskGateApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T12:00:00.000Z") };
@@ -84,4 +84,18 @@ test("merge revalidates the current project review policy", async () => {
   await service.approve(codex, task.id, head);
   policy.requiredReviewerCount = 2;
   await assert.rejects(() => service.merge(human, task.id, head), /requires 2 eligible agent approval/);
+});
+
+test("approval quorum ignores reviewers that become ineligible", async () => {
+  const policy = { requireIndependentReview: false, requiredReviewerCount: 1, allowedReviewerAgentIds: [] as string[] };
+  const { service } = setup(policy); const head = "3333333333333333333333333333333333333333";
+  await service.record(human, task.id, { headSha: head, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha: head }] });
+  const initiallyApproved = await service.approve(codex, task.id, head);
+  assert.equal(initiallyApproved.approvedHeadSha, head);
+  policy.requiredReviewerCount = 2;
+  policy.allowedReviewerAgentIds = ["codex-2", "codex-3"];
+  const oneEligibleReviewer = await service.approve({ actor: { ...codex.actor, userId: "codex-2" } }, task.id, head);
+  assert.equal(oneEligibleReviewer.approvedHeadSha, null);
+  const quorum = await service.approve({ actor: { ...codex.actor, userId: "codex-3" } }, task.id, head);
+  assert.equal(quorum.approvedHeadSha, head);
 });

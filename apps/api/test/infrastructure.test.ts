@@ -160,11 +160,12 @@ test("gate repository persists SHA-bound evidence and conditional approvals", as
   };
   const gate = createRepositories(database).gates;
   await gate.save({ taskId: "task-1", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }], implementationRunId: null, implementationAgentId: null, approvals: [], approvedHeadSha: null, approvedById: null, approvedAt: null, mergedHeadSha: null, mergedById: null, mergedAt: null, updatedAt: "2026-08-24T12:00:00.000Z" });
-  await gate.approve("task-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "codex-1", 1, "2026-08-24T12:00:00.000Z");
+  await gate.approve("task-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "codex-1", { requiredReviewerCount: 1, excludedReviewerId: "implementer-1", allowedReviewerIds: ["codex-1"] }, "2026-08-24T12:00:00.000Z");
   await gate.merge("task-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner-1", "2026-08-24T12:00:00.000Z");
   assert.ok(queries.some((sql) => sql.includes("head_sha = ?")));
   assert.ok(queries.some((sql) => sql.includes("approved_head_sha = ?")));
   assert.ok(queries.some((sql) => sql.includes("INSERT OR IGNORE INTO task_gate_approvals")));
+  assert.ok(queries.some((sql) => sql.includes("reviewer_id <> ?") && sql.includes("reviewer_id IN (?)")));
 });
 
 test("large task pages use a bounded number of relationship queries", async () => {

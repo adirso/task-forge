@@ -537,19 +537,23 @@ function createTaskGateRepository(db: DatabasePort): TaskGateRepository {
   return {
     async findByTask(taskId) { const row = await db.prepare("SELECT * FROM task_gate_evidence WHERE task_id = ?").get(taskId); if (!row) return null; const approvals = await db.prepare("SELECT reviewer_id, approved_at FROM task_gate_approvals WHERE task_id = ? AND head_sha = ? ORDER BY approved_at, reviewer_id").all(taskId, row.head_sha); return toTaskGate(row, approvals.map((approval) => ({ reviewerId: text(approval.reviewer_id), approvedAt: text(approval.approved_at) }))); },
     async save(input) {
-      const existing = await db.prepare("SELECT task_id, head_sha FROM task_gate_evidence WHERE task_id = ?").get(input.taskId);
+      const existing = await db.prepare("SELECT task_id, head_sha, approved_head_sha FROM task_gate_evidence WHERE task_id = ?").get(input.taskId);
       const values = [input.headSha, JSON.stringify(input.requiredChecks), JSON.stringify(input.checks), input.implementationRunId, input.implementationAgentId, input.approvedHeadSha, input.approvedById, input.approvedAt, input.mergedHeadSha, input.mergedById, input.mergedAt, input.updatedAt, input.taskId];
       if (existing) await db.prepare("UPDATE task_gate_evidence SET head_sha = ?, required_checks = ?, checks_json = ?, implementation_run_id = ?, implementation_agent_id = ?, approved_head_sha = ?, approved_by_id = ?, approved_at = ?, merged_head_sha = ?, merged_by_id = ?, merged_at = ?, updated_at = ? WHERE task_id = ?").run(...values);
       else await db.prepare("INSERT INTO task_gate_evidence (head_sha, required_checks, checks_json, implementation_run_id, implementation_agent_id, approved_head_sha, approved_by_id, approved_at, merged_head_sha, merged_by_id, merged_at, updated_at, task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(...values);
-      if (existing && (text(existing.head_sha) !== input.headSha || (existing.approved_head_sha != null && input.approvedHeadSha == null))) await db.prepare("DELETE FROM task_gate_approvals WHERE task_id = ?").run(input.taskId);
+      if (existing && (text(existing.head_sha) !== input.headSha || input.approvedHeadSha == null)) await db.prepare("DELETE FROM task_gate_approvals WHERE task_id = ?").run(input.taskId);
       return this.findByTask(input.taskId) as Promise<TaskGateEntity>;
     },
-    async approve(taskId, headSha, actorId, requiredReviewerCount, now) {
+    async approve(taskId, headSha, actorId, policy, now) {
       const gate = await db.prepare("SELECT task_id FROM task_gate_evidence WHERE task_id = ? AND head_sha = ?").get(taskId, headSha);
       if (!gate) return null;
       await db.prepare(db.dialect === "mysql" ? "INSERT IGNORE INTO task_gate_approvals (task_id, head_sha, reviewer_id, approved_at) VALUES (?, ?, ?, ?)" : "INSERT OR IGNORE INTO task_gate_approvals (task_id, head_sha, reviewer_id, approved_at) VALUES (?, ?, ?, ?)").run(taskId, headSha, actorId, now);
-      const count = Number((await db.prepare("SELECT COUNT(*) AS count FROM task_gate_approvals WHERE task_id = ? AND head_sha = ?").get(taskId, headSha))?.count ?? 0);
-      if (count >= requiredReviewerCount) await db.prepare("UPDATE task_gate_evidence SET approved_head_sha = head_sha, approved_by_id = ?, approved_at = ?, updated_at = ? WHERE task_id = ? AND head_sha = ?").run(actorId, now, now, taskId, headSha);
+      const eligibility = ["task_id = ?", "head_sha = ?"];
+      const eligibilityParams: unknown[] = [taskId, headSha];
+      if (policy.excludedReviewerId) { eligibility.push("reviewer_id <> ?"); eligibilityParams.push(policy.excludedReviewerId); }
+      if (policy.allowedReviewerIds.length) { eligibility.push(`reviewer_id IN (${policy.allowedReviewerIds.map(() => "?").join(", ")})`); eligibilityParams.push(...policy.allowedReviewerIds); }
+      const count = Number((await db.prepare(`SELECT COUNT(*) AS count FROM task_gate_approvals WHERE ${eligibility.join(" AND ")}`).get(...eligibilityParams))?.count ?? 0);
+      if (count >= policy.requiredReviewerCount) await db.prepare("UPDATE task_gate_evidence SET approved_head_sha = head_sha, approved_by_id = ?, approved_at = ?, updated_at = ? WHERE task_id = ? AND head_sha = ?").run(actorId, now, now, taskId, headSha);
       else await db.prepare("UPDATE task_gate_evidence SET approved_head_sha = NULL, approved_by_id = NULL, approved_at = NULL, updated_at = ? WHERE task_id = ? AND head_sha = ?").run(now, taskId, headSha);
       return this.findByTask(taskId);
     },

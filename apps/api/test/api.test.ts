@@ -939,6 +939,69 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
   assert.equal(deleted.statusCode, 204, deleted.body);
 });
 
+test("FIX_NEEDED invalidates same-head approvals and requires a fresh eligible quorum", async () => {
+  const implementerId = randomUUID();
+  const reviewerOneId = randomUUID();
+  const reviewerTwoId = randomUUID();
+  const now = new Date().toISOString();
+  for (const [id, label] of [[implementerId, "Implementer"], [reviewerOneId, "Reviewer one"], [reviewerTwoId, "Reviewer two"]] as const) {
+    await db.prepare("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)")
+      .run(id, `${id}@example.com`, label, now);
+  }
+  const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `INV${randomUUID().slice(0, 4)}`, name: "Approval invalidation", description: "Same-head review invalidation", color: "#0052CC" } });
+  assert.equal(created.statusCode, 201, created.body);
+  const invalidationProjectId = created.json().project.id as string;
+  for (const userId of [implementerId, reviewerOneId, reviewerTwoId]) {
+    const membership = await app.inject({ method: "POST", url: `/api/projects/${invalidationProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId, role: "MEMBER" } });
+    assert.equal(membership.statusCode, 204, membership.body);
+  }
+  const configured = await app.inject({ method: "PATCH", url: `/api/projects/${invalidationProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { reviewPolicy: { requireIndependentReview: true, requiredReviewerCount: 2, allowedReviewerAgentIds: [reviewerOneId, reviewerTwoId] } } });
+  assert.equal(configured.statusCode, 200, configured.body);
+  const issueToken = async (userId: string, name: string) => {
+    const issued = await app.inject({ method: "POST", url: `/api/users/${userId}/tokens`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name, permissions: ["task:gate:approve"] } });
+    assert.equal(issued.statusCode, 201, issued.body);
+    return issued.json().token as string;
+  };
+  const implementerToken = await issueToken(implementerId, "Implementation agent");
+  const reviewerOneToken = await issueToken(reviewerOneId, "First reviewer");
+  const reviewerTwoToken = await issueToken(reviewerTwoId, "Second reviewer");
+  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${invalidationProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Invalidate approved head", status: "IN_REVIEW", assigneeId: implementerId, branch: "agent/invalidate-approved-head" } });
+  assert.equal(createdTask.statusCode, 201, createdTask.body);
+  const invalidationTaskId = createdTask.json().task.id as string;
+  const runResponse = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  assert.equal(runResponse.statusCode, 201, runResponse.body);
+  const runId = runResponse.json().run.id as string;
+  const claimed = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${implementerToken}` }, payload: { leaseMs: 60_000 } });
+  assert.equal(claimed.statusCode, 200, claimed.body);
+  const headSha = "4444444444444444444444444444444444444444";
+  const handoff = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${implementerToken}` }, payload: { branch: "agent/invalidate-approved-head", headSha, branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/44", pullRequestTitle: "Invalidate approved head", pullRequestState: "OPEN", status: "PUBLISHED" } });
+  assert.equal(handoff.statusCode, 200, handoff.body);
+  const evidence = await app.inject({ method: "PUT", url: `/api/tasks/${invalidationTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha }] } });
+  assert.equal(evidence.statusCode, 200, evidence.body);
+  const selfReview = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${implementerToken}` }, payload: { headSha } });
+  assert.equal(selfReview.statusCode, 403, selfReview.body);
+  for (const token of [reviewerOneToken, reviewerTwoToken]) {
+    const approval = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${token}` }, payload: { headSha } });
+    assert.equal(approval.statusCode, 200, approval.body);
+  }
+  const approved = await app.inject({ method: "GET", url: `/api/tasks/${invalidationTaskId}/gate`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(approved.json().gate.approvedHeadSha, headSha);
+  assert.equal(approved.json().gate.approvals.length, 2);
+
+  const finding = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/findings`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { severity: "P3", title: "Same-head fix", body: "Invalidate every prior reviewer approval." } });
+  assert.equal(finding.statusCode, 201, finding.body);
+  const disposition = await app.inject({ method: "POST", url: `/api/findings/${finding.json().finding.id}/disposition`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { disposition: "FIX_NEEDED", reason: "A same-head correction needs fresh approval." } });
+  assert.equal(disposition.statusCode, 200, disposition.body);
+  const remaining = await db.prepare("SELECT COUNT(*) AS count FROM task_gate_approvals WHERE task_id = ? AND head_sha = ?").get(invalidationTaskId, headSha) as { count: number };
+  assert.equal(Number(remaining.count), 0);
+  const freshApproval = await app.inject({ method: "POST", url: `/api/tasks/${invalidationTaskId}/gate/approve`, headers: { authorization: `Bearer ${reviewerOneToken}` }, payload: { headSha } });
+  assert.equal(freshApproval.statusCode, 200, freshApproval.body);
+  assert.equal(freshApproval.json().gate.approvedHeadSha, null);
+  assert.deepEqual(freshApproval.json().gate.approvals.map((approval: { reviewerId: string }) => approval.reviewerId), [reviewerOneId]);
+  const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${invalidationProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deleted.statusCode, 204, deleted.body);
+});
+
 test("task types default to FEATURE and are settable, filterable, and validated", async () => {
   const project = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "TYP", name: "Task types", description: "Task type coverage", color: "#0747A6" } });
   assert.equal(project.statusCode, 201, project.body);
