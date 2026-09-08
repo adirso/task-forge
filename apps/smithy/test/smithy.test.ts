@@ -663,6 +663,51 @@ test("runner resumes a persisted pending job with the same event and run correla
   assert.ok(calls.includes("/api/runs/run-existing/complete"));
 });
 
+test("runner resumes an intervened run with operator input and fences callbacks by control version", async () => {
+  let prompt = "";
+  const calls: Array<{ path: string; body: string }> = [];
+  const api = { request: async (requestPath: string, init?: RequestInit) => {
+    calls.push({ path: requestPath, body: String(init?.body ?? "") });
+    if (requestPath.endsWith("/claim")) return { run: { controlVersion: 7 } };
+    if (requestPath.endsWith("/credential")) return runCredential;
+    if (requestPath.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: { ...event.task, status: "IN_PROGRESS", branch: "agent/intervened" } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, commandPrompt) => {
+    prompt = commandPrompt;
+    return { code: 0, stdout: "ok", stderr: "" };
+  }, () => 1_700_000_000_000);
+  const interventionEvent = { ...event, id: "event-answer", runId: "run-answer", runKind: "IMPLEMENTATION" as const, interventionAction: "ANSWER", operatorInput: "Use eu-west-1", task: { ...event.task, status: "IN_PROGRESS", branch: "agent/intervened" } };
+  const body = JSON.stringify(interventionEvent);
+  await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` }, body);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(prompt, /Operator input: Use eu-west-1/);
+  assert.match(prompt, /"action":"REQUEST_INPUT","controlVersion":7/);
+  assert.equal(calls.some((call) => call.path.endsWith("/runs")), false, "the existing run is resumed rather than duplicated");
+  assert.deepEqual(JSON.parse(calls.find((call) => call.path.endsWith("/complete"))!.body), { status: "SUCCEEDED", controlVersion: 7 });
+});
+
+test("an operator decision stops the stale worker without failure or recovery writes", async () => {
+  const calls: Array<{ path: string; body: string }> = [];
+  const api = { request: async (requestPath: string, init?: RequestInit) => {
+    calls.push({ path: requestPath, body: String(init?.body ?? "") });
+    if (requestPath.endsWith("/credential")) return runCredential;
+    if (requestPath.endsWith("/claim")) return { run: { controlVersion: 4 } };
+    if (requestPath.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: { ...event.task, status: "TODO", branch: "agent/waiting" } };
+    if (requestPath.endsWith("/handoff") && init?.method === "PUT") throw new Error('TaskForge API returned HTTP 409: {"error":"Agent run control decision superseded this worker"}');
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async () => ({ code: 0, stdout: "waiting", stderr: "" }), () => 1_700_000_000_000);
+  const controlled = { ...event, id: "event-control-superseded", runId: "run-control-superseded", runKind: "IMPLEMENTATION" as const, task: { ...event.task, status: "TODO", branch: "agent/waiting" } };
+  const body = JSON.stringify(controlled);
+  await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` }, body);
+  await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+  assert.equal(calls.filter((call) => call.path.endsWith("/handoff") && call.body.includes('"status":"PENDING"')).length, 1);
+  assert.equal(calls.some((call) => call.path.endsWith("/complete")), false);
+  assert.equal(calls.some((call) => call.path.endsWith("/updates") && /run failed/i.test(call.body)), false);
+});
+
 test("runner only resumes stale RUNNING jobs after the lease window", async () => {
   const freshStore = new MemoryJobStore();
   const fresh = freshStore.accept("event-fresh-running", "claude", event.task.id, JSON.stringify(event)).job;
@@ -774,7 +819,40 @@ test("runner prevents concurrent jobs for the same task", async () => {
   await new Promise((resolve) => setImmediate(resolve));
 });
 
-test("runner cancellation aborts the provider and completes the correlated run", async () => {
+test("a structured intervention supersedes the active local job and resumes the same API run", async () => {
+  const prompts: string[] = [];
+  const calls: Array<{ path: string; body: string }> = [];
+  let executions = 0;
+  const api = { request: async (path: string, init?: RequestInit) => {
+    calls.push({ path, body: String(init?.body ?? "") });
+    if (path.endsWith("/credential")) return runCredential;
+    if (path.endsWith("/claim")) return { run: { controlVersion: executions + 1 } };
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: { ...event.task, status: "TODO", branch: "agent/intervention" } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, prompt, _cwd, _timeout, _onChunk, signal?: AbortSignal) => {
+    executions += 1;
+    prompts.push(prompt);
+    if (executions === 1) {
+      await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+      return { code: null, stdout: "", stderr: "", cancelled: true };
+    }
+    return { code: 0, stdout: "resumed", stderr: "" };
+  }, () => 1_700_000_000_000);
+  const signed = (value: object) => { const body = JSON.stringify(value); return { body, headers: { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` } }; };
+  const initial = { ...event, id: "event-intervention-initial", runId: "run-intervention", runKind: "IMPLEMENTATION" as const, task: { ...event.task, status: "TODO", branch: "agent/intervention" } };
+  await runner.handle("claude", signed(initial).headers, signed(initial).body);
+  await new Promise((resolve) => setImmediate(resolve));
+  const answer = { ...initial, id: "event-intervention-answer", interventionAction: "ANSWER", operatorInput: "Use eu-west-1" };
+  await runner.handle("claude", signed(answer).headers, signed(answer).body);
+  await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+  assert.equal(executions, 2);
+  assert.match(prompts[1]!, /Operator input: Use eu-west-1/);
+  assert.equal(calls.filter((call) => call.path.endsWith("/runs")).length, 0);
+  assert.equal(calls.filter((call) => call.path.endsWith("/complete")).length, 1);
+});
+
+test("runner cancellation aborts the provider without a stale terminal overwrite", async () => {
   let signal!: AbortSignal;
   const calls: Array<{ path: string; body?: string }> = [];
   const api = { request: async (path: string, init?: RequestInit) => { calls.push({ path, body: String(init?.body ?? "") }); if (path.endsWith("/credential")) return runCredential; if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["TODO", "IN_PROGRESS"] }, task: event.task }; if (path.endsWith("/runs")) return { run: { id: "run-cancel" } }; return {}; } };
@@ -790,8 +868,7 @@ test("runner cancellation aborts the provider and completes the correlated run",
   assert.ok(signal);
   assert.equal(runner.cancel("event-cancel"), true);
   await new Promise((resolve) => setImmediate(resolve));
-  const completion = calls.find((call) => call.path.endsWith("/complete"));
-  assert.match(completion?.body ?? "", /CANCELLED/);
+  assert.equal(calls.some((call) => call.path.endsWith("/complete")), false);
 });
 
 test("runner cancellation during worktree preparation prevents provider start", async () => {

@@ -668,6 +668,37 @@ export const migrations: readonly Migration[] = [
         : "INSERT OR IGNORE INTO task_gate_approvals (task_id, head_sha, reviewer_id, approved_at) SELECT task_id, approved_head_sha, approved_by_id, approved_at FROM task_gate_evidence WHERE approved_head_sha IS NOT NULL AND approved_by_id IS NOT NULL AND approved_at IS NOT NULL", []);
     },
   },
+  {
+    version: "0027_agent_run_interventions",
+    async up(executor, dialect) {
+      const columns = dialect === "mysql"
+        ? [
+            "ADD COLUMN control_state VARCHAR(24) NOT NULL DEFAULT 'ACTIVE'",
+            "ADD COLUMN control_version INT NOT NULL DEFAULT 0",
+            "ADD COLUMN assigned_agent_id CHAR(36) NULL",
+            "ADD COLUMN input_request TEXT NULL",
+            "ADD COLUMN input_response TEXT NULL",
+            "ADD COLUMN input_requested_at VARCHAR(30) NULL",
+            "ADD COLUMN input_answered_at VARCHAR(30) NULL",
+            "ADD COLUMN takeover_by_id CHAR(36) NULL",
+          ]
+        : [
+            "ADD COLUMN control_state TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (control_state IN ('ACTIVE','PAUSED','WAITING_FOR_INPUT','HUMAN_TAKEOVER'))",
+            "ADD COLUMN control_version INTEGER NOT NULL DEFAULT 0",
+            "ADD COLUMN assigned_agent_id TEXT NULL REFERENCES users(id)",
+            "ADD COLUMN input_request TEXT NULL",
+            "ADD COLUMN input_response TEXT NULL",
+            "ADD COLUMN input_requested_at TEXT NULL",
+            "ADD COLUMN input_answered_at TEXT NULL",
+            "ADD COLUMN takeover_by_id TEXT NULL REFERENCES users(id)",
+          ];
+      for (const column of columns) await executor.run(`ALTER TABLE agent_runs ${column}`, []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_run_interventions (request_id VARCHAR(180) PRIMARY KEY, run_id CHAR(36) NOT NULL, actor_id CHAR(36) NOT NULL, action VARCHAR(24) NOT NULL, payload_hash CHAR(64) NOT NULL, result_version INT NOT NULL, created_at VARCHAR(30) NOT NULL, INDEX idx_run_interventions_run (run_id, created_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (actor_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_run_interventions (request_id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, actor_id TEXT NOT NULL REFERENCES users(id), action TEXT NOT NULL, payload_hash TEXT NOT NULL, result_version INTEGER NOT NULL, created_at TEXT NOT NULL)", []);
+      if (dialect === "sqlite") await executor.run("CREATE INDEX idx_run_interventions_run ON agent_run_interventions(run_id, created_at)", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

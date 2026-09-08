@@ -933,7 +933,7 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
   assert.equal(approval.statusCode, 200, approval.body);
   const merge = await app.inject({ method: "POST", url: `/api/tasks/${loopTaskId}/gate/merge`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { headSha } });
   assert.equal(merge.statusCode, 200, merge.body);
-  const completedRun = await app.inject({ method: "POST", url: `/api/runs/${runId}/complete`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "SUCCEEDED" } });
+  const completedRun = await app.inject({ method: "POST", url: `/api/runs/${runId}/complete`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "SUCCEEDED", controlVersion: claimedRun.json().run.controlVersion } });
   assert.equal(completedRun.statusCode, 200, completedRun.body);
   const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(deleted.statusCode, 204, deleted.body);
@@ -1116,6 +1116,64 @@ test("agent observability API exposes run health fields alongside logs", async (
   const logs = await app.inject({ method: "GET", url: `/api/tasks/${taskId}/agent-logs?limit=1`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(logs.statusCode, 200);
   assert.equal(typeof logs.json().page.hasMore, "boolean");
+});
+
+test("structured run interventions are authorized, idempotent, audited, and fence stale workers", async () => {
+  await db.prepare("INSERT OR IGNORE INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'MEMBER', ?)").run(projectId, agentId, new Date().toISOString());
+  const webhook = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "http://127.0.0.1:4500/agents/codex" } });
+  assert.equal(webhook.statusCode, 200, webhook.body);
+  const assigned = await app.inject({ method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { assigneeId: agentId } });
+  assert.equal(assigned.statusCode, 200, assigned.body);
+  const created = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION", maxAttempts: 3 } });
+  assert.equal(created.statusCode, 201, created.body);
+  const runId = created.json().run.id as string;
+  const claimed = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${agentToken}` }, payload: { leaseMs: 120_000 } });
+  assert.equal(claimed.statusCode, 200, claimed.body);
+  const claimedVersion = claimed.json().run.controlVersion as number;
+
+  const agentPause = await app.inject({ method: "POST", url: `/api/runs/${runId}/interventions`, headers: { authorization: `Bearer ${agentToken}`, "idempotency-key": "agent-pause-denied" }, payload: { action: "PAUSE", controlVersion: claimedVersion } });
+  assert.equal(agentPause.statusCode, 403, agentPause.body);
+  const pausePayload = { action: "PAUSE", controlVersion: claimedVersion };
+  const paused = await app.inject({ method: "POST", url: `/api/runs/${runId}/interventions`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "pause-run-once" }, payload: pausePayload });
+  assert.equal(paused.statusCode, 202, paused.body);
+  assert.equal(paused.json().run.controlState, "PAUSED");
+  assert.equal(paused.json().run.controlVersion, claimedVersion + 1);
+  const duplicate = await app.inject({ method: "POST", url: `/api/runs/${runId}/interventions`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "pause-run-once" }, payload: pausePayload });
+  assert.equal(duplicate.statusCode, 200, duplicate.body);
+  assert.equal(duplicate.json().duplicate, true);
+  const stolenDuplicate = await app.inject({ method: "POST", url: `/api/runs/${runId}/interventions`, headers: { authorization: `Bearer ${agentToken}`, "idempotency-key": "pause-run-once" }, payload: pausePayload });
+  assert.equal(stolenDuplicate.statusCode, 409, stolenDuplicate.body);
+  const staleHeartbeat = await app.inject({ method: "POST", url: `/api/runs/${runId}/heartbeat`, headers: { authorization: `Bearer ${agentToken}` }, payload: { leaseMs: 120_000, controlVersion: claimedVersion } });
+  assert.equal(staleHeartbeat.statusCode, 409, staleHeartbeat.body);
+  const staleCompletion = await app.inject({ method: "POST", url: `/api/runs/${runId}/complete`, headers: { authorization: `Bearer ${agentToken}` }, payload: { status: "SUCCEEDED", controlVersion: claimedVersion } });
+  assert.equal(staleCompletion.statusCode, 409, staleCompletion.body);
+  const staleHandoff = await app.inject({ method: "PUT", url: `/api/runs/${runId}/handoff`, headers: { authorization: `Bearer ${agentToken}` }, payload: { branch: "agent/stale", headSha: null, branchPublished: false, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, status: "FAILED", lastError: "stale", controlVersion: claimedVersion } });
+  assert.equal(staleHandoff.statusCode, 409, staleHandoff.body);
+
+  const resumed = await app.inject({ method: "POST", url: `/api/runs/${runId}/interventions`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "resume-run-once" }, payload: { action: "RESUME", controlVersion: claimedVersion + 1 } });
+  assert.equal(resumed.statusCode, 202, resumed.body);
+  assert.equal(resumed.json().run.status, "PENDING");
+  const reclaimed = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${agentToken}` }, payload: { leaseMs: 120_000 } });
+  assert.equal(reclaimed.statusCode, 200, reclaimed.body);
+  const activeVersion = reclaimed.json().run.controlVersion as number;
+  const issued = await app.inject({ method: "POST", url: `/api/runs/${runId}/credential`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(issued.statusCode, 200, issued.body);
+  const requestInput = await app.inject({ method: "POST", url: `/api/runs/${runId}/interventions`, headers: { authorization: `Bearer ${issued.json().credential.token}`, "idempotency-key": "request-input-once" }, payload: { action: "REQUEST_INPUT", controlVersion: activeVersion, input: "Which region? token=do-not-store" } });
+  assert.equal(requestInput.statusCode, 202, requestInput.body);
+  assert.equal(requestInput.json().run.controlState, "WAITING_FOR_INPUT");
+  assert.doesNotMatch(requestInput.json().run.inputRequest, /do-not-store/);
+  const answered = await app.inject({ method: "POST", url: `/api/runs/${runId}/interventions`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "answer-input-once" }, payload: { action: "ANSWER", controlVersion: activeVersion + 1, input: "Use eu-west-1" } });
+  assert.equal(answered.statusCode, 202, answered.body);
+  assert.equal(answered.json().run.controlState, "ACTIVE");
+  assert.equal(answered.json().run.inputResponse, "Use eu-west-1");
+  const cancelled = await app.inject({ method: "POST", url: `/api/runs/${runId}/interventions`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "cancel-run-once" }, payload: { action: "CANCEL", controlVersion: activeVersion + 2 } });
+  assert.equal(cancelled.statusCode, 202, cancelled.body);
+  assert.equal(cancelled.json().run.status, "CANCELLED");
+  const audits = await db.prepare("SELECT metadata FROM activity WHERE task_id = ? AND action = 'agent_run.intervention'").all(taskId) as Array<{ metadata: string | object }>;
+  const metadata = audits.map((audit) => typeof audit.metadata === "string" ? JSON.parse(audit.metadata) : audit.metadata);
+  assert.ok(metadata.some((entry) => entry.intervention === "CANCEL"));
+  assert.doesNotMatch(JSON.stringify(metadata), /eu-west|do-not-store|tfr_/);
+  await db.prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?").run(projectId, agentId);
 });
 
 test("Smithy agents receive revocable credentials bound to one run, task, project, and attempt", async () => {

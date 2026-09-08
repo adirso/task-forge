@@ -1,4 +1,4 @@
-import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunCredentialEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -142,9 +142,12 @@ export interface AgentRunRepository {
   grantCycle(input: AgentCycleGrantEntity): Promise<{ grant: AgentCycleGrantEntity; created: boolean }>;
   expire(now: string): Promise<number>;
   claim(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
-  heartbeat(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
-  complete(id: string, owner: string, status: "SUCCEEDED" | "FAILED" | "CANCELLED", now: string, error?: string | null): Promise<boolean>;
+  heartbeat(id: string, owner: string, controlVersion: number, now: string, leaseExpiresAt: string): Promise<boolean>;
+  complete(id: string, owner: string, controlVersion: number, status: "SUCCEEDED" | "FAILED" | "CANCELLED", now: string, error?: string | null): Promise<boolean>;
   cancel(id: string, now: string, error?: string | null): Promise<boolean>;
+  findIntervention(requestId: string): Promise<AgentRunInterventionEntity | null>;
+  applyIntervention(id: string, expectedVersion: number, update: Partial<Pick<AgentRunEntity, "status" | "controlState" | "assignedAgentId" | "inputRequest" | "inputResponse" | "inputRequestedAt" | "inputAnsweredAt" | "takeoverById" | "lastError" | "completedAt">>, now: string): Promise<boolean>;
+  recordIntervention(input: AgentRunInterventionEntity): Promise<void>;
 }
 export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; findPublishedByTaskHead(taskId: string, headSha: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
 export interface DeliveryMonitorRepository { health(now: string, pollIntervalMs: number): Promise<DeliveryMonitorHealthEntity>; taskCheckpoint(taskId: string): Promise<Record<string, unknown> | null>; }
