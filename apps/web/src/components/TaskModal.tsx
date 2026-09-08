@@ -1,5 +1,5 @@
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
-import type { ActivityEvent, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
+import type { ActivityEvent, AgentRunInterventionAction, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
 import { Activity, Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Terminal, Trash2, UploadCloud, X } from "lucide-react";
 import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
 import { api, type AgentCycleState, type AgentLog, type AgentRun } from "../lib/api";
@@ -26,6 +26,9 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [cycle, setCycle] = useState<AgentCycleState | null>(null);
   const [forcingCycle, setForcingCycle] = useState(false);
+  const [controllingRun, setControllingRun] = useState<string | null>(null);
+  const [runInputs, setRunInputs] = useState<Record<string, string>>({});
+  const [runAgents, setRunAgents] = useState<Record<string, string>>({});
   const [agentLogs, setAgentLogs] = useState<AgentLog[]>([]);
   const [updateBody, setUpdateBody] = useState("");
   const [postingUpdate, setPostingUpdate] = useState(false);
@@ -95,6 +98,22 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
     } catch { setError(FORCE_CYCLE_FAILURE_MESSAGE); }
     finally { setForcingCycle(false); }
   }
+  async function controlRun(run: AgentRun, action: AgentRunInterventionAction) {
+    const input = runInputs[run.id]?.trim();
+    const agentId = runAgents[run.id] || run.assignedAgentId || undefined;
+    if (action === "ANSWER" && !input) { setError("Enter an answer before resuming the run"); return; }
+    if (action === "REASSIGN" && !agentId) { setError("Choose an agent before reassigning the run"); return; }
+    if ((action === "CANCEL" || action === "TAKEOVER") && !window.confirm(action === "TAKEOVER" ? "Stop this agent run and take ownership of the task?" : "Cancel this agent run?")) return;
+    setControllingRun(run.id); setError("");
+    try {
+      const result = await api.interveneRun(run.id, crypto.randomUUID(), { action, controlVersion: run.controlVersion, ...(action === "ANSWER" ? { input } : {}), ...(action === "REASSIGN" ? { agentId } : {}) });
+      setRuns((items) => items.map((candidate) => candidate.id === run.id ? result.run : candidate));
+      if (action === "ANSWER") setRunInputs((items) => ({ ...items, [run.id]: "" }));
+      const refreshedActivity = task ? await api.taskActivity(task.id).catch(() => null) : null;
+      if (refreshedActivity) setActivity(refreshedActivity.activity);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not control agent run"); }
+    finally { setControllingRun(null); }
+  }
   async function uploadFiles(files: FileList | File[]) {
     if (!task || !files.length) return;
     setUploadingFiles(true); setError("");
@@ -115,6 +134,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const headerTitle = form.title.trim() || (task ? "Untitled task" : "New task");
   const liveProvider = latestProviderLog(agentLogs);
   const runningAgents = runs.filter((run) => run.status === "RUNNING" || run.status === "PENDING").length;
+  const canControlRuns = currentUser.kind === "HUMAN" && (currentUser.role === "ADMIN" || currentUser.id === project.ownerId);
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -182,7 +202,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
               {liveProvider && <div className="task-provider-progress"><Terminal /><span><strong>Live provider progress</strong><small>{liveProvider.provider} · {liveProvider.stream} · #{liveProvider.sequence}</small><pre>{liveProvider.content}</pre></span></div>}
               <section className="task-runs">
                 <div className="section-heading"><span>Agent runs <b>{runs.length}</b></span><small>{runningAgents ? "Live · refreshes every 5s" : ""}</small></div>
-                {runs.length ? <div className="run-list">{runs.map((run) => { const health = getRunHealth(run, observedAt); const lastLog = latestRunLog(agentLogs, run.id); const timeline = runLogs(agentLogs, run.id); const timeout = formatCountdown(run.timeoutAt, observedAt); return <article className={`run-item${health.stale ? " is-stale" : ""}`} key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><span className={`run-health run-health-${health.kind.toLowerCase()}`}>{health.label}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-health-detail">{health.detail}{runIsWaitingForInput(lastLog) && <b className="run-waiting">Waiting for provider input</b>}</div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{timeout && <span>Timeout {timeout}</span>}</div>{timeline.length > 0 && <div className="run-output-timeline" aria-label={`${run.kind} provider response timeline`}><small>Provider response timeline · {timeline.length} event{timeline.length === 1 ? "" : "s"}</small>{timeline.slice().reverse().map((log) => <div className="run-timeline-entry" key={log.id}><span>#{log.sequence} · {log.stream}</span><pre>{log.content}</pre></div>)}</div>}{run.lastError && <p className="run-error">{run.lastError}</p>}</article>; })}</div> : <p className="runs-empty">No agent runs yet.</p>}
+                {runs.length ? <div className="run-list">{runs.map((run) => { const health = getRunHealth(run, observedAt); const lastLog = latestRunLog(agentLogs, run.id); const timeline = runLogs(agentLogs, run.id); const timeout = formatCountdown(run.timeoutAt, observedAt); const busy = controllingRun === run.id; const terminal = run.status === "SUCCEEDED" || run.status === "CANCELLED"; return <article className={`run-item${health.stale ? " is-stale" : ""}`} key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><span className={`run-health run-health-${health.kind.toLowerCase()}`}>{health.label}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-health-detail">{health.detail}{run.controlState === "ACTIVE" && runIsWaitingForInput(lastLog) && <b className="run-waiting">Possible unstructured input request</b>}</div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span><span>Decision v{run.controlVersion}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{timeout && <span>Timeout {timeout}</span>}</div>{run.controlState === "WAITING_FOR_INPUT" && <div className="run-input-request"><strong>Provider question</strong><p>{run.inputRequest}</p>{canControlRuns && <textarea aria-label={`Answer ${run.kind} run`} rows={2} value={runInputs[run.id] ?? ""} onChange={(event) => setRunInputs((items) => ({ ...items, [run.id]: event.target.value }))} placeholder="Provide the decision or missing information" />}</div>}{canControlRuns && !terminal && run.controlState !== "HUMAN_TAKEOVER" && <div className="run-controls" aria-label={`${run.kind} run controls`}>{run.controlState === "ACTIVE" && ["PENDING", "RUNNING"].includes(run.status) && <button type="button" className="button button-secondary" disabled={busy} onClick={() => void controlRun(run, "PAUSE")}>Pause</button>}{run.controlState === "PAUSED" && <button type="button" className="button button-secondary" disabled={busy} onClick={() => void controlRun(run, "RESUME")}>Resume</button>}{run.controlState === "WAITING_FOR_INPUT" && <button type="button" className="button button-primary" disabled={busy || !runInputs[run.id]?.trim()} onClick={() => void controlRun(run, "ANSWER")}>Answer &amp; resume</button>}{run.status === "FAILED" && run.attemptCount < run.maxAttempts && <button type="button" className="button button-secondary" disabled={busy} onClick={() => void controlRun(run, "RETRY")}>Retry</button>}<label>Reassign<select aria-label={`Reassign ${run.kind} run`} value={runAgents[run.id] ?? run.assignedAgentId ?? ""} onChange={(event) => setRunAgents((items) => ({ ...items, [run.id]: event.target.value }))}><option value="">Choose agent</option>{members.filter((member) => member.kind === "AGENT").map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label><button type="button" className="button button-secondary" disabled={busy || !(runAgents[run.id] || run.assignedAgentId)} onClick={() => void controlRun(run, "REASSIGN")}>Apply</button><button type="button" className="button button-danger-quiet" disabled={busy} onClick={() => void controlRun(run, "CANCEL")}>Cancel run</button><button type="button" className="button button-danger-quiet" disabled={busy} onClick={() => void controlRun(run, "TAKEOVER")}>Take over</button></div>}{timeline.length > 0 && <div className="run-output-timeline" aria-label={`${run.kind} provider response timeline`}><small>Provider response timeline · {timeline.length} event{timeline.length === 1 ? "" : "s"}</small>{timeline.slice().reverse().map((log) => <div className="run-timeline-entry" key={log.id}><span>#{log.sequence} · {log.stream}</span><pre>{log.content}</pre></div>)}</div>}{run.lastError && <p className="run-error">{run.lastError}</p>}</article>; })}</div> : <p className="runs-empty">No agent runs yet.</p>}
               </section>
               <section className="task-agent-logs">
                 <div className="section-heading"><span><Terminal /> Agent logs <b>{agentLogs.length}</b></span><small>Provider output and callbacks</small></div>

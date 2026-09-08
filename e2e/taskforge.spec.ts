@@ -207,12 +207,19 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByRole("button", { name: /Browser observability task/ })).toBeVisible();
 
     const now = Date.now();
+    const controls = { controlState: "ACTIVE", controlVersion: 1, assignedAgentId: null, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null };
     await page.route("**/api/tasks/*/runs", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ runs: [
-      { id: "00000000-0000-4000-8000-000000000701", taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now + 120000).toISOString(), heartbeatAt: new Date(now - 30000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 60000).toISOString(), updatedAt: new Date(now - 30000).toISOString(), completedAt: null },
-      { id: "00000000-0000-4000-8000-000000000702", taskId: "task", projectId: "project", requestedById: "agent", kind: "FIX", status: "RUNNING", attemptCount: 2, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now - 1000).toISOString(), heartbeatAt: new Date(now - 180000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 240000).toISOString(), updatedAt: new Date(now - 180000).toISOString(), completedAt: null },
-      { id: "00000000-0000-4000-8000-000000000703", taskId: "task", projectId: "project", requestedById: "agent", kind: "REVIEW", status: "FAILED", attemptCount: 3, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: "Provider exited", createdAt: new Date(now - 300000).toISOString(), updatedAt: new Date(now - 240000).toISOString(), completedAt: new Date(now - 240000).toISOString() },
-      { id: "00000000-0000-4000-8000-000000000704", taskId: "task", projectId: "project", requestedById: "agent", kind: "RE_REVIEW", status: "SUCCEEDED", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: new Date(now - 600000).toISOString(), timeoutAt: null, lastError: null, createdAt: new Date(now - 600000).toISOString(), updatedAt: new Date(now - 500000).toISOString(), completedAt: new Date(now - 500000).toISOString() },
+      { ...controls, id: "00000000-0000-4000-8000-000000000701", taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now + 120000).toISOString(), heartbeatAt: new Date(now - 30000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 60000).toISOString(), updatedAt: new Date(now - 30000).toISOString(), completedAt: null },
+      { ...controls, id: "00000000-0000-4000-8000-000000000702", taskId: "task", projectId: "project", requestedById: "agent", kind: "FIX", status: "RUNNING", attemptCount: 2, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now - 1000).toISOString(), heartbeatAt: new Date(now - 180000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 240000).toISOString(), updatedAt: new Date(now - 180000).toISOString(), completedAt: null },
+      { ...controls, id: "00000000-0000-4000-8000-000000000703", taskId: "task", projectId: "project", requestedById: "agent", kind: "REVIEW", status: "FAILED", attemptCount: 2, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: "Provider exited", createdAt: new Date(now - 300000).toISOString(), updatedAt: new Date(now - 240000).toISOString(), completedAt: new Date(now - 240000).toISOString() },
+      { ...controls, id: "00000000-0000-4000-8000-000000000704", taskId: "task", projectId: "project", requestedById: "agent", kind: "RE_REVIEW", status: "SUCCEEDED", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: new Date(now - 600000).toISOString(), timeoutAt: null, lastError: null, createdAt: new Date(now - 600000).toISOString(), updatedAt: new Date(now - 500000).toISOString(), completedAt: new Date(now - 500000).toISOString() },
+      { ...controls, id: "00000000-0000-4000-8000-000000000705", taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "RUNNING", controlState: "WAITING_FOR_INPUT", controlVersion: 2, inputRequest: "Choose the deployment region", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: new Date(now - 30000).toISOString(), timeoutAt: null, lastError: null, createdAt: new Date(now - 60000).toISOString(), updatedAt: new Date(now - 30000).toISOString(), completedAt: null },
     ] }) }));
+    let intervention: unknown = null;
+    await page.route("**/api/runs/*/interventions", async (route) => {
+      intervention = route.request().postDataJSON();
+      return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ duplicate: false, run: { ...controls, id: "00000000-0000-4000-8000-000000000705", taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "PENDING", controlVersion: 3, inputResponse: "Use eu-west-1", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: new Date(now - 60000).toISOString(), updatedAt: new Date().toISOString(), completedAt: null } }) });
+    });
     await page.route("**/api/tasks/*/agent-logs*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agentLogs: [
       { id: "log-701", taskId: "task", runId: "00000000-0000-4000-8000-000000000701", provider: "codex", stream: "stdout", category: "output", sequence: 3, eventId: null, content: "Waiting for permission to continue", createdAt: new Date(now - 10000).toISOString() },
       { id: "log-702", taskId: "task", runId: "00000000-0000-4000-8000-000000000702", provider: "codex", stream: "stderr", category: "output", sequence: 2, eventId: null, content: "Last stalled output", createdAt: new Date(now - 180000).toISOString() },
@@ -224,7 +231,16 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByText("Lease expired", { exact: true })).toBeVisible();
     await expect(page.getByText("Failed", { exact: true })).toBeVisible();
     await expect(page.getByText("Completed", { exact: true })).toBeVisible();
-    await expect(page.getByText("Waiting for provider input", { exact: true })).toBeVisible();
+    await expect(page.getByText("Needs input", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pause" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry" }).first()).toBeVisible();
+    await expect(page.getByLabel("Reassign IMPLEMENTATION run").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Take over" }).first()).toBeVisible();
+    await expect(page.getByRole("paragraph").filter({ hasText: "Choose the deployment region" })).toBeVisible();
+    await page.getByLabel("Answer IMPLEMENTATION run").fill("Use eu-west-1");
+    await page.getByRole("button", { name: "Answer & resume" }).click();
+    expect(intervention).toEqual({ action: "ANSWER", controlVersion: 2, input: "Use eu-west-1" });
+    await expect(page.getByText("Decision v3", { exact: true })).toBeVisible();
     await expect(page.getByText("Provider response timeline", { exact: false }).first()).toBeVisible();
   });
 

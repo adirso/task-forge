@@ -50,7 +50,8 @@ export class TaskFindingApplicationService implements TaskFindingService {
         }
         const changed = await r.tasks.update(task.id, { status: fixStatus });
         const cycle = await r.runs.cycleState(task.id); if (cycle.count >= cycle.limit) throw new ValidationError("Task has reached the maximum autonomous delivery cycle limit");
-        const run = await r.runs.create({ id: this.newId(), taskId: task.id, projectId: task.projectId, requestedById: context.actor.userId, executedById: null, kind: "FIX", status: "PENDING", attemptCount: 0, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: now, updatedAt: now, completedAt: null });
+        const assignee = task.assigneeId ? await r.users.findById(task.assigneeId) : null;
+        const run = await r.runs.create({ id: this.newId(), taskId: task.id, projectId: task.projectId, requestedById: context.actor.userId, executedById: null, kind: "FIX", status: "PENDING", controlState: "ACTIVE", controlVersion: 0, assignedAgentId: assignee?.kind === "AGENT" ? assignee.id : null, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 0, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: now, updatedAt: now, completedAt: null });
         const automated = await this.automationEngine.apply(r, context, task, changed, "TASK_UPDATED");
         await enqueueTaskStatusWebhook(r, automated, task.status, context, run.id, this.newId, this.now);
       } else if (input.disposition === "ESCALATED") {

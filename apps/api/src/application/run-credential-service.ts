@@ -31,7 +31,7 @@ export class AgentRunCredentialApplicationService {
       const run = await repositories.runs.findById(runId);
       if (!run) throw new NotFoundError("Agent run");
       await this.authorize(repositories, context, run.projectId);
-      if (context.actor.kind !== "AGENT" || run.status !== "RUNNING" || run.leaseOwner !== context.actor.userId) {
+      if (context.actor.kind !== "AGENT" || run.status !== "RUNNING" || run.controlState !== "ACTIVE" || run.leaseOwner !== context.actor.userId) {
         throw new ForbiddenError("Only the current agent run lease owner can issue a run credential");
       }
 

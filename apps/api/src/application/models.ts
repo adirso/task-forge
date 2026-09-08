@@ -1,4 +1,4 @@
-import type { AgentWorkflow, DependencyResolutionStatus, ProjectMergeTarget, ProjectReviewPolicy, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
+import type { AgentRunControlState, AgentRunInterventionAction, AgentWorkflow, DependencyResolutionStatus, ProjectMergeTarget, ProjectReviewPolicy, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
 
 export interface UserEntity {
   id: string;
@@ -44,6 +44,14 @@ export interface AgentRunEntity {
   executedById: string | null;
   kind: AgentRunKind;
   status: AgentRunStatus;
+  controlState: AgentRunControlState;
+  controlVersion: number;
+  assignedAgentId: string | null;
+  inputRequest: string | null;
+  inputResponse: string | null;
+  inputRequestedAt: string | null;
+  inputAnsweredAt: string | null;
+  takeoverById: string | null;
   attemptCount: number;
   maxAttempts: number;
   leaseOwner: string | null;
@@ -54,6 +62,15 @@ export interface AgentRunEntity {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+}
+export interface AgentRunInterventionEntity {
+  requestId: string;
+  runId: string;
+  actorId: string;
+  action: AgentRunInterventionAction;
+  payloadHash: string;
+  resultVersion: number;
+  createdAt: string;
 }
 export interface AgentRunCredentialEntity {
   runId: string;

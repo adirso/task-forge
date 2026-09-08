@@ -1,8 +1,10 @@
-import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
   id: string; taskId: string; projectId: string; requestedById: string; executedById: string | null; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
   status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED"; attemptCount: number; maxAttempts: number;
+  controlState: "ACTIVE" | "PAUSED" | "WAITING_FOR_INPUT" | "HUMAN_TAKEOVER"; controlVersion: number; assignedAgentId: string | null;
+  inputRequest: string | null; inputResponse: string | null; inputRequestedAt: string | null; inputAnsweredAt: string | null; takeoverById: string | null;
   leaseOwner: string | null; leaseExpiresAt: string | null; heartbeatAt: string | null; timeoutAt: string | null; lastError: string | null;
   createdAt: string; updatedAt: string; completedAt: string | null;
 }
@@ -114,7 +116,7 @@ const mockNotifications: Notification[] = [
   { id: "n1", userId: MOCK_USER.id, projectId: "p_mobile", taskId: "t3", type: "TASK_UPDATED", title: "Task moved to review", message: "Collapse filters on phones is ready for review.", readAt: null, createdAt: MOCK_NOW, projectName: "Mobile Refresh", projectKey: "MOB", taskNumber: 3 },
 ];
 const mockRuns: Record<string, AgentRun[]> = {
-  t1: [{ id: "run-demo-1", taskId: "t1", projectId: "p_mobile", requestedById: MOCK_USER.id, executedById: MOCK_AGENT.id, kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy-demo", leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(), heartbeatAt: MOCK_NOW, timeoutAt: new Date(Date.now() + 900_000).toISOString(), lastError: null, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, completedAt: null }],
+  t1: [{ id: "run-demo-1", taskId: "t1", projectId: "p_mobile", requestedById: MOCK_USER.id, executedById: MOCK_AGENT.id, kind: "IMPLEMENTATION", status: "RUNNING", controlState: "ACTIVE", controlVersion: 1, assignedAgentId: MOCK_AGENT.id, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy-demo", leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(), heartbeatAt: MOCK_NOW, timeoutAt: new Date(Date.now() + 900_000).toISOString(), lastError: null, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, completedAt: null }],
 };
 const mockAgentLogs: Record<string, AgentLog[]> = {
   t1: [{ id: "log-demo-1", taskId: "t1", runId: "run-demo-1", provider: "codex", stream: "stdout", category: "progress", sequence: 1, eventId: "demo-event-1", content: "Implementation started on agent/mob-1", createdAt: MOCK_NOW }],
@@ -357,6 +359,21 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
 
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "GET") return { updates: [] } as T;
   if (/^\/tasks\/[^/]+\/runs$/.test(pathname) && method === "GET") { const runs = mockRuns[pathname.split("/")[2]!] ?? []; return { runs, cycle: { count: runs.length, limit: 6, limitFailure: false } } as T; }
+  if (/^\/runs\/[^/]+\/interventions$/.test(pathname) && method === "POST") {
+    const runId = pathname.split("/")[2]!;
+    const input = options.body as AgentRunIntervention;
+    const run = Object.values(mockRuns).flat().find((candidate) => candidate.id === runId);
+    if (!run) throw new ApiError("Agent run not found", 404);
+    if (run.controlVersion !== input.controlVersion) throw new ApiError("Agent run changed; refresh it before applying this intervention", 409);
+    run.controlVersion += 1; run.updatedAt = new Date().toISOString(); run.leaseOwner = null; run.leaseExpiresAt = null;
+    if (input.action === "PAUSE") run.controlState = "PAUSED";
+    if (["RESUME", "RETRY", "REASSIGN", "ANSWER"].includes(input.action)) { run.controlState = "ACTIVE"; run.status = "PENDING"; run.completedAt = null; run.lastError = null; }
+    if (input.action === "REASSIGN") run.assignedAgentId = input.agentId!;
+    if (input.action === "ANSWER") { run.inputResponse = input.input!; run.inputAnsweredAt = run.updatedAt; }
+    if (input.action === "CANCEL") { run.status = "CANCELLED"; run.completedAt = run.updatedAt; run.lastError = "Cancelled by operator"; }
+    if (input.action === "TAKEOVER") { run.status = "CANCELLED"; run.controlState = "HUMAN_TAKEOVER"; run.takeoverById = MOCK_USER.id; run.completedAt = run.updatedAt; }
+    return { run, duplicate: false } as T;
+  }
   if (/^\/tasks\/[^/]+\/runs\/force-cycle$/.test(pathname) && method === "POST") return { cycle: { count: 6, limit: 7, limitFailure: false }, duplicate: false } as T;
   if (/^\/tasks\/[^/]+\/agent-logs$/.test(pathname) && method === "GET") return { agentLogs: mockAgentLogs[pathname.split("/")[2]!] ?? [], page: { limit: 100, hasMore: false, nextCursor: null } } as T;
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "POST") {
@@ -467,6 +484,7 @@ export const api = {
     return { updates };
   },
   taskRuns: (id: string) => request<{ runs: AgentRun[]; cycle: AgentCycleState }>(`/tasks/${id}/runs`),
+  interveneRun: (id: string, requestId: string, input: AgentRunIntervention) => request<{ run: AgentRun; duplicate: boolean }>(`/runs/${id}/interventions`, { method: "POST", headers: { "Idempotency-Key": requestId }, body: input }),
   forceTaskCycle: (id: string, requestId: string) => request<{ cycle: AgentCycleState; duplicate: boolean }>(`/tasks/${id}/runs/force-cycle`, { method: "POST", headers: { "Idempotency-Key": requestId } }),
   taskAgentLogs: async (id: string) => {
     const logs: AgentLog[] = []; let cursor: string | null = null;

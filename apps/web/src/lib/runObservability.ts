@@ -1,11 +1,14 @@
 import type { AgentLog, AgentRun } from "./api";
 
-export type RunHealthKind = "LIVE" | "WAITING" | "STALE" | "TIMED_OUT" | "FAILED" | "COMPLETED" | "CANCELLED";
+export type RunHealthKind = "LIVE" | "WAITING" | "PAUSED" | "WAITING_FOR_INPUT" | "STALE" | "TIMED_OUT" | "FAILED" | "COMPLETED" | "CANCELLED";
 export interface RunHealth { kind: RunHealthKind; label: string; detail: string; stale: boolean; }
 
 const WAITING_PATTERN = /\b(waiting|awaiting|permission|approval|input|prompt)\b/i;
 
 export function getRunHealth(run: AgentRun, now = Date.now()): RunHealth {
+  if (run.controlState === "PAUSED") return { kind: "PAUSED", label: "Paused", detail: "Paused by an operator", stale: false };
+  if (run.controlState === "WAITING_FOR_INPUT") return { kind: "WAITING_FOR_INPUT", label: "Needs input", detail: run.inputRequest || "The provider requested operator input", stale: false };
+  if (run.controlState === "HUMAN_TAKEOVER") return { kind: "CANCELLED", label: "Human takeover", detail: "An operator took ownership of this task", stale: false };
   if (run.status === "SUCCEEDED") return { kind: "COMPLETED", label: "Completed", detail: "Provider run completed", stale: false };
   if (run.status === "FAILED") return { kind: "FAILED", label: "Failed", detail: run.lastError || "Provider run failed", stale: true };
   if (run.status === "CANCELLED") return { kind: "CANCELLED", label: "Cancelled", detail: "Run was cancelled", stale: false };

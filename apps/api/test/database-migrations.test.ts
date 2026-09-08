@@ -135,6 +135,14 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
     ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('agent_runs') WHERE name = 'executed_by_id'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'agent_runs' AND column_name = 'executed_by_id'", []));
   assert.equal(hasExecutedByColumn, true);
+  const hasControlStateColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('agent_runs') WHERE name = 'control_state'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'agent_runs' AND column_name = 'control_state'", []));
+  assert.equal(hasControlStateColumn, true);
+  const hasInterventionsTable = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_interventions'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_run_interventions'", []));
+  assert.equal(hasInterventionsTable, true);
   const hasGateApprovals = driver === "sqlite"
     ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'task_gate_approvals'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'task_gate_approvals'", []));

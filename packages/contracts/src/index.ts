@@ -72,6 +72,17 @@ export const DEFAULT_AGENT_WORKFLOW: AgentWorkflow = {
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
 export const taskTypeSchema = z.enum(["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
+export const agentRunControlStateSchema = z.enum(["ACTIVE", "PAUSED", "WAITING_FOR_INPUT", "HUMAN_TAKEOVER"]);
+export const agentRunInterventionActionSchema = z.enum(["PAUSE", "RESUME", "CANCEL", "RETRY", "REASSIGN", "REQUEST_INPUT", "ANSWER", "TAKEOVER"]);
+export const agentRunInterventionSchema = z.object({
+  action: agentRunInterventionActionSchema,
+  controlVersion: z.number().int().nonnegative(),
+  agentId: z.string().uuid().optional(),
+  input: z.string().trim().min(1).max(4000).optional(),
+}).superRefine((value, context) => {
+  if (value.action === "REASSIGN" && !value.agentId) context.addIssue({ code: "custom", path: ["agentId"], message: "agentId is required when reassigning a run" });
+  if (["REQUEST_INPUT", "ANSWER"].includes(value.action) && !value.input) context.addIssue({ code: "custom", path: ["input"], message: "input is required for this intervention" });
+});
 /** Pull requests are intentionally restricted to canonical public GitHub URLs. */
 export const deliveryMonitorPullRequestSchema = z.object({
   owner: z.string().regex(/^[A-Za-z0-9_.-]+$/),
@@ -310,6 +321,9 @@ export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 export type TaskType = z.infer<typeof taskTypeSchema>;
 export type PullRequestState = z.infer<typeof pullRequestStateSchema>;
+export type AgentRunControlState = z.infer<typeof agentRunControlStateSchema>;
+export type AgentRunInterventionAction = z.infer<typeof agentRunInterventionActionSchema>;
+export type AgentRunIntervention = z.infer<typeof agentRunInterventionSchema>;
 export type DeliveryMonitorConfig = z.infer<typeof deliveryMonitorConfigSchema>;
 export type DeliveryMonitorPullRequest = z.infer<typeof deliveryMonitorPullRequestSchema>;
 export type DeliveryMonitorErrorCategory = z.infer<typeof deliveryMonitorErrorCategorySchema>;

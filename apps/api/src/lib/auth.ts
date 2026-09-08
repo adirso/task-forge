@@ -63,7 +63,7 @@ async function runCredentialMayAccess(request: FastifyRequest, credential: NonNu
     const suffix = runMatch[2] ?? "";
     return (method === "GET" && suffix === "/handoff")
       || (method === "PUT" && suffix === "/handoff")
-      || (method === "POST" && suffix === "/handoff/validate");
+      || (method === "POST" && ["/handoff/validate", "/interventions"].includes(suffix));
   }
 
   const findingMatch = pathname.match(/^\/api\/findings\/([^/]+)\/disposition$/);
@@ -101,7 +101,7 @@ export function installAuth(app: FastifyInstance) {
         JOIN users u ON u.id = c.user_id
         JOIN agent_runs r ON r.id = c.run_id
         WHERE c.token_hash = ? AND c.revoked_at IS NULL AND c.expires_at > ?
-          AND r.status = 'RUNNING' AND r.lease_owner = c.user_id
+          AND r.status = 'RUNNING' AND r.control_state = 'ACTIVE' AND r.lease_owner = c.user_id
           AND r.attempt_count = c.run_attempt AND r.lease_expires_at > ?
       `).get(hashToken(token), now, now) as (Omit<AuthRow, "tokenScopes" | "runCredential"> & { run_id: string; task_id: string; project_id: string; token_permissions: string }) | undefined;
       if (row) {

@@ -863,3 +863,13 @@ html[data-text-size="large"] body { zoom: 1.08; }
 .task-status-duration-meta { flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 8px; color: #6b778c; font-size: 11px; }
 .task-status-duration-meta b { color: #253858; font-weight: 700; font-variant-numeric: tabular-nums; }
 .task-status-duration-meta small { min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
+.run-health-paused { background: #eae6ff; color: #403294; }
+.run-health-waiting_for_input { background: #fffae6; color: #974f0c; }
+.run-input-request { display: grid; gap: 5px; border: 1px solid #ffe380; border-radius: 6px; background: #fffae6; padding: 8px; }
+.run-input-request strong { color: #6f4e00; font-size: 9px; }
+.run-input-request p { margin: 0; color: #42526e; font-size: 10px; white-space: pre-wrap; }
+.run-input-request textarea { resize: vertical; min-height: 52px; border: 1px solid #dfe1e6; border-radius: 5px; padding: 7px; font: inherit; }
+.run-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 6px; border-top: 1px solid #ebecf0; padding-top: 7px; }
+.run-controls .button { min-height: 28px; padding: 5px 8px; font-size: 9px; }
+.run-controls label { display: grid; gap: 2px; color: #6b778c; font-size: 8px; }
+.run-controls select { min-height: 28px; max-width: 150px; border: 1px solid #dfe1e6; border-radius: 5px; background: white; font-size: 9px; }

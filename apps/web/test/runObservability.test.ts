@@ -4,11 +4,13 @@ import { formatCountdown, getRunHealth, latestRunLog, runIsWaitingForInput, runL
 import type { AgentLog, AgentRun } from "../src/lib/api.js";
 
 const now = Date.parse("2026-08-25T12:00:00.000Z");
-const run = (overrides: Partial<AgentRun> = {}): AgentRun => ({ id: "run-1", taskId: "task-1", projectId: "project-1", requestedById: "agent-1", executedById: "agent-1", kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: "2026-08-25T12:02:00.000Z", heartbeatAt: "2026-08-25T11:59:30.000Z", timeoutAt: "2026-08-25T12:10:00.000Z", lastError: null, createdAt: "2026-08-25T11:58:00.000Z", updatedAt: "2026-08-25T11:59:30.000Z", completedAt: null, ...overrides });
+const run = (overrides: Partial<AgentRun> = {}): AgentRun => ({ id: "run-1", taskId: "task-1", projectId: "project-1", requestedById: "agent-1", executedById: "agent-1", kind: "IMPLEMENTATION", status: "RUNNING", controlState: "ACTIVE", controlVersion: 1, assignedAgentId: "agent-1", inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: "2026-08-25T12:02:00.000Z", heartbeatAt: "2026-08-25T11:59:30.000Z", timeoutAt: "2026-08-25T12:10:00.000Z", lastError: null, createdAt: "2026-08-25T11:58:00.000Z", updatedAt: "2026-08-25T11:59:30.000Z", completedAt: null, ...overrides });
 const log = (content: string, sequence: number): AgentLog => ({ id: `log-${sequence}`, taskId: "task-1", runId: "run-1", provider: "codex", stream: "stdout", category: "output", sequence, eventId: null, content, createdAt: `2026-08-25T11:${59 - sequence}:00.000Z` });
 
 test("classifies active and waiting-for-input runs", () => {
   assert.equal(getRunHealth(run(), now).kind, "LIVE");
+  assert.deepEqual(getRunHealth(run({ controlState: "PAUSED" }), now), { kind: "PAUSED", label: "Paused", detail: "Paused by an operator", stale: false });
+  assert.equal(getRunHealth(run({ controlState: "WAITING_FOR_INPUT", inputRequest: "Choose a region" }), now).detail, "Choose a region");
   assert.equal(getRunHealth(run({ heartbeatAt: "2026-08-25T11:57:00.000Z" }), now).kind, "STALE");
   assert.equal(runIsWaitingForInput(log("Waiting for permission to continue", 1)), true);
 });

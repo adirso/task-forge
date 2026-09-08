@@ -23,7 +23,7 @@ function base(overrides: Partial<RepositorySet> = {}): RepositorySet {
 }
 
 function run(overrides: Partial<AgentRunEntity> = {}): AgentRunEntity {
-  return { id: "run-1", taskId: task.id, projectId: project.id, requestedById: "owner-1", executedById: null, kind: "IMPLEMENTATION", status: "PENDING", attemptCount: 0, maxAttempts: 2, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: "2026-08-24T10:00:00.000Z", updatedAt: "2026-08-24T10:00:00.000Z", completedAt: null, ...overrides };
+  return { id: "run-1", taskId: task.id, projectId: project.id, requestedById: "owner-1", executedById: null, kind: "IMPLEMENTATION", status: "PENDING", controlState: "ACTIVE", controlVersion: 0, assignedAgentId: null, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 0, maxAttempts: 2, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: "2026-08-24T10:00:00.000Z", updatedAt: "2026-08-24T10:00:00.000Z", completedAt: null, ...overrides };
 }
 
 test("run claims are race-safe: only one concurrent claimant wins", async () => {
@@ -60,12 +60,62 @@ test("attempt budget is enforced before claiming another attempt", async () => {
   assert.equal(claimed, false);
 });
 
-test("only project owners and admins can cancel a run", async () => {
-  const current = run({ status: "RUNNING", leaseOwner: "runner-1" });
-  const set = base({ runs: { expire: async () => 0, findById: async () => current, cancel: async () => true } as never });
+test("only project owners and admins can cancel a run through an idempotent intervention", async () => {
+  let current = run({ status: "RUNNING", controlVersion: 1, leaseOwner: "runner-1" });
+  const interventions = new Map<string, any>();
+  const set = base({
+    tasks: { findById: async () => task, update: async () => task } as never,
+    runs: {
+      findById: async () => current,
+      findIntervention: async (id: string) => interventions.get(id) ?? null,
+      applyIntervention: async (_id: string, version: number, update: Partial<AgentRunEntity>) => { if (version !== current.controlVersion) return false; current = { ...current, ...update, controlVersion: version + 1 }; return true; },
+      recordIntervention: async (entry: any) => { interventions.set(entry.requestId, entry); },
+    } as never,
+    activity: { record: async () => undefined } as never,
+  });
   const service = new AgentRunApplicationService({ run: async (work) => work(set) });
-  await assert.rejects(() => service.complete(actor, current.id, "CANCELLED"), /project owner or administrator/);
-  await service.complete({ actor: { ...actor.actor, role: "ADMIN" } }, current.id, "CANCELLED");
+  await assert.rejects(() => service.intervene(actor, current.id, "cancel-1", { action: "CANCEL", controlVersion: 1 }), /project owner or administrator/);
+  const first = await service.intervene(owner, current.id, "cancel-1", { action: "CANCEL", controlVersion: 1 });
+  assert.equal(first.run?.status, "CANCELLED");
+  await assert.rejects(() => service.intervene(actor, current.id, "cancel-1", { action: "CANCEL", controlVersion: 1 }), /another actor/);
+  const duplicate = await service.intervene(owner, current.id, "cancel-1", { action: "CANCEL", controlVersion: 1 });
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(current.controlVersion, 2);
+});
+
+test("failed runs can be retried, reassigned, and handed to a human without losing audit or dispatch state", async () => {
+  let current = run({ status: "FAILED", controlVersion: 2, attemptCount: 1, assignedAgentId: "runner-1", executedById: "runner-1", lastError: "provider failed", completedAt: "2026-08-24T10:00:30.000Z" });
+  let currentTask = { ...task, assigneeId: "runner-1" };
+  const deliveries: any[] = [];
+  const activities: any[] = [];
+  const interventions = new Map<string, any>();
+  const set = base({
+    tasks: { findById: async () => currentTask, update: async (_id: string, update: Partial<TaskEntity>) => (currentTask = { ...currentTask, ...update }) } as never,
+    runs: {
+      findById: async () => current,
+      findIntervention: async (id: string) => interventions.get(id) ?? null,
+      applyIntervention: async (_id: string, version: number, update: Partial<AgentRunEntity>) => { if (version !== current.controlVersion) return false; current = { ...current, ...update, controlVersion: version + 1 }; return true; },
+      recordIntervention: async (entry: any) => { interventions.set(entry.requestId, entry); },
+    } as never,
+    users: { findById: async (id: string) => ({ id, kind: "AGENT", webhookUrl: "http://smithy.test/agent" }), getWebhookConfiguration: async () => ({ webhookUrl: "http://smithy.test/agent", secretCiphertext: "encrypted", secretVersion: 1 }) } as never,
+    webhookDeliveries: { create: async (delivery: any) => { deliveries.push(delivery); return delivery; } } as never,
+    activity: { record: async (entry: any) => { activities.push(entry); } } as never,
+  });
+  let nextId = 0;
+  const service = new AgentRunApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T10:01:00.000Z", () => `event-${++nextId}`);
+  const retried = await service.intervene(owner, current.id, "retry-1", { action: "RETRY", controlVersion: 2 });
+  assert.equal(retried.run?.status, "PENDING");
+  assert.equal(deliveries.length, 1);
+  assert.equal(JSON.parse(deliveries[0].payload).runId, current.id);
+  const reassigned = await service.intervene(owner, current.id, "reassign-1", { action: "REASSIGN", controlVersion: 3, agentId: "runner-2" });
+  assert.equal(reassigned.run?.assignedAgentId, "runner-2");
+  assert.equal(currentTask.assigneeId, "runner-2");
+  assert.equal(deliveries.length, 2);
+  const takeover = await service.intervene(owner, current.id, "takeover-1", { action: "TAKEOVER", controlVersion: 4 });
+  assert.equal(takeover.run?.controlState, "HUMAN_TAKEOVER");
+  assert.equal(takeover.run?.status, "CANCELLED");
+  assert.equal(currentTask.assigneeId, owner.actor.userId);
+  assert.deepEqual(activities.map((entry) => entry.metadata.intervention), ["RETRY", "REASSIGN", "TAKEOVER"]);
 });
 
 test("project owners grant exactly one audited cycle and repeated requests are idempotent", async () => {

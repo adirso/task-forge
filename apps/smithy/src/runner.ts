@@ -8,7 +8,7 @@ import type { JobStore } from "./store.js";
 import { MemoryJobStore } from "./store.js";
 import { DEFAULT_SANDBOX_POLICY, type SandboxPolicy } from "./sandbox.js";
 
-export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string; pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null }; runId?: string | null; }
+export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string; pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null }; runId?: string | null; runKind?: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX"; interventionAction?: string; operatorInput?: string | null; }
 export type RunnerResult = { status: number; body: string };
 type AgentWorkflow = { implementationQueue: string; implementationStart: string; reviewHandoff: string; reviewStart: string; approved: string; fixNeeded: string; fixStart: string; reReview: string };
 type TaskFinding = { severity?: string; title?: string; body?: string; disposition?: string; filePath?: string | null; lineNumber?: number | null };
@@ -98,8 +98,15 @@ export class SmithyRunner {
     }
     const owner = this.activeByTask.get(event.task.id);
     if (owner && owner !== event.id) {
-      this.store.markComplete(event.id, "CANCELLED");
-      return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, activeEventId: owner }) };
+      if (event.runId && event.runKind) {
+        this.cancelled.add(owner);
+        this.controllers.get(owner)?.abort();
+        this.store.cancel(owner);
+        this.activeByTask.delete(event.task.id);
+      } else {
+        this.store.markComplete(event.id, "CANCELLED");
+        return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, activeEventId: owner }) };
+      }
     }
     void this.process(config, event, accepted.job).catch(() => undefined);
     return { status: 202, body: JSON.stringify({ accepted: true, eventId: event.id }) };
@@ -124,6 +131,7 @@ export class SmithyRunner {
   }
 
   private kind(event: AgentEvent, workflow: AgentWorkflow | null | undefined): "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX" | null {
+    if (event.event === "task.assigned" && event.runId && event.runKind) return event.runKind;
     const status = event.task?.status;
     if (!status && event.event === "task.assigned") return "IMPLEMENTATION";
     if (!status || !["task.assigned", "task.status_changed"].includes(event.event)) return null;
@@ -175,8 +183,15 @@ export class SmithyRunner {
     const taskId = event.task?.id ?? job.taskId;
     const owner = this.activeByTask.get(taskId);
     if (owner && owner !== event.id) {
-      this.store.markComplete(event.id, "CANCELLED");
-      return;
+      if (event.runId && event.runKind) {
+        this.cancelled.add(owner);
+        this.controllers.get(owner)?.abort();
+        this.store.cancel(owner);
+        this.activeByTask.delete(taskId);
+      } else {
+        this.store.markComplete(event.id, "CANCELLED");
+        return;
+      }
     }
     this.activeByTask.set(taskId, event.id);
     const controller = new AbortController();
@@ -190,8 +205,10 @@ export class SmithyRunner {
     this.store.markRunning(event.id);
     const api = this.apiFactory(config);
     let runId = event.runId ?? job.runId ?? null;
+    let controlVersion: number | null = null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
     let leaseLost = false;
+    let controlSuperseded = false;
     let logSequence = 0;
     let logQueue = Promise.resolve();
     try {
@@ -225,7 +242,9 @@ export class SmithyRunner {
         runId = String((created.run as { id: string }).id);
         this.store.setRunId(event.id, runId);
       }
-      await api.request(`/api/runs/${runId}/claim`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) });
+      const claimResponse = await api.request(`/api/runs/${runId}/claim`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }) as unknown as { run?: { controlVersion?: number } };
+      controlVersion = claimResponse.run?.controlVersion ?? 1;
+      if (!Number.isInteger(controlVersion) || controlVersion! < 1) throw new Error("TaskForge claim did not return a valid run control version");
       const credentialResponse = await api.request(`/api/runs/${runId}/credential`, { method: "POST" }) as unknown as { credential?: { token?: string; expiresAt?: string } };
       const runCredential = credentialResponse.credential;
       if (!runCredential?.token?.startsWith("tfr_") || !runCredential.expiresAt || Date.parse(runCredential.expiresAt) <= this.now()) {
@@ -249,7 +268,7 @@ export class SmithyRunner {
           }
         } catch { verifiedHandoff = null; }
       }
-      heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }).catch((error) => { if (error instanceof Error && /lease is not owned|already leased|no longer runnable/i.test(error.message)) { leaseLost = true; controller.abort(); } }); }, this.heartbeatIntervalMs);
+      heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000, controlVersion }) }).catch((error) => { if (!(error instanceof Error)) return; if (/control decision superseded/i.test(error.message)) { controlSuperseded = true; controller.abort(); } else if (/lease|already leased|no longer runnable/i.test(error.message)) { leaseLost = true; controller.abort(); } }); }, this.heartbeatIntervalMs);
       heartbeat.unref?.();
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `Smithy started ${kind.toLowerCase()} run ${runId}.` }) });
       const appendLog = (stream: "stdout" | "stderr" | "system" | "callback", category: "output" | "progress" | "tool" | "callback" | "lifecycle", content: string) => {
@@ -266,13 +285,12 @@ export class SmithyRunner {
       const prTask = task as typeof task & { pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null; headSha?: string | null; branchPublished?: boolean; status?: string };
       const publication = verifiedHandoff ?? prTask;
       const publicationState = publication.status === "PUBLISHED" && publication.branchPublished && publication.branch && publication.headSha && publication.pullRequestUrl ? "verified" : "incomplete or unverified";
-      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, `Branch: ${task.branch?.trim() || "(no branch configured)"}`, `Canonical publication (${publicationState}): branch ${redact(publication.branch ?? task.branch ?? "(not recorded)")}; head SHA ${redact(publication.headSha ?? "(not recorded)")}; pull request ${redact(publication.pullRequestUrl ?? prTask.pullRequestUrl ?? "(not recorded)")} (${redact(publication.pullRequestState ?? prTask.pullRequestState ?? "unknown")})`, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...(task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), "TaskForge access is available through TASKFORGE_API_URL and the short-lived TASKFORGE_TOKEN. The credential is bound to this task and run; never print, persist, or copy it.", "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
+      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, `Branch: ${task.branch?.trim() || "(no branch configured)"}`, `Canonical publication (${publicationState}): branch ${redact(publication.branch ?? task.branch ?? "(not recorded)")}; head SHA ${redact(publication.headSha ?? "(not recorded)")}; pull request ${redact(publication.pullRequestUrl ?? prTask.pullRequestUrl ?? "(not recorded)")} (${redact(publication.pullRequestState ?? prTask.pullRequestState ?? "unknown")})`, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...(task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`), ...(event.operatorInput ? [`Operator input: ${redact(event.operatorInput)}`] : []), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), `If a decision is required, POST /api/runs/${runId}/interventions with an Idempotency-Key and {"action":"REQUEST_INPUT","controlVersion":${controlVersion},"input":"your concise question"}; stop work after TaskForge accepts it.`, "TaskForge access is available through TASKFORGE_API_URL and the short-lived TASKFORGE_TOKEN. The credential is bound to this task and run; never print, persist, or copy it.", "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
       if (this.cancelled.has(event.id)) {
         await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: "Smithy run cancelled by operator." }) }).catch(() => undefined);
-        await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "CANCELLED" }) }).catch(() => undefined);
         this.store.markComplete(event.id, "CANCELLED");
         return;
       }
@@ -288,7 +306,6 @@ export class SmithyRunner {
         const message = "Smithy run cancelled by operator.";
         appendLog("system", "lifecycle", message);
         await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: message }) }).catch(() => undefined);
-        await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "CANCELLED" }) }).catch(() => undefined);
         this.store.markComplete(event.id, "CANCELLED");
         await logQueue;
         return;
@@ -308,14 +325,21 @@ export class SmithyRunner {
       // A local branch is not proof that it was pushed. Only an explicit
       // provider callback may mark branchPublished/PUBLISHED.
       const existingHandoff = await api.request(`/api/runs/${runId}/handoff`).catch(() => ({})) as { handoff?: { status?: string } };
-      if (existingHandoff.handoff?.status !== "PUBLISHED") await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: task.branch ?? null, headSha, branchPublished: false, pullRequestUrl: prTask.pullRequestUrl ?? null, pullRequestTitle: prTask.pullRequestTitle ?? null, pullRequestState: prTask.pullRequestState ?? null, status: "PENDING", lastError: "Provider completed without explicit branch publication evidence" }) });
+      if (existingHandoff.handoff?.status !== "PUBLISHED") await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: task.branch ?? null, headSha, branchPublished: false, pullRequestUrl: prTask.pullRequestUrl ?? null, pullRequestTitle: prTask.pullRequestTitle ?? null, pullRequestState: prTask.pullRequestState ?? null, status: "PENDING", lastError: "Provider completed without explicit branch publication evidence", controlVersion }) });
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });
-      await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }) });
+      await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED", controlVersion }) });
       appendLog("system", "lifecycle", `Smithy ${kind.toLowerCase()} run completed successfully.`);
       await logQueue;
       this.store.markComplete(event.id, "SUCCEEDED");
     } catch (error) {
       const wasCancelled = this.cancelled.has(event.id);
+      if (error instanceof Error && /control decision superseded/i.test(error.message)) controlSuperseded = true;
+      if (controlSuperseded) {
+        this.store.markComplete(event.id, "CANCELLED");
+        logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:${job.attemptCount + 1}:superseded`, content: "An operator control decision superseded this worker; stopped without a terminal callback." }) }); }).catch(() => undefined);
+        await logQueue;
+        return;
+      }
       if (leaseLost) {
         this.store.requeue(event.id);
         logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:${job.attemptCount + 1}:lease-lost`, content: "Run lease was lost; queued the existing run for recovery." }) }); }).catch(() => undefined);
@@ -328,8 +352,8 @@ export class SmithyRunner {
       await logQueue;
       const message = wasCancelled ? "Smithy run cancelled by operator." : `Smithy run failed: ${redact(error instanceof Error ? error.message : "Runner failure")}`;
       await api.request(`/api/tasks/${event.task!.id}/updates`, { method: "POST", body: JSON.stringify({ body: message }) }).catch(() => undefined);
-      if (runId) await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: event.task?.branch ?? null, headSha: null, branchPublished: false, pullRequestUrl: event.task?.pullRequestUrl ?? null, pullRequestTitle: event.task?.pullRequestTitle ?? null, pullRequestState: event.task?.pullRequestState ?? null, status: "FAILED", lastError: redact(error instanceof Error ? error.message : "Runner failure") }) }).catch(() => undefined);
-      if (runId) await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: wasCancelled ? "CANCELLED" : "FAILED", ...(wasCancelled ? {} : { error: redact(error instanceof Error ? error.message : "Runner failure") }) }) }).catch(() => undefined);
+      if (runId) await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: event.task?.branch ?? null, headSha: null, branchPublished: false, pullRequestUrl: event.task?.pullRequestUrl ?? null, pullRequestTitle: event.task?.pullRequestTitle ?? null, pullRequestState: event.task?.pullRequestState ?? null, status: "FAILED", lastError: redact(error instanceof Error ? error.message : "Runner failure"), controlVersion }) }).catch(() => undefined);
+      if (runId && !wasCancelled && controlVersion !== null) await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "FAILED", controlVersion, error: redact(error instanceof Error ? error.message : "Runner failure") }) }).catch(() => undefined);
     } finally {
       this.controllers.delete(event.id);
       this.cancelled.delete(event.id);
