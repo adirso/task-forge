@@ -13,10 +13,11 @@ import { canForceCycle, FORCE_CYCLE_FAILURE_MESSAGE, forceCycleRequestId } from 
 
 type TaskModalTab = "details" | "updates" | "plans" | "agents";
 
-export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete, onRouted }: {
+export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete, onRouted, onPlanApplied }: {
   task: Task | null; initialStatus: TaskStatus; defaultPhaseId: string | null; project: Project; currentUser: User; members: User[]; phases: Phase[]; availableTags: Tag[]; tasks: Task[];
   onClose: () => void; onSave: (input: TaskCreate) => Promise<void>; onDelete: (() => Promise<void>) | null;
   onRouted?: (task: Task) => void;
+  onPlanApplied?: () => Promise<void>;
 }) {
   const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", type: "FEATURE", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: defaultPhaseId, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, tags: [], dependencyIds: [] });
   const [saving, setSaving] = useState(false);
@@ -137,6 +138,12 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
     try {
       const result = await api.decideTaskPlan(task.id, plan.id, { action });
       setPlans((items) => items.map((item) => item.id === plan.id ? result.plan : item));
+      const refreshedPlans = await api.taskPlans(task.id).catch(() => null);
+      if (refreshedPlans) setPlans(refreshedPlans.plans);
+      if (action === "APPROVE" && onPlanApplied) {
+        try { await onPlanApplied(); }
+        catch { setError("Plan approved, but the task list could not be refreshed"); }
+      }
     } catch (err) { setError(err instanceof Error ? err.message : "Could not review the plan"); }
     finally { setReviewingPlan(null); }
   }
@@ -161,6 +168,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const liveProvider = latestProviderLog(agentLogs);
   const runningAgents = runs.filter((run) => run.status === "RUNNING" || run.status === "PENDING").length;
   const canControlRuns = currentUser.kind === "HUMAN" && (currentUser.role === "ADMIN" || currentUser.id === project.ownerId);
+  const tasksById = new Map(tasks.map((candidate) => [candidate.id, candidate]));
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -231,8 +239,14 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
               <p>{plan.summary}</p>
               {plan.risks.length > 0 && <div><strong>Risks</strong><ul>{plan.risks.map((risk) => <li key={risk}>{risk}</li>)}</ul></div>}
               {plan.acceptanceEvidence.length > 0 && <div><strong>Acceptance evidence</strong><ul>{plan.acceptanceEvidence.map((evidence) => <li key={evidence}>{evidence}</li>)}</ul></div>}
-              <div className="plan-items">{plan.items.map((item) => <div key={item.key}><span><strong>{item.title}</strong><small>{item.type} · {item.priority}{item.estimatePoints === null ? "" : ` · ${item.estimatePoints} points`}</small></span>{item.dependencyKeys.length > 0 && <small>Depends on {item.dependencyKeys.join(", ")}</small>}</div>)}</div>
-              {plan.status === "APPROVED" && <small>{Object.keys(plan.createdTaskIds).length} executable task{Object.keys(plan.createdTaskIds).length === 1 ? "" : "s"} created</small>}
+              <div className="plan-items">{plan.items.map((item) => <div key={item.key} className="plan-task-proposal">
+                <div className="plan-task-heading"><span><strong>{item.title}</strong><small>{item.type} · {item.priority}{item.estimatePoints === null ? "" : ` · ${item.estimatePoints} points`}</small></span>{item.dependencyKeys.length > 0 && <small>Depends on {item.dependencyKeys.join(", ")}</small>}</div>
+                <div className="plan-task-review"><p><strong>Description</strong><span>{item.description || "No description provided"}</span></p><p><strong>Definition of Done</strong><span>{item.definitionOfDone || "No Definition of Done provided"}</span></p></div>
+              </div>)}</div>
+              {plan.status === "APPROVED" && <div className="plan-created-tasks"><strong>{Object.keys(plan.createdTaskIds).length} executable task{Object.keys(plan.createdTaskIds).length === 1 ? "" : "s"} created</strong><ul>{Object.entries(plan.createdTaskIds).map(([itemKey, taskId]) => {
+                const createdTask = tasksById.get(taskId);
+                return <li key={itemKey}><span>{itemKey}</span>{createdTask ? <a href={`?view=board&project=${encodeURIComponent(project.key)}&task=${encodeURIComponent(`${project.key}-${createdTask.number}`)}`}>{project.key}-{createdTask.number} · {createdTask.title}</a> : null}<code>{taskId}</code></li>;
+              })}</ul></div>}
               {plan.reviewComment && <p className="plan-review-comment">Review: {plan.reviewComment}</p>}
               {plan.status === "PROPOSED" && canControlRuns && <footer><button type="button" className="button button-danger-quiet" disabled={reviewingPlan === plan.id} onClick={() => void reviewPlan(plan, "REJECT")}>Reject</button><button type="button" className="button button-primary" disabled={reviewingPlan === plan.id} onClick={() => void reviewPlan(plan, "APPROVE")}>Approve &amp; create tasks</button></footer>}
             </article>)}</div> : <div className="task-agents-empty"><span><ListTree /><strong>No implementation plans yet</strong><small>An active agent run can propose a versioned task graph for review.</small></span></div>}

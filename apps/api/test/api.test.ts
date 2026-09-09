@@ -1477,14 +1477,21 @@ test("agent plans are versioned, reviewable, acyclic, and idempotently create ex
   const runToken = credential.json().credential.token as string;
 
   const firstProposal = { sourceRunId: runId, summary: "Initial proposal", requiresApproval: true, risks: ["Migration ordering"], acceptanceEvidence: ["API test passes"], items: [{ key: "schema", title: "Add schema", type: "INFRA", priority: "HIGH", estimatePoints: 2, dependencyKeys: [] }] };
+  const humanProposal = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "human-plan" }, payload: firstProposal });
+  assert.equal(humanProposal.statusCode, 403);
   const proposed = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-1" }, payload: firstProposal });
   assert.equal(proposed.statusCode, 201, proposed.body);
   assert.equal(proposed.json().plan.version, 1);
   assert.equal(proposed.json().plan.status, "PROPOSED");
+  const agentDecision = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans/${proposed.json().plan.id}/decision`, headers: { authorization: `Bearer ${agentToken}` }, payload: { action: "APPROVE" } });
+  assert.equal(agentDecision.statusCode, 403);
   const duplicate = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-1" }, payload: firstProposal });
   assert.equal(duplicate.statusCode, 200, duplicate.body);
   assert.equal(duplicate.json().duplicate, true);
   assert.equal(duplicate.json().plan.id, proposed.json().plan.id);
+  const mismatchedDuplicate = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-1" }, payload: { ...firstProposal, summary: "Different proposal" } });
+  assert.equal(mismatchedDuplicate.statusCode, 409, mismatchedDuplicate.body);
+  assert.match(mismatchedDuplicate.body, /different plan proposal/);
   const rejected = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans/${proposed.json().plan.id}/decision`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { action: "REJECT", comment: "Split the implementation" } });
   assert.equal(rejected.statusCode, 200, rejected.body);
   assert.equal(rejected.json().plan.status, "REJECTED");
@@ -1498,10 +1505,19 @@ test("agent plans are versioned, reviewable, acyclic, and idempotently create ex
   const revised = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-2" }, payload: secondProposal });
   assert.equal(revised.statusCode, 201, revised.body);
   assert.equal(revised.json().plan.version, 2);
+  const alternative = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-3" }, payload: { ...secondProposal, summary: "Alternative proposal", items: [{ key: "single", title: "Implement in one task", dependencyKeys: [] }] } });
+  assert.equal(alternative.statusCode, 201, alternative.body);
+  assert.equal(alternative.json().plan.version, 3);
   const approved = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans/${revised.json().plan.id}/decision`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { action: "APPROVE", comment: "Proceed" } });
   assert.equal(approved.statusCode, 200, approved.body);
   assert.equal(approved.json().plan.status, "APPROVED");
   assert.equal(Object.keys(approved.json().plan.createdTaskIds).length, 2);
+  const superseded = await app.inject({ method: "GET", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${jwtToken}` } });
+  const supersededAlternative = superseded.json().plans.find((plan: { id: string }) => plan.id === alternative.json().plan.id);
+  assert.equal(supersededAlternative.status, "REJECTED");
+  assert.match(supersededAlternative.reviewComment, /Superseded by approved plan v2/);
+  const conflictingApproval = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans/${alternative.json().plan.id}/decision`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { action: "APPROVE" } });
+  assert.equal(conflictingApproval.statusCode, 409, conflictingApproval.body);
   const apiTaskId = approved.json().plan.createdTaskIds.api as string;
   const apiTask = await app.inject({ method: "GET", url: `/api/tasks/${apiTaskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
   assert.equal(apiTask.json().task.parentId, sourceTaskId);
@@ -1510,7 +1526,15 @@ test("agent plans are versioned, reviewable, acyclic, and idempotently create ex
   const duplicateApproval = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans/${revised.json().plan.id}/decision`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { action: "APPROVE" } });
   assert.equal(duplicateApproval.json().duplicate, true);
 
-  const automatic = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-3" }, payload: { sourceRunId: runId, summary: "No human approval required", requiresApproval: false, items: [{ key: "docs", title: "Document the plan", type: "DOCS", dependencyKeys: [] }] } });
+  const automaticSource = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Auto-approved planning", phaseId } });
+  const automaticTaskId = automaticSource.json().task.id as string;
+  const automaticRunResponse = await app.inject({ method: "POST", url: `/api/tasks/${automaticTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  const automaticRunId = automaticRunResponse.json().run.id as string;
+  const automaticClaim = await app.inject({ method: "POST", url: `/api/runs/${automaticRunId}/claim`, headers: { authorization: `Bearer ${agentToken}` }, payload: { leaseMs: 120_000 } });
+  assert.equal(automaticClaim.statusCode, 200, automaticClaim.body);
+  const automaticCredential = await app.inject({ method: "POST", url: `/api/runs/${automaticRunId}/credential`, headers: { authorization: `Bearer ${agentToken}` } });
+  const automaticRunToken = automaticCredential.json().credential.token as string;
+  const automatic = await app.inject({ method: "POST", url: `/api/tasks/${automaticTaskId}/plans`, headers: { authorization: `Bearer ${automaticRunToken}`, "idempotency-key": "plan-callback-auto" }, payload: { sourceRunId: automaticRunId, summary: "No human approval required", requiresApproval: false, items: [{ key: "docs", title: "Document the plan", type: "DOCS", dependencyKeys: [] }] } });
   assert.equal(automatic.statusCode, 201, automatic.body);
   assert.equal(automatic.json().plan.status, "APPROVED");
   assert.equal(Object.keys(automatic.json().plan.createdTaskIds).length, 1);
@@ -1522,6 +1546,6 @@ test("agent plans are versioned, reviewable, acyclic, and idempotently create ex
   assert.deepEqual(plans.json().plans.map((plan: { version: number }) => plan.version), [3, 2, 1]);
   const audits = await db.prepare("SELECT action FROM activity WHERE task_id = ? AND action LIKE 'agent_plan.%' ORDER BY created_at").all(sourceTaskId) as Array<{ action: string }>;
   assert.equal(audits.filter((audit) => audit.action === "agent_plan.proposed").length, 3);
-  assert.equal(audits.filter((audit) => audit.action === "agent_plan.approved").length, 2);
-  assert.equal(audits.filter((audit) => audit.action === "agent_plan.rejected").length, 1);
+  assert.equal(audits.filter((audit) => audit.action === "agent_plan.approved").length, 1);
+  assert.equal(audits.filter((audit) => audit.action === "agent_plan.rejected").length, 2);
 });

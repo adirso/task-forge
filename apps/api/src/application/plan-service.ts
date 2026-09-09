@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { AgentPlanDecision, AgentPlanProposal } from "@taskforge/contracts";
 import { ConflictError, ForbiddenError, NotFoundError } from "./errors.js";
 import type { RequestContext, TokenScope } from "./context.js";
@@ -25,7 +26,18 @@ export class AgentPlanApplicationService {
       if (run.status !== "RUNNING" || run.controlState !== "ACTIVE" || run.leaseOwner !== context.actor.userId) throw new ConflictError("Only the current run lease owner can propose a plan");
       await repositories.plans.lockTask(task.id);
       const duplicate = await repositories.plans.findByIdempotency(input.sourceRunId, idempotencyKey);
-      if (duplicate) return { plan: duplicate, duplicate: true };
+      if (duplicate) {
+        const original: AgentPlanProposal = {
+          sourceRunId: duplicate.sourceRunId,
+          summary: duplicate.summary,
+          risks: duplicate.risks,
+          acceptanceEvidence: duplicate.acceptanceEvidence,
+          requiresApproval: duplicate.requiresApproval,
+          items: duplicate.items,
+        };
+        if (!isDeepStrictEqual(original, input)) throw new ConflictError("Idempotency key was already used for a different plan proposal");
+        return { plan: duplicate, duplicate: true };
+      }
 
       const now = this.now();
       const plan: AgentPlanEntity = {
@@ -44,6 +56,7 @@ export class AgentPlanApplicationService {
     return this.unitOfWork.run(async (repositories) => {
       const { task, project } = await this.authorizeTask(repositories, context, taskId);
       if (context.actor.kind !== "HUMAN" || (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId)) throw new ForbiddenError("Only the project owner or an administrator can review plans");
+      await repositories.plans.lockTask(task.id);
       const plan = await repositories.plans.findById(planId);
       if (!plan || plan.taskId !== task.id) throw new NotFoundError("Agent plan");
       const desired = input.action === "APPROVE" ? "APPROVED" : "REJECTED";
@@ -59,7 +72,21 @@ export class AgentPlanApplicationService {
 
   private async apply(repositories: RepositorySet, sourceTask: TaskEntity, project: ProjectEntity, plan: AgentPlanEntity, reviewerId: string, comment: string | null) {
     const reviewedAt = this.now();
+    const siblings = (await repositories.plans.listForTask(sourceTask.id)).filter((candidate) => candidate.id !== plan.id);
+    const approvedSibling = siblings.find((candidate) => candidate.status === "APPROVED");
+    if (approvedSibling) throw new ConflictError(`Plan v${approvedSibling.version} is already approved for this task`);
     if (!(await repositories.plans.decide(plan.id, "PROPOSED", { status: "APPROVED", createdTaskIds: {}, reviewedById: reviewerId, reviewComment: comment, reviewedAt }))) throw new ConflictError("Plan changed while it was being reviewed");
+    for (const sibling of siblings.filter((candidate) => candidate.status === "PROPOSED")) {
+      const superseded = await repositories.plans.decide(sibling.id, "PROPOSED", {
+        status: "REJECTED",
+        createdTaskIds: {},
+        reviewedById: reviewerId,
+        reviewComment: `Superseded by approved plan v${plan.version}`,
+        reviewedAt,
+      });
+      if (!superseded) throw new ConflictError("A sibling plan changed while this plan was being approved");
+      await repositories.activity.record({ projectId: project.id, taskId: sourceTask.id, actorId: reviewerId, action: "agent_plan.rejected", metadata: { planId: sibling.id, version: sibling.version, reason: "superseded", supersededByPlanId: plan.id, supersededByVersion: plan.version } });
+    }
     const createdTaskIds: Record<string, string> = {};
     for (const item of plan.items) {
       const allocation = await repositories.tasks.allocateNumber(sourceTask.projectId, project.defaultStatus);
