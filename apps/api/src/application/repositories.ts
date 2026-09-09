@@ -1,3 +1,4 @@
+import type { AgentCapabilityProfile } from "@taskforge/contracts";
 import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
@@ -7,6 +8,7 @@ export interface UserRepository {
   list(): Promise<UserEntity[]>;
   saveProfile(id: string, input: { name: string; email: string }): Promise<UserEntity>;
   updateAvatar(id: string, avatarUrl: string | null): Promise<UserEntity>;
+  updateCapabilityProfile(id: string, profile: AgentCapabilityProfile): Promise<UserEntity>;
   getWebhookConfiguration(id: string): Promise<AgentWebhookConfiguration | null>;
   updateWebhookConfiguration(id: string, input: { webhookUrl?: string | null; secretCiphertext?: string; secretVersion?: number }): Promise<UserEntity>;
   createAgent(input: { id: string; name: string; email: string; createdAt: string }): Promise<UserEntity>;
@@ -59,6 +61,8 @@ export interface TaskRepository {
   deleteByPhase(phaseId: string): Promise<number>;
   create(input: TaskEntity): Promise<TaskEntity>;
   update(id: string, input: Partial<TaskEntity>): Promise<TaskEntity>;
+  activeAssignmentCounts(agentIds: string[]): Promise<Map<string, number>>;
+  assignIfCapacity(taskId: string, agentId: string, maxConcurrency: number): Promise<"ASSIGNED" | "ALREADY_ASSIGNED" | "TASK_TAKEN" | "AT_CAPACITY">;
   delete(id: string): Promise<void>;
 }
 

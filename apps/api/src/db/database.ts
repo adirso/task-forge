@@ -699,6 +699,14 @@ export const migrations: readonly Migration[] = [
       if (dialect === "sqlite") await executor.run("CREATE INDEX idx_run_interventions_run ON agent_run_interventions(run_id, created_at)", []);
     },
   },
+  {
+    version: "0028_agent_capability_profiles",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE users ADD COLUMN capability_profile JSON NULL"
+        : "ALTER TABLE users ADD COLUMN capability_profile TEXT NULL", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

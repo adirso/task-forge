@@ -1,4 +1,4 @@
-import type { AgentRunControlState, AgentRunInterventionAction, AgentWorkflow, DependencyResolutionStatus, ProjectMergeTarget, ProjectReviewPolicy, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
+import type { AgentCapabilityProfile, AgentRunControlState, AgentRunInterventionAction, AgentWorkflow, DependencyResolutionStatus, ProjectMergeTarget, ProjectReviewPolicy, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
 
 export interface UserEntity {
   id: string;
@@ -9,6 +9,8 @@ export interface UserEntity {
   avatarUrl: string | null;
   webhookUrl?: string | null;
   webhookSecretConfigured?: boolean;
+  capabilityProfile?: AgentCapabilityProfile | null;
+  capabilityProfileError?: string | null;
   createdAt: string;
 }
 

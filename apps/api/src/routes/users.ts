@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { agentCreateSchema, agentWebhookSchema, avatarUploadSchema, profileUpdateSchema, tokenCreateSchema, webhookDeliveryQuerySchema } from "@taskforge/contracts";
+import { agentCapabilityProfileSchema, agentCreateSchema, agentWebhookSchema, avatarUploadSchema, profileUpdateSchema, tokenCreateSchema, webhookDeliveryQuerySchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { UserApplicationService } from "../application/resource-services.js";
@@ -49,6 +49,7 @@ export async function userRoutes(app: FastifyInstance) {
   app.post<{ Params: UserParams }>("/:id/avatar", { schema: { tags: ["Users"], summary: "Upload a profile picture" } }, async (request) => { const body = avatarUploadSchema.parse(request.body); return { user: await service.updateAvatar(context(request), request.params.id, `data:${body.mimeType};base64,${body.data.replace(/^data:[^;]+;base64,/, "")}`) }; });
   app.delete<{ Params: UserParams }>("/:id/avatar", { schema: { tags: ["Users"], summary: "Remove a profile picture" } }, async (request) => ({ user: await service.updateAvatar(context(request), request.params.id, null) }));
   app.post("/agents", { schema: { tags: ["Agents"], summary: "Create an agent identity" } }, async (request, reply) => reply.code(201).send({ user: await service.createAgent(context(request), agentCreateSchema.parse(request.body)) }));
+  app.patch<{ Params: UserParams }>("/:id/capabilities", { schema: { tags: ["Agents"], summary: "Update an agent capability profile" } }, async (request) => ({ user: await service.updateAgentCapabilities(context(request), request.params.id, agentCapabilityProfileSchema.parse(request.body)) }));
   app.delete<{ Params: UserParams }>("/:id", { schema: { tags: ["Agents"], summary: "Delete an agent identity" } }, async (request, reply) => { await service.deleteAgent(context(request), request.params.id); return reply.code(204).send(); });
   app.post<{ Params: UserParams }>("/:id/tokens", { schema: { tags: ["Agents"], summary: "Issue an API token" } }, async (request, reply) => { const parsed = tokenCreateSchema.parse(request.body); return reply.code(201).send({ ...(await service.issueToken(context(request), request.params.id, parsed)), warning: "Copy this token now, or reveal it later from Settings." }); });
   app.get<{ Params: UserParams }>("/:id/tokens", { schema: { tags: ["Agents"], summary: "List token metadata" } }, async (request) => ({ tokens: await service.listTokens(context(request), request.params.id) }));

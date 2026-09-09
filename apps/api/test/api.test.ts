@@ -122,6 +122,92 @@ test("human can log in and create a project", async () => {
   assert.equal(deletedEmpty.statusCode, 204);
 });
 
+test("agent capability profiles drive deterministic, auditable, capacity-safe routing", async (context) => {
+  const suffix = randomUUID().slice(0, 6);
+  const projectResponse = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `R${suffix}`.toUpperCase(), name: "Capability routing", description: "Agent routing integration", repoUrl: "https://github.com/example/capability-routing.git", color: "#0052CC" } });
+  assert.equal(projectResponse.statusCode, 201, projectResponse.body);
+  const routingProjectId = projectResponse.json().project.id as string;
+  context.after(async () => { await app.inject({ method: "DELETE", url: `/api/projects/${routingProjectId}`, headers: { authorization: `Bearer ${jwtToken}` } }); });
+  const createAgent = async (name: string) => {
+    const response = await app.inject({ method: "POST", url: "/api/users/agents", headers: { authorization: `Bearer ${jwtToken}` }, payload: { name } });
+    assert.equal(response.statusCode, 201, response.body);
+    return response.json().user.id as string;
+  };
+  const alphaId = await createAgent(`Alpha router ${suffix}`);
+  const betaId = await createAgent(`Beta router ${suffix}`);
+  const pausedId = await createAgent(`Paused router ${suffix}`);
+  const profile = { provider: "fake", model: "deterministic", skills: ["Security", "TypeScript", "security"], taskTypes: ["BUG", "FEATURE"], repositories: ["GITHUB.COM/EXAMPLE/CAPABILITY-ROUTING"], maxConcurrency: 1, availability: "AVAILABLE", health: "HEALTHY" };
+  for (const id of [alphaId, betaId]) {
+    const saved = await app.inject({ method: "PATCH", url: `/api/users/${id}/capabilities`, headers: { authorization: `Bearer ${jwtToken}` }, payload: profile });
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.deepEqual(saved.json().user.capabilityProfile.skills, ["security", "typescript"]);
+    await app.inject({ method: "POST", url: `/api/projects/${routingProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: id, role: "MEMBER" } });
+  }
+  const pausedProfile = { ...profile, taskTypes: ["DOCS"], availability: "PAUSED" };
+  assert.equal((await app.inject({ method: "PATCH", url: `/api/users/${pausedId}/capabilities`, headers: { authorization: `Bearer ${jwtToken}` }, payload: pausedProfile })).statusCode, 200);
+  await app.inject({ method: "POST", url: `/api/projects/${routingProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: pausedId, role: "MEMBER" } });
+  await app.inject({ method: "POST", url: `/api/projects/${routingProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: memberId, role: "MEMBER" } });
+
+  const invalid = await app.inject({ method: "PATCH", url: `/api/users/${alphaId}/capabilities`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { ...profile, maxConcurrency: 0 } });
+  assert.equal(invalid.statusCode, 400);
+  const invalidRepository = await app.inject({ method: "PATCH", url: `/api/users/${alphaId}/capabilities`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { ...profile, repositories: ["https://secret:token@github.com/example/capability-routing"] } });
+  assert.equal(invalidRepository.statusCode, 400);
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  const memberJwt = memberLogin.json().token as string;
+  assert.equal((await app.inject({ method: "PATCH", url: `/api/users/${alphaId}/capabilities`, headers: { authorization: `Bearer ${memberJwt}` }, payload: profile })).statusCode, 403);
+
+  const createTask = async (title: string, type: string = "FEATURE") => {
+    const response = await app.inject({ method: "POST", url: `/api/projects/${routingProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title, type } });
+    assert.equal(response.statusCode, 201, response.body);
+    return response.json().task.id as string;
+  };
+  const deterministicId = await createTask("Deterministic selection");
+  const deterministic = await app.inject({ method: "POST", url: `/api/tasks/${deterministicId}/route`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { requiredSkills: ["SECURITY"] } });
+  assert.equal(deterministic.statusCode, 200, deterministic.body);
+  assert.equal(deterministic.json().selectedAgentId, alphaId);
+  assert.equal(deterministic.json().duplicate, false);
+  const duplicate = await app.inject({ method: "POST", url: `/api/tasks/${deterministicId}/route`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { requiredSkills: ["security"] } });
+  assert.equal(duplicate.statusCode, 200, duplicate.body);
+  assert.equal(duplicate.json().duplicate, true);
+  await app.inject({ method: "PATCH", url: `/api/tasks/${deterministicId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "DONE" } });
+
+  const duplicateConcurrentId = await createTask("Concurrent idempotent route");
+  const duplicateRoutes = await Promise.all([1, 2].map(() => app.inject({ method: "POST", url: `/api/tasks/${duplicateConcurrentId}/route`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { requiredSkills: ["typescript"] } })));
+  assert.ok(duplicateRoutes.every((response) => response.statusCode === 200), duplicateRoutes.map((response) => response.body).join("\n"));
+  assert.equal(new Set(duplicateRoutes.map((response) => response.json().selectedAgentId)).size, 1, "concurrent retries reuse the same assignment");
+  assert.deepEqual(duplicateRoutes.map((response) => response.json().duplicate).sort(), [false, true]);
+  await app.inject({ method: "PATCH", url: `/api/tasks/${duplicateConcurrentId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { status: "DONE" } });
+
+  const concurrentIds = await Promise.all([createTask("Concurrent route one"), createTask("Concurrent route two")]);
+  const routed = await Promise.all(concurrentIds.map((id) => app.inject({ method: "POST", url: `/api/tasks/${id}/route`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { requiredSkills: ["typescript"] } })));
+  assert.ok(routed.every((response) => response.statusCode === 200), routed.map((response) => response.body).join("\n"));
+  assert.equal(new Set(routed.map((response) => response.json().selectedAgentId)).size, 2, "concurrent routing must not exceed per-agent capacity");
+
+  const docsId = await createTask("No automatic capability", "DOCS");
+  await db.prepare("UPDATE users SET capability_profile = ? WHERE id = ?").run(JSON.stringify({ provider: "invalid" }), pausedId);
+  const noMatch = await app.inject({ method: "POST", url: `/api/tasks/${docsId}/route`, headers: { authorization: `Bearer ${jwtToken}` }, payload: {} });
+  assert.equal(noMatch.statusCode, 400, noMatch.body);
+  assert.match(noMatch.json().error, /No available agent matches repository github\.com\/example\/capability-routing, task type DOCS.*operator override/);
+  assert.match(noMatch.json().error, /1 stored agent profile is invalid.*saved again by an administrator/);
+  const denied = await app.inject({ method: "POST", url: `/api/tasks/${docsId}/route`, headers: { authorization: `Bearer ${memberJwt}` }, payload: { overrideAgentId: pausedId } });
+  assert.equal(denied.statusCode, 403);
+  const overridden = await app.inject({ method: "POST", url: `/api/tasks/${docsId}/route`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { overrideAgentId: pausedId } });
+  assert.equal(overridden.statusCode, 200, overridden.body);
+  assert.equal(overridden.json().override, true);
+
+  const activity = await app.inject({ method: "GET", url: `/api/activity?projectId=${routingProjectId}&limit=100`, headers: { authorization: `Bearer ${jwtToken}` } });
+  const actions = activity.json().activity.map((event: { action: string }) => event.action);
+  assert.ok(actions.includes("task.auto_routed"));
+  assert.ok(actions.includes("task.routing_overridden"));
+  const ops = await app.inject({ method: "GET", url: "/api/users/agents/ops", headers: { authorization: `Bearer ${jwtToken}` } });
+  const alphaOps = ops.json().agents.find((agent: { id: string }) => agent.id === alphaId);
+  assert.equal(alphaOps.capabilityProfile.provider, "fake");
+  assert.equal(alphaOps.openTaskCount, 1, "Agent Ops capacity uses the same non-terminal workload as routing");
+  const invalidOps = ops.json().agents.find((agent: { id: string }) => agent.id === pausedId);
+  assert.equal(invalidOps.capabilityProfile, null);
+  assert.match(invalidOps.capabilityProfileError, /invalid.*save it again/i);
+});
+
 test("deleting a phase with tasks requires move or delete disposition", async () => {
   const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `PHD${randomUUID().slice(0, 4)}`, name: "Phase delete", description: "Disposition", color: "#654321" } });
   const disposeProjectId = createdProject.json().project.id as string;

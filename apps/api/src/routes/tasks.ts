@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { taskClaimSchema, taskCreateSchema, taskDependencyUpdateSchema, taskStatusSchema, taskTagNameSchema, taskTypeSchema, taskUpdateCreateSchema, taskUpdateSchema } from "@taskforge/contracts";
+import { agentRoutingSchema, taskClaimSchema, taskCreateSchema, taskDependencyUpdateSchema, taskStatusSchema, taskTagNameSchema, taskTypeSchema, taskUpdateCreateSchema, taskUpdateSchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { TaskApplicationService } from "../application/task-service.js";
@@ -27,6 +27,7 @@ export async function taskRoutes(app: FastifyInstance) {
   app.get<{ Params: TaskParams }>("/tasks/:id", { schema: { tags: ["Tasks"], summary: "Get a task" } }, async (request) => ({ task: taskResponse(await service.get(context(request), request.params.id)) }));
   app.patch<{ Params: TaskParams }>("/tasks/:id", { schema: { tags: ["Tasks"], summary: "Update a task" } }, async (request, reply) => { const parsed = taskUpdateSchema.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ error: "Validation failed", issues: parsed.error.issues }); return { task: taskResponse(await service.update(context(request), request.params.id, parsed.data)) }; });
   app.post<{ Params: TaskParams }>("/tasks/:id/dependencies", { schema: { tags: ["Tasks"], summary: "Replace a task's dependencies" } }, async (request, reply) => { const parsed = taskDependencyUpdateSchema.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ error: "Validation failed", issues: parsed.error.issues }); return { task: taskResponse(await service.update(context(request), request.params.id, parsed.data)) }; });
+  app.post<{ Params: TaskParams }>("/tasks/:id/route", { schema: { tags: ["Tasks"], summary: "Route a task to a capable agent" } }, async (request, reply) => { const parsed = agentRoutingSchema.safeParse(request.body ?? {}); if (!parsed.success) return reply.code(400).send({ error: "Validation failed", issues: parsed.error.issues }); const result = await service.routeTask(context(request), request.params.id, parsed.data); return { ...result, task: taskResponse(result.task) }; });
   app.delete<{ Params: TaskParams }>("/tasks/:id", { schema: { tags: ["Tasks"], summary: "Delete a task and its subtasks" } }, async (request, reply) => { await service.delete(context(request), request.params.id); return reply.code(204).send(); });
   app.get<{ Params: ProjectParams }>("/projects/:projectId/tags", { schema: { tags: ["Tasks"], summary: "List reusable project tags" } }, async (request) => ({ tags: await service.listTags(projectContext(request, request.params.projectId)) }));
   app.post<{ Params: ProjectParams }>("/projects/:projectId/tasks/claim", { schema: { tags: ["Tasks"], summary: "Atomically claim the next unassigned task in a project" } }, async (request, reply) => {

@@ -166,6 +166,46 @@ test.describe("workspace browser smoke", () => {
     await call("DELETE", `/api/projects/${project.id}`, adminToken!);
   });
 
+  test("operators edit capability profiles and auto-route work", async ({ page, request }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const adminToken = await page.evaluate(() => localStorage.getItem("taskforge_token"));
+    expect(adminToken).toBeTruthy();
+    const suffix = String(Date.now());
+    const agentResponse = await request.post("/api/users/agents", { headers: { authorization: `Bearer ${adminToken}` }, data: { name: `Routing agent ${suffix}` } });
+    expect(agentResponse.ok()).toBeTruthy();
+    const agent = (await agentResponse.json()).user;
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Create project", exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Settings" }).first().click();
+    await page.getByRole("button", { name: "Agents" }).click();
+    await page.getByRole("button", { name: new RegExp(`Routing agent ${suffix}`) }).click();
+    await expect(page.getByText("Routing capabilities", { exact: true })).toBeVisible();
+    await page.getByLabel("Provider").fill("fake-github");
+    await page.getByLabel("Model").fill("deterministic-v1");
+    await page.getByLabel("Skills").fill("typescript, browser");
+    await page.getByLabel("Repository access").fill("github.com/example/browser-routing");
+    await page.getByLabel("Health").selectOption("HEALTHY");
+    await page.getByRole("button", { name: "Save capabilities" }).click();
+    await expect(page.getByText("Capability profile saved")).toBeVisible();
+
+    const projectResponse = await request.post("/api/projects", { headers: { authorization: `Bearer ${adminToken}` }, data: { key: `A${Date.now() % 1000000}`, name: `Routing workspace ${suffix}`, description: "Browser routing coverage", repoUrl: "https://github.com/example/browser-routing", color: "#6554C0" } });
+    expect(projectResponse.ok()).toBeTruthy();
+    const project = (await projectResponse.json()).project;
+    expect((await request.post(`/api/projects/${project.id}/members`, { headers: { authorization: `Bearer ${adminToken}` }, data: { userId: agent.id, role: "MEMBER" } })).ok()).toBeTruthy();
+    const taskResponse = await request.post(`/api/projects/${project.id}/tasks`, { headers: { authorization: `Bearer ${adminToken}` }, data: { title: "Browser auto-route task", type: "FEATURE" } });
+    expect(taskResponse.ok()).toBeTruthy();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Create project", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: new RegExp(`Routing workspace ${suffix}.*Drag to reorder`) }).click();
+    await page.getByRole("button", { name: /Browser auto-route task/ }).click();
+    await page.getByLabel("Required agent skills").fill("browser");
+    await page.getByRole("button", { name: "Auto-route", exact: true }).click();
+    await expect(page.getByRole("dialog").locator("label").filter({ hasText: "Assignee" }).locator("select")).toHaveValue(agent.id);
+    await request.delete(`/api/projects/${project.id}`, { headers: { authorization: `Bearer ${adminToken}` } });
+  });
+
   test("shows dependency blockers and configures cancellation semantics", async ({ page }) => {
     await signIn(page);
     const projectKey = `D${Date.now() % 1000000}`;

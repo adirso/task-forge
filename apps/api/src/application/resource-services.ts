@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, TASK_STATUSES, agentWorkflowSchema, phaseBranchName, projectReviewPolicySchema } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, TASK_STATUSES, agentWorkflowSchema, phaseBranchName, projectReviewPolicySchema, type AgentCapabilityProfile } from "@taskforge/contracts";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { PhaseEntity, ProjectEntity, UserEntity } from "./models.js";
@@ -118,6 +118,7 @@ export class UserApplicationService implements UserService {
   async list(context: RequestContext) { if (context.actor.role !== "ADMIN") throw new ForbiddenError("Administrator access required"); return this.unitOfWork.run((repositories) => repositories.users.list()); }
   async updateProfile(context: RequestContext, input: { name: string; email: string }) { if (context.actor.kind !== "HUMAN") throw new ValidationError("Agent profiles are managed by administrators"); return this.unitOfWork.run((repositories) => repositories.users.saveProfile(context.actor.userId, input)); }
   async updateAvatar(context: RequestContext, userId: string, avatarUrl: string | null) { if (context.actor.userId !== userId && context.actor.role !== "ADMIN") throw new ForbiddenError("Administrator access required"); if (avatarUrl !== null) { const match = avatarUrl.match(/^data:(image\/(?:png|jpeg|jpg|gif|webp));base64,([A-Za-z0-9+/=]+)$/i); if (!match || Buffer.byteLength(match[2]!, "base64") > 2 * 1024 * 1024) throw new ValidationError("Profile pictures must be valid images smaller than 2 MB"); } return this.unitOfWork.run(async (repositories) => { if (!(await repositories.users.findById(userId))) throw new NotFoundError("User"); return repositories.users.updateAvatar(userId, avatarUrl); }); }
+  async updateAgentCapabilities(context: RequestContext, agentId: string, profile: AgentCapabilityProfile) { if (context.actor.role !== "ADMIN") throw new ForbiddenError("Administrator access required"); return this.unitOfWork.run(async (repositories) => { const agent = await repositories.users.findById(agentId); if (!agent) throw new NotFoundError("Agent"); if (agent.kind !== "AGENT") throw new ValidationError("Capability profiles can only be assigned to agent identities"); return repositories.users.updateCapabilityProfile(agentId, profile); }); }
   async createAgent(context: RequestContext, input: { name: string; email?: string }) { if (context.actor.role !== "ADMIN") throw new ForbiddenError("Administrator access required"); const id = this.newId(); return this.unitOfWork.run((repositories) => repositories.users.createAgent({ id, name: input.name, email: input.email ?? `${id.slice(0, 8)}@agents.taskforge.local`, createdAt: this.now() })); }
   async updateAgentWebhook(context: RequestContext, agentId: string, webhookUrl: string | null) { if (context.actor.role !== "ADMIN") throw new ForbiddenError("Administrator access required"); return this.unitOfWork.run(async (repositories) => { const agent = await repositories.users.findById(agentId); if (!agent) throw new NotFoundError("Agent"); if (agent.kind !== "AGENT") throw new ValidationError("Only agent identities can have a webhook URL"); const configuration = await repositories.users.getWebhookConfiguration(agentId); if (webhookUrl && !configuration?.secretCiphertext) { const webhookSecret = this.webhookSecretAdapter.create(); const user = await repositories.users.updateWebhookConfiguration(agentId, { webhookUrl, secretCiphertext: this.webhookSecretAdapter.encrypt(webhookSecret), secretVersion: 1 }); return { user, webhookSecret }; } return { user: await repositories.users.updateWebhookConfiguration(agentId, { webhookUrl }) }; }); }
   async rotateAgentWebhookSecret(context: RequestContext, agentId: string) { if (context.actor.role !== "ADMIN") throw new ForbiddenError("Administrator access required"); return this.unitOfWork.run(async (repositories) => { const agent = await repositories.users.findById(agentId); if (!agent) throw new NotFoundError("Agent"); if (agent.kind !== "AGENT") throw new ValidationError("Only agent identities can have a webhook signing secret"); const configuration = await repositories.users.getWebhookConfiguration(agentId); const webhookSecret = this.webhookSecretAdapter.create(); const user = await repositories.users.updateWebhookConfiguration(agentId, { secretCiphertext: this.webhookSecretAdapter.encrypt(webhookSecret), secretVersion: (configuration?.secretVersion ?? 0) + 1 }); return { user, webhookSecret }; }); }
@@ -132,9 +133,10 @@ export class UserApplicationService implements UserService {
     return this.unitOfWork.run(async (repositories) => {
       const agents = (await repositories.users.list()).filter((user) => user.kind === "AGENT");
       const agentIds = agents.map((agent) => agent.id);
-      const [tasks, activity] = await Promise.all([
+      const [tasks, activity, activeAssignmentCounts] = await Promise.all([
         repositories.reporting.listAgentInProgressTasks(agentIds),
         repositories.reporting.listAgentLastActive(agentIds),
+        repositories.tasks.activeAssignmentCounts(agentIds),
       ]);
       const tasksByAgent = new Map<string, typeof tasks>();
       for (const task of tasks) {
@@ -153,9 +155,11 @@ export class UserApplicationService implements UserService {
           role: agent.role,
           avatarUrl: agent.avatarUrl,
           webhookUrl: agent.webhookUrl ?? null,
+          capabilityProfile: agent.capabilityProfile ?? null,
+          capabilityProfileError: agent.capabilityProfileError ?? null,
           createdAt: agent.createdAt,
           lastActiveAt: lastActiveByAgent.get(agent.id) ?? null,
-          openTaskCount: inProgressTasks.length,
+          openTaskCount: activeAssignmentCounts.get(agent.id) ?? 0,
           stuckTaskCount: inProgressTasks.filter((task) => task.updatedAt < cutoff).length,
           inProgressTasks: inProgressTasks.map((task) => ({ id: task.id, title: task.title, number: task.number, projectId: task.projectId, projectName: task.projectName, projectKey: task.projectKey, updatedAt: task.updatedAt, isStuck: task.updatedAt < cutoff })),
         };

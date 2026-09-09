@@ -70,7 +70,38 @@ export const DEFAULT_AGENT_WORKFLOW: AgentWorkflow = {
   reReview: "RE_REVIEW",
 };
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
-export const taskTypeSchema = z.enum(["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
+export const TASK_TYPES = ["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"] as const;
+export const taskTypeSchema = z.enum(TASK_TYPES);
+export const agentAvailabilitySchema = z.enum(["AVAILABLE", "PAUSED"]);
+export const agentHealthSchema = z.enum(["HEALTHY", "DEGRADED", "OFFLINE", "UNKNOWN"]);
+const normalizedCapabilityList = (maximum: number) => z.array(z.string().trim().min(1).max(160)).max(maximum)
+  .transform((values) => [...new Set(values.map((value) => value.toLowerCase()))].sort());
+const repositoryCapabilitySchema = z.string().trim().min(1).max(300).superRefine((value, context) => {
+  if (value === "*") return;
+  if (/^[^\s/:]+\/[^\s/]+(?:\/[^\s/]+)?$/.test(value) || /^git@[^:]+:[^\s/]+\/[^\s/]+(?:\.git)?$/.test(value)) return;
+  try {
+    const url = new URL(value);
+    if (["http:", "https:", "ssh:"].includes(url.protocol) && !url.username && !url.password && url.hostname && url.pathname.split("/").filter(Boolean).length >= 2) return;
+  } catch { /* Report one stable validation issue below. */ }
+  context.addIssue({ code: "custom", message: "Repositories must be *, owner/repository, host/owner/repository, or a credential-free repository URL" });
+});
+export const agentCapabilityProfileSchema = z.object({
+  provider: z.string().trim().min(1).max(64),
+  model: z.string().trim().min(1).max(120),
+  skills: normalizedCapabilityList(50),
+  taskTypes: z.array(taskTypeSchema).min(1).max(TASK_TYPES.length)
+    .refine((values) => new Set(values).size === values.length, "Task types must be unique")
+    .transform((values) => TASK_TYPES.filter((value) => values.includes(value))),
+  repositories: z.array(repositoryCapabilitySchema).min(1, "At least one repository is required").max(50)
+    .transform((values) => [...new Set(values.map((value) => value.toLowerCase()))].sort()),
+  maxConcurrency: z.number().int().min(1).max(32),
+  availability: agentAvailabilitySchema,
+  health: agentHealthSchema,
+});
+export const agentRoutingSchema = z.object({
+  requiredSkills: normalizedCapabilityList(20).optional().default([]),
+  overrideAgentId: z.string().uuid().optional(),
+});
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
 export const agentRunControlStateSchema = z.enum(["ACTIVE", "PAUSED", "WAITING_FOR_INPUT", "HUMAN_TAKEOVER"]);
 export const agentRunInterventionActionSchema = z.enum(["PAUSE", "RESUME", "CANCEL", "RETRY", "REASSIGN", "REQUEST_INPUT", "ANSWER", "TAKEOVER"]);
@@ -244,6 +275,11 @@ export const agentCreateSchema = z.object({
   email: z.string().email().optional(),
 });
 
+export type AgentAvailability = z.infer<typeof agentAvailabilitySchema>;
+export type AgentHealth = z.infer<typeof agentHealthSchema>;
+export type AgentCapabilityProfile = z.infer<typeof agentCapabilityProfileSchema>;
+export type AgentRoutingRequest = z.infer<typeof agentRoutingSchema>;
+
 export const agentWebhookSchema = z.object({
   webhookUrl: z.string().url().nullable().superRefine((value, context) => {
     if (!value) return;
@@ -372,6 +408,8 @@ export interface User {
   avatarUrl: string | null;
   webhookUrl?: string | null;
   webhookSecretConfigured?: boolean;
+  capabilityProfile?: AgentCapabilityProfile | null;
+  capabilityProfileError?: string | null;
   createdAt: string;
 }
 
@@ -583,6 +621,8 @@ export interface AgentOpsEntry {
   role: UserRole;
   avatarUrl: string | null;
   webhookUrl: string | null;
+  capabilityProfile: AgentCapabilityProfile | null;
+  capabilityProfileError: string | null;
   createdAt: string;
   lastActiveAt: string | null;
   openTaskCount: number;
