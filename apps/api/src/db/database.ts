@@ -716,6 +716,21 @@ export const migrations: readonly Migration[] = [
       if (dialect === "sqlite") await executor.run("CREATE INDEX idx_agent_plans_task ON agent_plans(task_id, version)", []);
     },
   },
+  {
+    version: "0030_agent_context_packs",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE agent_runs ADD COLUMN context_pack_version INT NOT NULL DEFAULT 0"
+        : "ALTER TABLE agent_runs ADD COLUMN context_pack_version INTEGER NOT NULL DEFAULT 0", []);
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE agent_runs ADD COLUMN context_pack_fingerprint CHAR(64) NULL"
+        : "ALTER TABLE agent_runs ADD COLUMN context_pack_fingerprint TEXT NULL", []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_context_packs (id CHAR(36) PRIMARY KEY, run_id CHAR(36) NOT NULL, task_id CHAR(36) NOT NULL, project_id CHAR(36) NOT NULL, version INT NOT NULL, fingerprint CHAR(64) NOT NULL, content JSON NOT NULL, refreshed_from_version INT NULL, refresh_reason VARCHAR(24) NOT NULL, created_by_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_agent_context_packs_run_version (run_id, version), INDEX idx_agent_context_packs_task (task_id, created_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (created_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_context_packs (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, version INTEGER NOT NULL, fingerprint TEXT NOT NULL, content TEXT NOT NULL, refreshed_from_version INTEGER NULL, refresh_reason TEXT NOT NULL CHECK (refresh_reason IN ('INITIAL','EXPLICIT_REFRESH')), created_by_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE (run_id, version))", []);
+      if (dialect === "sqlite") await executor.run("CREATE INDEX idx_agent_context_packs_task ON agent_context_packs(task_id, created_at)", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

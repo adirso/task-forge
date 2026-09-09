@@ -1,5 +1,5 @@
 import type { AgentCapabilityProfile } from "@taskforge/contracts";
-import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentContextPackEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -153,6 +153,12 @@ export interface AgentRunRepository {
   applyIntervention(id: string, expectedVersion: number, update: Partial<Pick<AgentRunEntity, "status" | "controlState" | "assignedAgentId" | "inputRequest" | "inputResponse" | "inputRequestedAt" | "inputAnsweredAt" | "takeoverById" | "lastError" | "completedAt">>, now: string): Promise<boolean>;
   recordIntervention(input: AgentRunInterventionEntity): Promise<void>;
 }
+export interface AgentContextPackRepository {
+  findCurrent(runId: string): Promise<AgentContextPackEntity | null>;
+  listForRun(runId: string): Promise<AgentContextPackEntity[]>;
+  nextVersion(runId: string): Promise<number>;
+  create(input: AgentContextPackEntity): Promise<AgentContextPackEntity>;
+}
 export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; findPublishedByTaskHead(taskId: string, headSha: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
 export interface AgentPlanRepository {
   lockTask(taskId: string): Promise<void>;
@@ -206,6 +212,7 @@ export interface RepositorySet {
   tokens: ApiTokenRepository;
   search: SearchRepository;
   runs: AgentRunRepository;
+  contextPacks: AgentContextPackRepository;
   gates: TaskGateRepository;
   findings: TaskFindingRepository;
   handoffs: AgentHandoffRepository;

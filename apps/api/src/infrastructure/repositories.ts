@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentCapabilityProfileSchema, agentWorkflowSchema, dependencyResolutionStatusesSchema, projectReviewPolicySchema, type TaskStatus } from "@taskforge/contracts";
-import type { ActivityEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
-import type { AgentHandoffRepository, AgentLogRepository, AgentPlanRepository, AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, DeliveryMonitorRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskFindingRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
+import type { ActivityEntity, AgentContextPackEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
+import type { AgentContextPackRepository, AgentHandoffRepository, AgentLogRepository, AgentPlanRepository, AgentRunRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, DeliveryMonitorRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskFindingRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 import { decodeCursor, toPage } from "./pagination.js";
 
@@ -514,13 +514,13 @@ function createWebhookDeliveryRepository(db: DatabasePort): WebhookDeliveryRepos
 }
 
 function toAgentRun(row: Record<string, unknown>): AgentRunEntity {
-  return { id: text(row.id), taskId: text(row.task_id), projectId: text(row.project_id), requestedById: text(row.requested_by_id), executedById: nullableText(row.executed_by_id), kind: row.kind as AgentRunEntity["kind"], status: row.status as AgentRunEntity["status"], controlState: (row.control_state ?? "ACTIVE") as AgentRunEntity["controlState"], controlVersion: Number(row.control_version ?? 0), assignedAgentId: nullableText(row.assigned_agent_id), inputRequest: nullableText(row.input_request), inputResponse: nullableText(row.input_response), inputRequestedAt: nullableText(row.input_requested_at), inputAnsweredAt: nullableText(row.input_answered_at), takeoverById: nullableText(row.takeover_by_id), attemptCount: Number(row.attempt_count), maxAttempts: Number(row.max_attempts), leaseOwner: nullableText(row.lease_owner), leaseExpiresAt: nullableText(row.lease_expires_at), heartbeatAt: nullableText(row.heartbeat_at), timeoutAt: nullableText(row.timeout_at), lastError: nullableText(row.last_error), createdAt: date(row.created_at), updatedAt: date(row.updated_at), completedAt: nullableText(row.completed_at) };
+  return { id: text(row.id), taskId: text(row.task_id), projectId: text(row.project_id), requestedById: text(row.requested_by_id), executedById: nullableText(row.executed_by_id), kind: row.kind as AgentRunEntity["kind"], status: row.status as AgentRunEntity["status"], controlState: (row.control_state ?? "ACTIVE") as AgentRunEntity["controlState"], controlVersion: Number(row.control_version ?? 0), assignedAgentId: nullableText(row.assigned_agent_id), inputRequest: nullableText(row.input_request), inputResponse: nullableText(row.input_response), inputRequestedAt: nullableText(row.input_requested_at), inputAnsweredAt: nullableText(row.input_answered_at), takeoverById: nullableText(row.takeover_by_id), attemptCount: Number(row.attempt_count), maxAttempts: Number(row.max_attempts), leaseOwner: nullableText(row.lease_owner), leaseExpiresAt: nullableText(row.lease_expires_at), heartbeatAt: nullableText(row.heartbeat_at), timeoutAt: nullableText(row.timeout_at), lastError: nullableText(row.last_error), createdAt: date(row.created_at), updatedAt: date(row.updated_at), completedAt: nullableText(row.completed_at), contextPackVersion: Number(row.context_pack_version ?? 0), contextPackFingerprint: nullableText(row.context_pack_fingerprint) };
 }
 
 function createAgentRunRepository(db: DatabasePort): AgentRunRepository {
   const toCycleGrant = (row: Row): import("../application/models.js").AgentCycleGrantEntity => ({ taskId: text(row.task_id), priorCount: Number(row.prior_count), newLimit: Number(row.new_limit), requestId: text(row.request_id), smithyEventId: text(row.smithy_event_id), actorId: text(row.actor_id), createdAt: date(row.created_at) });
   return {
-    async create(input) { await db.prepare("INSERT INTO agent_runs (id, task_id, project_id, requested_by_id, executed_by_id, kind, status, control_state, control_version, assigned_agent_id, input_request, input_response, input_requested_at, input_answered_at, takeover_by_id, attempt_count, max_attempts, lease_owner, lease_expires_at, heartbeat_at, timeout_at, last_error, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.projectId, input.requestedById, input.executedById, input.kind, input.status, input.controlState, input.controlVersion, input.assignedAgentId, input.inputRequest, input.inputResponse, input.inputRequestedAt, input.inputAnsweredAt, input.takeoverById, input.attemptCount, input.maxAttempts, input.leaseOwner, input.leaseExpiresAt, input.heartbeatAt, input.timeoutAt, input.lastError, input.createdAt, input.updatedAt, input.completedAt); return input; },
+    async create(input) { await db.prepare("INSERT INTO agent_runs (id, task_id, project_id, requested_by_id, executed_by_id, kind, status, control_state, control_version, assigned_agent_id, input_request, input_response, input_requested_at, input_answered_at, takeover_by_id, attempt_count, max_attempts, lease_owner, lease_expires_at, heartbeat_at, timeout_at, last_error, created_at, updated_at, completed_at, context_pack_version, context_pack_fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.taskId, input.projectId, input.requestedById, input.executedById, input.kind, input.status, input.controlState, input.controlVersion, input.assignedAgentId, input.inputRequest, input.inputResponse, input.inputRequestedAt, input.inputAnsweredAt, input.takeoverById, input.attemptCount, input.maxAttempts, input.leaseOwner, input.leaseExpiresAt, input.heartbeatAt, input.timeoutAt, input.lastError, input.createdAt, input.updatedAt, input.completedAt, input.contextPackVersion, input.contextPackFingerprint); return input; },
     async findById(id) { const row = await db.prepare("SELECT * FROM agent_runs WHERE id = ?").get(id); return row ? toAgentRun(row) : null; },
     async listForTask(taskId) { return (await db.prepare("SELECT * FROM agent_runs WHERE task_id = ? ORDER BY created_at DESC, id DESC").all(taskId)).map(toAgentRun); },
     async countForTask(taskId) { const row = await db.prepare("SELECT COUNT(*) AS count FROM agent_runs WHERE task_id = ?").get(taskId); return Number(row?.count ?? 0); },
@@ -565,6 +565,36 @@ function createAgentRunRepository(db: DatabasePort): AgentRunRepository {
       return Boolean(result.changes);
     },
     async recordIntervention(input) { await db.prepare("INSERT INTO agent_run_interventions (request_id, run_id, actor_id, action, payload_hash, result_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(input.requestId, input.runId, input.actorId, input.action, input.payloadHash, input.resultVersion, input.createdAt); },
+  };
+}
+
+function toAgentContextPack(row: Row): AgentContextPackEntity {
+  const content = typeof row.content === "string" ? JSON.parse(row.content) : row.content;
+  return {
+    id: text(row.id), runId: text(row.run_id), taskId: text(row.task_id), projectId: text(row.project_id),
+    version: Number(row.version), fingerprint: text(row.fingerprint), content,
+    refreshedFromVersion: row.refreshed_from_version == null ? null : Number(row.refreshed_from_version),
+    refreshReason: row.refresh_reason as AgentContextPackEntity["refreshReason"], createdById: text(row.created_by_id), createdAt: date(row.created_at),
+  } as AgentContextPackEntity;
+}
+
+function createAgentContextPackRepository(db: DatabasePort): AgentContextPackRepository {
+  return {
+    async findCurrent(runId) {
+      const row = await db.prepare("SELECT * FROM agent_context_packs WHERE run_id = ? ORDER BY version DESC LIMIT 1").get(runId);
+      return row ? toAgentContextPack(row) : null;
+    },
+    async listForRun(runId) { return (await db.prepare("SELECT * FROM agent_context_packs WHERE run_id = ? ORDER BY version DESC").all(runId)).map(toAgentContextPack); },
+    async nextVersion(runId) {
+      if (db.dialect === "mysql") await db.prepare("SELECT id FROM agent_runs WHERE id = ? FOR UPDATE").get(runId);
+      const row = await db.prepare("SELECT COALESCE(MAX(version), 0) + 1 AS next_version FROM agent_context_packs WHERE run_id = ?").get(runId);
+      return Number(row?.next_version ?? 1);
+    },
+    async create(input) {
+      await db.prepare("INSERT INTO agent_context_packs (id, run_id, task_id, project_id, version, fingerprint, content, refreshed_from_version, refresh_reason, created_by_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(input.id, input.runId, input.taskId, input.projectId, input.version, input.fingerprint, JSON.stringify(input.content), input.refreshedFromVersion, input.refreshReason, input.createdById, input.createdAt);
+      await db.prepare("UPDATE agent_runs SET context_pack_version = ?, context_pack_fingerprint = ?, updated_at = ? WHERE id = ?").run(input.version, input.fingerprint, input.createdAt, input.runId);
+      return input;
+    },
   };
 }
 
@@ -696,5 +726,5 @@ function createSearchRepository(db: DatabasePort): SearchRepository {
 }
 
 export function createRepositories(db: DatabasePort): RepositorySet {
-  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), agentLogs: createAgentLogRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db), runs: createAgentRunRepository(db), handoffs: createAgentHandoffRepository(db), plans: createAgentPlanRepository(db), gates: createTaskGateRepository(db), findings: createTaskFindingRepository(db), deliveryMonitor: createDeliveryMonitorRepository(db) };
+  return { users: createUserRepository(db), projects: createProjectRepository(db), memberships: createMembershipRepository(db), phases: createPhaseRepository(db), tasks: createTaskRepository(db), tags: createTagRepository(db), dependencies: createDependencyRepository(db), updates: createUpdateRepository(db), agentLogs: createAgentLogRepository(db), attachments: createAttachmentRepository(db), automations: createAutomationRepository(db), notifications: createNotificationRepository(db), activity: createActivityRepository(db), webhookDeliveries: createWebhookDeliveryRepository(db), reporting: createReportingRepository(db), tokens: createTokenRepository(db), search: createSearchRepository(db), runs: createAgentRunRepository(db), contextPacks: createAgentContextPackRepository(db), handoffs: createAgentHandoffRepository(db), plans: createAgentPlanRepository(db), gates: createTaskGateRepository(db), findings: createTaskFindingRepository(db), deliveryMonitor: createDeliveryMonitorRepository(db) };
 }

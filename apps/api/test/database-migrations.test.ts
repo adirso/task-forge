@@ -155,6 +155,14 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
     ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_plans'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_plans'", []));
   assert.equal(hasAgentPlans, true);
+  const hasContextPackVersion = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('agent_runs') WHERE name = 'context_pack_version'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'agent_runs' AND column_name = 'context_pack_version'", []));
+  assert.equal(hasContextPackVersion, true);
+  const hasContextPacks = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_context_packs'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_context_packs'", []));
+  assert.equal(hasContextPacks, true);
   if (expectsLegacyTask) {
     const project = await adapter.get<{ dependency_resolution_statuses: string }>("SELECT dependency_resolution_statuses FROM projects WHERE id = ?", ["project-1"]);
     assert.deepEqual(JSON.parse(project!.dependency_resolution_statuses), ["DONE", "CANCELLED"]);

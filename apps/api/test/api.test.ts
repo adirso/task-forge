@@ -1269,12 +1269,14 @@ test("Smithy agents receive revocable credentials bound to one run, task, projec
   const scopedProjectId = createdProject.json().project.id as string;
   const membership = await app.inject({ method: "POST", url: `/api/projects/${scopedProjectId}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: agentId, role: "MEMBER" } });
   assert.equal(membership.statusCode, 204, membership.body);
-  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${scopedProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Run credential boundary", status: "TODO", assigneeId: agentId, branch: "agent/run-credential" } });
+  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${scopedProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Run credential boundary", description: "Use token=context-pack-secret only during setup", status: "TODO", assigneeId: agentId, branch: "agent/run-credential" } });
   assert.equal(createdTask.statusCode, 201, createdTask.body);
   const scopedTask = createdTask.json().task as { id: string; number: number };
   const createdRun = await app.inject({ method: "POST", url: `/api/tasks/${scopedTask.id}/runs`, headers: { authorization: `Bearer ${agentToken}` }, payload: { kind: "IMPLEMENTATION" } });
   assert.equal(createdRun.statusCode, 201, createdRun.body);
   const runId = createdRun.json().run.id as string;
+  assert.equal(createdRun.json().run.contextPackVersion, 1);
+  assert.match(createdRun.json().run.contextPackFingerprint, /^[0-9a-f]{64}$/);
   const claimed = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${agentToken}` }, payload: { leaseMs: 120_000 } });
   assert.equal(claimed.statusCode, 200, claimed.body);
 
@@ -1287,22 +1289,38 @@ test("Smithy agents receive revocable credentials bound to one run, task, projec
   const repeated = await app.inject({ method: "POST", url: `/api/runs/${runId}/credential`, headers: { authorization: `Bearer ${agentToken}` } });
   assert.equal(repeated.json().credential.token, credential.token, "issuance is idempotent within one lease attempt");
 
+  const firstPack = await app.inject({ method: "GET", url: `/api/runs/${runId}/context-pack`, headers: { authorization: `Bearer ${credential.token}` } });
+  assert.equal(firstPack.statusCode, 200, firstPack.body);
+  assert.equal(firstPack.json().contextPack.version, 1);
+  assert.doesNotMatch(firstPack.body, /context-pack-secret/);
+  const firstFingerprint = firstPack.json().contextPack.fingerprint as string;
+  const refreshedPack = await app.inject({ method: "POST", url: `/api/runs/${runId}/context-pack/refresh`, headers: { authorization: `Bearer ${credential.token}` }, payload: { reason: "Provider requested a stable retry checkpoint" } });
+  assert.equal(refreshedPack.statusCode, 201, refreshedPack.body);
+  assert.equal(refreshedPack.json().contextPack.version, 2);
+  assert.equal(refreshedPack.json().contextPack.refreshedFromVersion, 1);
+  assert.equal(refreshedPack.json().contextPack.fingerprint, firstFingerprint);
+
   const ownContext = await app.inject({ method: "GET", url: `/api/context?project=${scopedProjectKey}&task=${scopedProjectKey}-${scopedTask.number}`, headers: { authorization: `Bearer ${credential.token}` } });
   assert.equal(ownContext.statusCode, 200, ownContext.body);
   const ownUpdate = await app.inject({ method: "POST", url: `/api/tasks/${scopedTask.id}/updates`, headers: { authorization: `Bearer ${credential.token}` }, payload: { body: "Provider progress without a long-lived token." } });
   assert.equal(ownUpdate.statusCode, 201, ownUpdate.body);
+  const stablePack = await app.inject({ method: "GET", url: `/api/runs/${runId}/context-pack`, headers: { authorization: `Bearer ${credential.token}` } });
+  assert.equal(stablePack.json().contextPack.version, 2, "ordinary retries reuse the stored context until an explicit refresh");
+  assert.equal(stablePack.json().contextPack.fingerprint, firstFingerprint);
   const ownBranch = await app.inject({ method: "PATCH", url: `/api/tasks/${scopedTask.id}`, headers: { authorization: `Bearer ${credential.token}` }, payload: { branch: "agent/run-credential-published" } });
   assert.equal(ownBranch.statusCode, 200, ownBranch.body);
 
   const otherTask = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${credential.token}` } });
   assert.equal(otherTask.statusCode, 403, otherTask.body);
+  const otherRun = await app.inject({ method: "GET", url: `/api/runs/${randomUUID()}/context-pack`, headers: { authorization: `Bearer ${credential.token}` } });
+  assert.equal(otherRun.statusCode, 403, otherRun.body);
   const projectDenied = await app.inject({ method: "GET", url: `/api/projects/${scopedProjectId}`, headers: { authorization: `Bearer ${credential.token}` } });
   assert.equal(projectDenied.statusCode, 403, projectDenied.body);
   const metadataDenied = await app.inject({ method: "PATCH", url: `/api/tasks/${scopedTask.id}`, headers: { authorization: `Bearer ${credential.token}` }, payload: { title: "Escaped scope" } });
   assert.equal(metadataDenied.statusCode, 403, metadataDenied.body);
   const runControlDenied = await app.inject({ method: "POST", url: `/api/runs/${runId}/heartbeat`, headers: { authorization: `Bearer ${credential.token}` }, payload: { leaseMs: 120_000 } });
   assert.equal(runControlDenied.statusCode, 403, runControlDenied.body);
-  for (const response of [otherTask, projectDenied, metadataDenied, runControlDenied]) assert.doesNotMatch(response.body, /tfr_|tf_[A-Za-z0-9]/);
+  for (const response of [otherTask, otherRun, projectDenied, metadataDenied, runControlDenied]) assert.doesNotMatch(response.body, /tfr_|tf_[A-Za-z0-9]/);
 
   await db.prepare("UPDATE agent_run_credentials SET expires_at = ? WHERE run_id = ?").run("2000-01-01T00:00:00.000Z", runId);
   const expired = await app.inject({ method: "GET", url: `/api/tasks/${scopedTask.id}`, headers: { authorization: `Bearer ${credential.token}` } });

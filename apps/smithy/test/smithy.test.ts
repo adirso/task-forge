@@ -457,6 +457,34 @@ test("runner leaves task transitions to the assigned agent and explains the work
   assert.match(prompt, /PUT \/api\/runs\/run-backlog\/handoff/);
 });
 
+test("runner consumes the immutable context-pack version and redacts durable memory", async () => {
+  let prompt = "";
+  const calls: string[] = [];
+  const api = { request: async (path: string) => {
+    calls.push(path);
+    if (path.endsWith("/credential")) return runCredential;
+    if (path.includes("/api/context")) return { project: { key: "TAS", availableStatuses: ["BACKLOG", "IN_PROGRESS", "READY_FOR_REVIEW"] }, task: { ...event.task, status: "BACKLOG" } };
+    if (path.endsWith("/runs")) return { run: { id: "run-context-pack" } };
+    if (path.endsWith("/context-pack")) return { contextPack: { version: 3, fingerprint: "b".repeat(64), content: {
+      history: { decisions: [{ body: "Approved approach token=memory-secret" }], recentUpdates: [{ body: "Implementation is ready" }], findings: [], summary: { omittedSummary: "12 routine updates were summarized." } },
+      dependencies: [{ projectKey: "TAS", number: 114, title: "Planning", status: "DONE", isBlocking: false }],
+      attachments: [{ fileName: "evidence.txt", mimeType: "text/plain", size: 12, downloadUrl: "/api/attachments/attachment-1/download" }],
+      repository: { guidanceFiles: ["AGENTS.md"], relevantFiles: ["src/context.ts"] },
+    } } };
+    return {};
+  } };
+  const runner = new SmithyRunner({ claude: provider }, () => api as never, async (_command, commandPrompt) => { prompt = commandPrompt; return { code: 0, stdout: "ok", stderr: "" }; }, () => 1_700_000_000_000);
+  const body = JSON.stringify({ ...event, id: "event-context-pack", task: { ...event.task, status: "BACKLOG" } });
+  await runner.handle("claude", { "x-taskforge-signature": `t=1700000000,v1=${sign(secret, 1700000000, body)}` }, body);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(calls.includes("/api/runs/run-context-pack/context-pack"));
+  assert.match(prompt, new RegExp(`Durable context pack: version 3; fingerprint ${"b".repeat(64)}`));
+  assert.match(prompt, /TAS-114: Planning \(DONE\)/);
+  assert.match(prompt, /evidence\.txt/);
+  assert.match(prompt, /Historical context: Approved approach/);
+  assert.doesNotMatch(prompt, /memory-secret/);
+});
+
 test("runner gives fix and re-review jobs focused, status-aware prompts", async () => {
   for (const [status, expected] of [["FIX_NEEDED", /existing branch/], ["RE_REVIEW", /previously reviewed/] ] as const) {
     let prompt = "";

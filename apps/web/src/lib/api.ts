@@ -6,7 +6,7 @@ export interface AgentRun {
   controlState: "ACTIVE" | "PAUSED" | "WAITING_FOR_INPUT" | "HUMAN_TAKEOVER"; controlVersion: number; assignedAgentId: string | null;
   inputRequest: string | null; inputResponse: string | null; inputRequestedAt: string | null; inputAnsweredAt: string | null; takeoverById: string | null;
   leaseOwner: string | null; leaseExpiresAt: string | null; heartbeatAt: string | null; timeoutAt: string | null; lastError: string | null;
-  createdAt: string; updatedAt: string; completedAt: string | null;
+  createdAt: string; updatedAt: string; completedAt: string | null; contextPackVersion: number; contextPackFingerprint: string | null;
 }
 export interface AgentCycleState { count: number; limit: number; limitFailure: boolean; }
 export interface AgentLog { id: string; taskId: string; runId: string | null; provider: string; stream: "stdout" | "stderr" | "system" | "callback"; category: "output" | "progress" | "tool" | "callback" | "lifecycle"; sequence: number; eventId: string | null; content: string; createdAt: string; }
@@ -117,7 +117,7 @@ const mockNotifications: Notification[] = [
   { id: "n1", userId: MOCK_USER.id, projectId: "p_mobile", taskId: "t3", type: "TASK_UPDATED", title: "Task moved to review", message: "Collapse filters on phones is ready for review.", readAt: null, createdAt: MOCK_NOW, projectName: "Mobile Refresh", projectKey: "MOB", taskNumber: 3 },
 ];
 const mockRuns: Record<string, AgentRun[]> = {
-  t1: [{ id: "run-demo-1", taskId: "t1", projectId: "p_mobile", requestedById: MOCK_USER.id, executedById: MOCK_AGENT.id, kind: "IMPLEMENTATION", status: "RUNNING", controlState: "ACTIVE", controlVersion: 1, assignedAgentId: MOCK_AGENT.id, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy-demo", leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(), heartbeatAt: MOCK_NOW, timeoutAt: new Date(Date.now() + 900_000).toISOString(), lastError: null, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, completedAt: null }],
+  t1: [{ id: "run-demo-1", taskId: "t1", projectId: "p_mobile", requestedById: MOCK_USER.id, executedById: MOCK_AGENT.id, kind: "IMPLEMENTATION", status: "RUNNING", controlState: "ACTIVE", controlVersion: 1, assignedAgentId: MOCK_AGENT.id, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy-demo", leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(), heartbeatAt: MOCK_NOW, timeoutAt: new Date(Date.now() + 900_000).toISOString(), lastError: null, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, completedAt: null, contextPackVersion: 1, contextPackFingerprint: "a".repeat(64) }],
 };
 const mockAgentLogs: Record<string, AgentLog[]> = {
   t1: [{ id: "log-demo-1", taskId: "t1", runId: "run-demo-1", provider: "codex", stream: "stdout", category: "progress", sequence: 1, eventId: "demo-event-1", content: "Implementation started on agent/mob-1", createdAt: MOCK_NOW }],
