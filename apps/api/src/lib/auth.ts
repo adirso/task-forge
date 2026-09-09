@@ -51,9 +51,9 @@ async function runCredentialMayAccess(request: FastifyRequest, credential: NonNu
   if (taskMatch) {
     if (decodeURIComponent(taskMatch[1]!) !== credential.taskId) return false;
     const suffix = taskMatch[2] ?? "";
-    if (method === "GET") return ["", "/updates", "/agent-logs", "/findings", "/attachments", "/runs"].includes(suffix);
+    if (method === "GET") return ["", "/updates", "/agent-logs", "/findings", "/attachments", "/runs", "/plans"].includes(suffix);
     if (method === "PATCH") return suffix === "";
-    if (method === "POST") return ["/updates", "/agent-logs", "/findings"].includes(suffix);
+    if (method === "POST") return ["/updates", "/agent-logs", "/findings", "/plans"].includes(suffix);
     return false;
   }
 

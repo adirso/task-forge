@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentCapabilityProfile, type AgentOpsEntry, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentCapabilityProfile, type AgentOpsEntry, type AgentPlan, type AgentPlanDecision, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
   id: string; taskId: string; projectId: string; requestedById: string; executedById: string | null; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
@@ -121,6 +121,9 @@ const mockRuns: Record<string, AgentRun[]> = {
 };
 const mockAgentLogs: Record<string, AgentLog[]> = {
   t1: [{ id: "log-demo-1", taskId: "t1", runId: "run-demo-1", provider: "codex", stream: "stdout", category: "progress", sequence: 1, eventId: "demo-event-1", content: "Implementation started on agent/mob-1", createdAt: MOCK_NOW }],
+};
+const mockPlans: Record<string, AgentPlan[]> = {
+  t1: [{ id: "plan-demo-1", taskId: "t1", sourceRunId: "00000000-0000-4000-8000-000000000001", version: 1, status: "PROPOSED", summary: "Split the mobile header delivery into independently verifiable work.", risks: ["Navigation state may regress on narrow screens"], acceptanceEvidence: ["Keyboard and responsive browser checks pass"], requiresApproval: true, items: [{ key: "layout", title: "Implement responsive layout", description: "", definitionOfDone: "", priority: "HIGH", type: "FEATURE", estimatePoints: 3, dependencyKeys: [] }, { key: "qa", title: "Add mobile interaction coverage", description: "", definitionOfDone: "", priority: "MEDIUM", type: "UPDATE", estimatePoints: 2, dependencyKeys: ["layout"] }], createdTaskIds: {}, proposedById: MOCK_AGENT.id, reviewedById: null, reviewComment: null, createdAt: MOCK_NOW, reviewedAt: null }],
 };
 
 function mockPhaseData() {
@@ -370,6 +373,14 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
 
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "GET") return { updates: [] } as T;
   if (/^\/tasks\/[^/]+\/runs$/.test(pathname) && method === "GET") { const runs = mockRuns[pathname.split("/")[2]!] ?? []; return { runs, cycle: { count: runs.length, limit: 6, limitFailure: false } } as T; }
+  if (/^\/tasks\/[^/]+\/plans$/.test(pathname) && method === "GET") return { plans: mockPlans[pathname.split("/")[2]!] ?? [] } as T;
+  if (/^\/tasks\/[^/]+\/plans\/[^/]+\/decision$/.test(pathname) && method === "POST") {
+    const plan = Object.values(mockPlans).flat().find((candidate) => candidate.id === pathname.split("/")[4]);
+    if (!plan) throw new ApiError("Agent plan not found", 404);
+    plan.status = (options.body as AgentPlanDecision).action === "APPROVE" ? "APPROVED" : "REJECTED";
+    if (plan.status === "APPROVED") plan.createdTaskIds = Object.fromEntries(plan.items.map((item) => [item.key, `mock-${item.key}`]));
+    return { plan, duplicate: false } as T;
+  }
   if (/^\/runs\/[^/]+\/interventions$/.test(pathname) && method === "POST") {
     const runId = pathname.split("/")[2]!;
     const input = options.body as AgentRunIntervention;
@@ -497,6 +508,8 @@ export const api = {
     return { updates };
   },
   taskRuns: (id: string) => request<{ runs: AgentRun[]; cycle: AgentCycleState }>(`/tasks/${id}/runs`),
+  taskPlans: (id: string) => request<{ plans: AgentPlan[] }>(`/tasks/${id}/plans`),
+  decideTaskPlan: (taskId: string, planId: string, input: AgentPlanDecision) => request<{ plan: AgentPlan; duplicate: boolean }>(`/tasks/${taskId}/plans/${planId}/decision`, { method: "POST", body: input }),
   interveneRun: (id: string, requestId: string, input: AgentRunIntervention) => request<{ run: AgentRun; duplicate: boolean }>(`/runs/${id}/interventions`, { method: "POST", headers: { "Idempotency-Key": requestId }, body: input }),
   forceTaskCycle: (id: string, requestId: string) => request<{ cycle: AgentCycleState; duplicate: boolean }>(`/tasks/${id}/runs/force-cycle`, { method: "POST", headers: { "Idempotency-Key": requestId } }),
   taskAgentLogs: async (id: string) => {

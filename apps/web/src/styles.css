@@ -348,6 +348,17 @@ svg { flex: 0 0 auto; }
 .task-agents-empty small { font-size: 11px; line-height: 1.45; }
 .task-updates.task-tab-panel { margin-top: 0; padding-top: 0; border-top: 0; }
 .task-updates.task-tab-panel .task-activity { margin-top: 8px; padding-top: 16px; }
+.plan-list { display: grid; gap: 12px; }
+.plan-item { border: 1px solid #dfe1e6; border-radius: 10px; padding: 14px; display: grid; gap: 10px; background: #fff; }
+.plan-item > header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.plan-item > header span { display: grid; gap: 2px; }
+.plan-item p, .plan-item ul { margin: 0; }
+.plan-item ul { padding-left: 20px; color: #5e6c84; }
+.plan-status { border-radius: 999px; padding: 3px 8px; font-size: 10px; }
+.plan-status-proposed { background: #deebff; color: #0747a6; }.plan-status-approved { background: #e3fcef; color: #006644; }.plan-status-rejected { background: #ffebe6; color: #bf2600; }
+.plan-items { display: grid; gap: 6px; }
+.plan-items > div { border-left: 3px solid #b3bac5; padding: 7px 10px; display: flex; justify-content: space-between; gap: 12px; }
+.plan-items span { display: grid; gap: 2px; }.plan-item footer { display: flex; justify-content: flex-end; gap: 8px; }.plan-review-comment { color: #5e6c84; font-size: 12px; }
 .icon-button { width: 32px; height: 32px; border-radius: 6px; border: 0; background: transparent; display: grid; place-items: center; color: #6b778c; }
 .icon-button:hover { background: #f1f2f4; }
 .icon-button svg { width: 17px; }

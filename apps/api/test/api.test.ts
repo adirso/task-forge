@@ -1462,3 +1462,66 @@ test("delivery monitor terminal observations apply API status transitions", asyn
   assert.equal(terminal.json().task.status, "DONE");
   assert.equal(terminal.json().task.pullRequestState, "MERGED");
 });
+
+test("agent plans are versioned, reviewable, acyclic, and idempotently create executable subtasks", async () => {
+  const source = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Plan a durable delivery", phaseId } });
+  assert.equal(source.statusCode, 201, source.body);
+  const sourceTaskId = source.json().task.id as string;
+  const runResponse = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  assert.equal(runResponse.statusCode, 201, runResponse.body);
+  const runId = runResponse.json().run.id as string;
+  const claimed = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${agentToken}` }, payload: { leaseMs: 120_000 } });
+  assert.equal(claimed.statusCode, 200, claimed.body);
+  const credential = await app.inject({ method: "POST", url: `/api/runs/${runId}/credential`, headers: { authorization: `Bearer ${agentToken}` } });
+  assert.equal(credential.statusCode, 200, credential.body);
+  const runToken = credential.json().credential.token as string;
+
+  const firstProposal = { sourceRunId: runId, summary: "Initial proposal", requiresApproval: true, risks: ["Migration ordering"], acceptanceEvidence: ["API test passes"], items: [{ key: "schema", title: "Add schema", type: "INFRA", priority: "HIGH", estimatePoints: 2, dependencyKeys: [] }] };
+  const proposed = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-1" }, payload: firstProposal });
+  assert.equal(proposed.statusCode, 201, proposed.body);
+  assert.equal(proposed.json().plan.version, 1);
+  assert.equal(proposed.json().plan.status, "PROPOSED");
+  const duplicate = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-1" }, payload: firstProposal });
+  assert.equal(duplicate.statusCode, 200, duplicate.body);
+  assert.equal(duplicate.json().duplicate, true);
+  assert.equal(duplicate.json().plan.id, proposed.json().plan.id);
+  const rejected = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans/${proposed.json().plan.id}/decision`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { action: "REJECT", comment: "Split the implementation" } });
+  assert.equal(rejected.statusCode, 200, rejected.body);
+  assert.equal(rejected.json().plan.status, "REJECTED");
+  const duplicateRejection = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans/${proposed.json().plan.id}/decision`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { action: "REJECT" } });
+  assert.equal(duplicateRejection.json().duplicate, true);
+
+  const secondProposal = { sourceRunId: runId, summary: "Revised proposal", requiresApproval: true, risks: [], acceptanceEvidence: ["Graph is executable"], items: [
+    { key: "schema", title: "Create planning schema", type: "INFRA", priority: "HIGH", estimatePoints: 2, dependencyKeys: [] },
+    { key: "api", title: "Expose planning API", type: "FEATURE", priority: "MEDIUM", estimatePoints: 3, dependencyKeys: ["schema"] },
+  ] };
+  const revised = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-2" }, payload: secondProposal });
+  assert.equal(revised.statusCode, 201, revised.body);
+  assert.equal(revised.json().plan.version, 2);
+  const approved = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans/${revised.json().plan.id}/decision`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { action: "APPROVE", comment: "Proceed" } });
+  assert.equal(approved.statusCode, 200, approved.body);
+  assert.equal(approved.json().plan.status, "APPROVED");
+  assert.equal(Object.keys(approved.json().plan.createdTaskIds).length, 2);
+  const apiTaskId = approved.json().plan.createdTaskIds.api as string;
+  const apiTask = await app.inject({ method: "GET", url: `/api/tasks/${apiTaskId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(apiTask.json().task.parentId, sourceTaskId);
+  assert.equal(apiTask.json().task.phaseId, phaseId);
+  assert.equal(apiTask.json().task.dependencies[0].dependsOnTaskId, approved.json().plan.createdTaskIds.schema);
+  const duplicateApproval = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans/${revised.json().plan.id}/decision`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { action: "APPROVE" } });
+  assert.equal(duplicateApproval.json().duplicate, true);
+
+  const automatic = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-3" }, payload: { sourceRunId: runId, summary: "No human approval required", requiresApproval: false, items: [{ key: "docs", title: "Document the plan", type: "DOCS", dependencyKeys: [] }] } });
+  assert.equal(automatic.statusCode, 201, automatic.body);
+  assert.equal(automatic.json().plan.status, "APPROVED");
+  assert.equal(Object.keys(automatic.json().plan.createdTaskIds).length, 1);
+
+  const cyclic = await app.inject({ method: "POST", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${runToken}`, "idempotency-key": "plan-callback-cycle" }, payload: { sourceRunId: runId, summary: "Invalid cycle", items: [{ key: "a", title: "A", dependencyKeys: ["b"] }, { key: "b", title: "B", dependencyKeys: ["a"] }] } });
+  assert.equal(cyclic.statusCode, 400);
+  assert.match(cyclic.body, /acyclic/);
+  const plans = await app.inject({ method: "GET", url: `/api/tasks/${sourceTaskId}/plans`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.deepEqual(plans.json().plans.map((plan: { version: number }) => plan.version), [3, 2, 1]);
+  const audits = await db.prepare("SELECT action FROM activity WHERE task_id = ? AND action LIKE 'agent_plan.%' ORDER BY created_at").all(sourceTaskId) as Array<{ action: string }>;
+  assert.equal(audits.filter((audit) => audit.action === "agent_plan.proposed").length, 3);
+  assert.equal(audits.filter((audit) => audit.action === "agent_plan.approved").length, 2);
+  assert.equal(audits.filter((audit) => audit.action === "agent_plan.rejected").length, 1);
+});

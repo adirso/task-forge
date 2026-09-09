@@ -114,6 +114,51 @@ export const agentRunInterventionSchema = z.object({
   if (value.action === "REASSIGN" && !value.agentId) context.addIssue({ code: "custom", path: ["agentId"], message: "agentId is required when reassigning a run" });
   if (["REQUEST_INPUT", "ANSWER"].includes(value.action) && !value.input) context.addIssue({ code: "custom", path: ["input"], message: "input is required for this intervention" });
 });
+
+export const agentPlanStatusSchema = z.enum(["PROPOSED", "APPROVED", "REJECTED"]);
+export const agentPlanItemSchema = z.object({
+  key: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, "Item keys may contain letters, numbers, underscores, and hyphens"),
+  title: z.string().trim().min(1).max(240),
+  description: z.string().trim().max(10_000).default(""),
+  definitionOfDone: z.string().trim().max(10_000).default(""),
+  priority: taskPrioritySchema.default("MEDIUM"),
+  type: taskTypeSchema.default("FEATURE"),
+  estimatePoints: z.number().int().min(0).max(100).nullable().default(null),
+  dependencyKeys: z.array(z.string().trim().min(1).max(64)).max(50).default([])
+    .refine((keys) => new Set(keys).size === keys.length, "Dependencies must be unique"),
+});
+export const agentPlanProposalSchema = z.object({
+  sourceRunId: z.string().uuid(),
+  summary: z.string().trim().min(1).max(10_000),
+  risks: z.array(z.string().trim().min(1).max(1000)).max(50).default([]),
+  acceptanceEvidence: z.array(z.string().trim().min(1).max(1000)).max(50).default([]),
+  requiresApproval: z.boolean().default(true),
+  items: z.array(agentPlanItemSchema).min(1).max(50),
+}).superRefine((plan, context) => {
+  const keys = new Set(plan.items.map((item) => item.key));
+  if (keys.size !== plan.items.length) context.addIssue({ code: "custom", path: ["items"], message: "Item keys must be unique" });
+  for (const [index, item] of plan.items.entries()) {
+    for (const dependency of item.dependencyKeys) {
+      if (!keys.has(dependency)) context.addIssue({ code: "custom", path: ["items", index, "dependencyKeys"], message: `Unknown dependency key: ${dependency}` });
+      if (dependency === item.key) context.addIssue({ code: "custom", path: ["items", index, "dependencyKeys"], message: "An item cannot depend on itself" });
+    }
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const dependencies = new Map(plan.items.map((item) => [item.key, item.dependencyKeys]));
+  const cyclic = (key: string): boolean => {
+    if (visiting.has(key)) return true;
+    if (visited.has(key)) return false;
+    visiting.add(key);
+    for (const dependency of dependencies.get(key) ?? []) if (cyclic(dependency)) return true;
+    visiting.delete(key); visited.add(key); return false;
+  };
+  if (plan.items.some((item) => cyclic(item.key))) context.addIssue({ code: "custom", path: ["items"], message: "Plan dependencies must be acyclic" });
+});
+export const agentPlanDecisionSchema = z.object({
+  action: z.enum(["APPROVE", "REJECT"]),
+  comment: z.string().trim().max(4000).nullable().optional(),
+});
 /** Pull requests are intentionally restricted to canonical public GitHub URLs. */
 export const deliveryMonitorPullRequestSchema = z.object({
   owner: z.string().regex(/^[A-Za-z0-9_.-]+$/),
@@ -318,6 +363,7 @@ export const TOKEN_SCOPES = [
   "task:update:meta",
   "task:gate:evidence",
   "task:gate:approve",
+  "task:plan",
 ] as const;
 export type TokenScope = typeof TOKEN_SCOPES[number];
 
@@ -360,6 +406,10 @@ export type PullRequestState = z.infer<typeof pullRequestStateSchema>;
 export type AgentRunControlState = z.infer<typeof agentRunControlStateSchema>;
 export type AgentRunInterventionAction = z.infer<typeof agentRunInterventionActionSchema>;
 export type AgentRunIntervention = z.infer<typeof agentRunInterventionSchema>;
+export type AgentPlanStatus = z.infer<typeof agentPlanStatusSchema>;
+export type AgentPlanItem = z.infer<typeof agentPlanItemSchema>;
+export type AgentPlanProposal = z.infer<typeof agentPlanProposalSchema>;
+export type AgentPlanDecision = z.infer<typeof agentPlanDecisionSchema>;
 export type DeliveryMonitorConfig = z.infer<typeof deliveryMonitorConfigSchema>;
 export type DeliveryMonitorPullRequest = z.infer<typeof deliveryMonitorPullRequestSchema>;
 export type DeliveryMonitorErrorCategory = z.infer<typeof deliveryMonitorErrorCategorySchema>;
@@ -528,6 +578,25 @@ export interface Task {
   attachments: Attachment[];
   updates?: TaskNote[];
   updatesPage?: PageInfo;
+}
+
+export interface AgentPlan {
+  id: string;
+  taskId: string;
+  sourceRunId: string;
+  version: number;
+  status: AgentPlanStatus;
+  summary: string;
+  risks: string[];
+  acceptanceEvidence: string[];
+  requiresApproval: boolean;
+  items: AgentPlanItem[];
+  createdTaskIds: Record<string, string>;
+  proposedById: string;
+  reviewedById: string | null;
+  reviewComment: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
 }
 
 export interface AutomationCondition { field: z.infer<typeof automationFieldSchema>; operator: z.infer<typeof automationOperatorSchema>; value: string | null; fromValue?: string | null; }
