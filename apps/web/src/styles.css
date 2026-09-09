@@ -348,6 +348,17 @@ svg { flex: 0 0 auto; }
 .task-agents-empty small { font-size: 11px; line-height: 1.45; }
 .task-updates.task-tab-panel { margin-top: 0; padding-top: 0; border-top: 0; }
 .task-updates.task-tab-panel .task-activity { margin-top: 8px; padding-top: 16px; }
+.plan-list { display: grid; gap: 12px; }
+.plan-item { border: 1px solid #dfe1e6; border-radius: 10px; padding: 14px; display: grid; gap: 10px; background: #fff; }
+.plan-item > header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.plan-item > header span { display: grid; gap: 2px; }
+.plan-item p, .plan-item ul { margin: 0; }
+.plan-item ul { padding-left: 20px; color: #5e6c84; }
+.plan-status { border-radius: 999px; padding: 3px 8px; font-size: 10px; }
+.plan-status-proposed { background: #deebff; color: #0747a6; }.plan-status-approved { background: #e3fcef; color: #006644; }.plan-status-rejected { background: #ffebe6; color: #bf2600; }
+.plan-items { display: grid; gap: 6px; }
+.plan-items > div { border-left: 3px solid #b3bac5; padding: 9px 10px; display: grid; gap: 8px; }
+.plan-task-heading { display: flex; justify-content: space-between; gap: 12px; }.plan-task-heading > span { display: grid; gap: 2px; }.plan-task-review { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }.plan-task-review p { border-radius: 6px; background: #f7f8fa; padding: 7px 8px; display: grid; gap: 3px; color: #5e6c84; font-size: 11px; white-space: pre-wrap; }.plan-task-review p strong { color: #42526e; font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }.plan-created-tasks { display: grid; gap: 6px; }.plan-created-tasks > strong { color: #006644; font-size: 11px; }.plan-created-tasks ul { padding: 0; display: grid; gap: 5px; list-style: none; }.plan-created-tasks li { display: grid; grid-template-columns: minmax(60px, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; border-radius: 6px; background: #f3faf6; padding: 6px 8px; }.plan-created-tasks li > span { color: #42526e; font-weight: 700; }.plan-created-tasks a { color: #0052cc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.plan-created-tasks code { color: #6b778c; font-size: 9px; }.plan-item footer { display: flex; justify-content: flex-end; gap: 8px; }.plan-review-comment { color: #5e6c84; font-size: 12px; }
 .icon-button { width: 32px; height: 32px; border-radius: 6px; border: 0; background: transparent; display: grid; place-items: center; color: #6b778c; }
 .icon-button:hover { background: #f1f2f4; }
 .icon-button svg { width: 17px; }

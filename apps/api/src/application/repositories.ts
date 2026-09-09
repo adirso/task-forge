@@ -1,5 +1,5 @@
 import type { AgentCapabilityProfile } from "@taskforge/contracts";
-import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -154,6 +154,15 @@ export interface AgentRunRepository {
   recordIntervention(input: AgentRunInterventionEntity): Promise<void>;
 }
 export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; findPublishedByTaskHead(taskId: string, headSha: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
+export interface AgentPlanRepository {
+  lockTask(taskId: string): Promise<void>;
+  listForTask(taskId: string): Promise<AgentPlanEntity[]>;
+  findById(id: string): Promise<AgentPlanEntity | null>;
+  findByIdempotency(sourceRunId: string, key: string): Promise<AgentPlanEntity | null>;
+  nextVersion(taskId: string): Promise<number>;
+  create(input: AgentPlanEntity): Promise<AgentPlanEntity>;
+  decide(id: string, expectedStatus: AgentPlanEntity["status"], input: Pick<AgentPlanEntity, "status" | "createdTaskIds" | "reviewedById" | "reviewComment" | "reviewedAt">): Promise<boolean>;
+}
 export interface DeliveryMonitorRepository { health(now: string, pollIntervalMs: number): Promise<DeliveryMonitorHealthEntity>; taskCheckpoint(taskId: string): Promise<Record<string, unknown> | null>; }
 export interface TaskGateRepository {
   findByTask(taskId: string): Promise<TaskGateEntity | null>;
@@ -200,6 +209,7 @@ export interface RepositorySet {
   gates: TaskGateRepository;
   findings: TaskFindingRepository;
   handoffs: AgentHandoffRepository;
+  plans: AgentPlanRepository;
   deliveryMonitor: DeliveryMonitorRepository;
 }
 

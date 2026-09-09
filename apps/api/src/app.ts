@@ -29,6 +29,7 @@ import { agentLogRoutes } from "./routes/agent-logs.js";
 import { handoffRoutes } from "./routes/handoffs.js";
 import { RateLimiter } from "./lib/rate-limit.js";
 import { deliveryMonitorRoutes } from "./routes/delivery-monitor.js";
+import { planRoutes } from "./routes/plans.js";
 
 export async function buildApp(options: { startWebhookDispatcher?: boolean } = {}) {
   const app = Fastify({ logger: !process.env.TEST, trustProxy: config.trustedProxy });
@@ -98,6 +99,7 @@ export async function buildApp(options: { startWebhookDispatcher?: boolean } = {
   await app.register(agentLogRoutes, { prefix: "/api" });
   await app.register(handoffRoutes, { prefix: "/api" });
   await app.register(deliveryMonitorRoutes, { prefix: "/api/delivery-monitor" });
+  await app.register(planRoutes, { prefix: "/api" });
 
   return app;
 }

@@ -331,6 +331,48 @@ test.describe("workspace browser smoke", () => {
     await expect(card.getByText("monitor-1", { exact: false })).toBeVisible();
     await expect(card.getByText("RATE_LIMIT", { exact: false })).toBeVisible();
   });
+
+  test("reviews immutable agent plans before creating their task graph", async ({ page }) => {
+    await signIn(page);
+    const key = `P${Date.now() % 1000000}`;
+    await createProject(page, `Planning Workspace ${Date.now() % 10000}`, key);
+    await page.getByRole("button", { name: "Create task" }).first().click();
+    await page.getByLabel("Task name").fill("Decompose delivery work");
+    await page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true }).click({ force: true });
+    const plans = [
+      { id: "plan-reject", taskId: "task", sourceRunId: "00000000-0000-4000-8000-000000000201", version: 1, status: "PROPOSED", summary: "First proposal", risks: ["Unbounded scope"], acceptanceEvidence: ["Review complete"], requiresApproval: true, items: [{ key: "large", title: "One large task", description: "Implement the entire workflow at once.", definitionOfDone: "All planning behavior ships in one task.", type: "FEATURE", priority: "MEDIUM", estimatePoints: 8, dependencyKeys: [] }], createdTaskIds: {}, proposedById: "agent", reviewedById: null, reviewComment: null, createdAt: new Date().toISOString(), reviewedAt: null },
+      { id: "plan-approve", taskId: "task", sourceRunId: "00000000-0000-4000-8000-000000000202", version: 2, status: "PROPOSED", summary: "Split into executable work", risks: [], acceptanceEvidence: ["Browser coverage"], requiresApproval: true, items: [{ key: "schema", title: "Create schema", description: "Persist immutable plan versions.", definitionOfDone: "SQLite and MySQL migrations pass.", type: "INFRA", priority: "HIGH", estimatePoints: 2, dependencyKeys: [] }, { key: "ui", title: "Build plan UI", description: "Render the complete proposal for reviewers.", definitionOfDone: "Reviewers can inspect descriptions and acceptance criteria.", type: "FEATURE", priority: "MEDIUM", estimatePoints: 3, dependencyKeys: ["schema"] }], createdTaskIds: {}, proposedById: "agent", reviewedById: null, reviewComment: null, createdAt: new Date().toISOString(), reviewedAt: null },
+    ];
+    await page.route("**/api/tasks/*/plans**", async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ plans }) });
+      const plan = plans.find((candidate) => request.url().includes(candidate.id))!;
+      const action = (request.postDataJSON() as { action: "APPROVE" | "REJECT" }).action;
+      plan.status = action === "APPROVE" ? "APPROVED" : "REJECTED";
+      if (action === "APPROVE") plan.createdTaskIds = { schema: "task-schema", ui: "task-ui" };
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ plan, duplicate: false }) });
+    });
+    await page.getByRole("button", { name: /Decompose delivery work/ }).click();
+    await page.getByRole("tab", { name: /Plans/ }).click();
+    await expect(page.getByText("Split into executable work")).toBeVisible();
+    await expect(page.getByText("Persist immutable plan versions.")).toBeVisible();
+    await expect(page.getByText("SQLite and MySQL migrations pass.")).toBeVisible();
+    await expect(page.getByText("Reviewers can inspect descriptions and acceptance criteria.")).toBeVisible();
+    await expect(page.getByText("Depends on schema")).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator(".plan-item").filter({ hasText: "First proposal" }).getByRole("button", { name: "Reject" }).click();
+    await expect(page.locator(".plan-item").filter({ hasText: "First proposal" }).getByText("REJECTED")).toBeVisible();
+    let taskRefreshes = 0;
+    await page.route("**/api/projects/*/tasks*", async (route) => {
+      if (route.request().method() === "GET") taskRefreshes += 1;
+      await route.continue();
+    });
+    await page.locator(".plan-item").filter({ hasText: "Split into executable work" }).getByRole("button", { name: "Approve & create tasks" }).click();
+    await expect(page.getByText("2 executable tasks created")).toBeVisible();
+    await expect(page.getByText("task-schema", { exact: true })).toBeVisible();
+    await expect(page.getByText("task-ui", { exact: true })).toBeVisible();
+    await expect.poll(() => taskRefreshes).toBeGreaterThan(0);
+  });
 });
 
 test.describe("mobile workspace smoke", () => {

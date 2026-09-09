@@ -707,6 +707,15 @@ export const migrations: readonly Migration[] = [
         : "ALTER TABLE users ADD COLUMN capability_profile TEXT NULL", []);
     },
   },
+  {
+    version: "0029_agent_plans",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_plans (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, source_run_id CHAR(36) NOT NULL, version INT NOT NULL, status VARCHAR(16) NOT NULL, summary TEXT NOT NULL, risks JSON NOT NULL, acceptance_evidence JSON NOT NULL, requires_approval BOOLEAN NOT NULL DEFAULT TRUE, items JSON NOT NULL, created_task_ids JSON NOT NULL, idempotency_key VARCHAR(180) NOT NULL, proposed_by_id CHAR(36) NOT NULL, reviewed_by_id CHAR(36) NULL, review_comment TEXT NULL, created_at VARCHAR(30) NOT NULL, reviewed_at VARCHAR(30) NULL, UNIQUE KEY uq_agent_plans_task_version (task_id, version), UNIQUE KEY uq_agent_plans_run_request (source_run_id, idempotency_key), INDEX idx_agent_plans_task (task_id, version), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (source_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (proposed_by_id) REFERENCES users(id), FOREIGN KEY (reviewed_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_plans (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, source_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, version INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('PROPOSED','APPROVED','REJECTED')), summary TEXT NOT NULL, risks TEXT NOT NULL, acceptance_evidence TEXT NOT NULL, requires_approval INTEGER NOT NULL DEFAULT 1, items TEXT NOT NULL, created_task_ids TEXT NOT NULL, idempotency_key TEXT NOT NULL, proposed_by_id TEXT NOT NULL REFERENCES users(id), reviewed_by_id TEXT NULL REFERENCES users(id), review_comment TEXT NULL, created_at TEXT NOT NULL, reviewed_at TEXT NULL, UNIQUE (task_id, version), UNIQUE (source_run_id, idempotency_key))", []);
+      if (dialect === "sqlite") await executor.run("CREATE INDEX idx_agent_plans_task ON agent_plans(task_id, version)", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {
