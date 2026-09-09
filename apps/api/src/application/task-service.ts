@@ -149,7 +149,9 @@ export class TaskApplicationService implements TaskService {
       if (!project.repoUrl) throw new ValidationError("Automatic routing requires a project repository URL");
       const repository = normalizeRepository(project.repoUrl);
       if (!repository) throw new ValidationError("Automatic routing could not normalize the project repository URL");
-      const members = (await repositories.memberships.list(project.id)).filter((member) => member.kind === "AGENT" && member.capabilityProfile);
+      const projectAgents = (await repositories.memberships.list(project.id)).filter((member) => member.kind === "AGENT");
+      const invalidProfileCount = projectAgents.filter((member) => member.capabilityProfileError).length;
+      const members = projectAgents.filter((member) => member.capabilityProfile);
       const counts = await repositories.tasks.activeAssignmentCounts(members.map((member) => member.id));
       const requiredSkills = input.requiredSkills ?? [];
       const candidates = members.filter((member) => {
@@ -161,7 +163,7 @@ export class TaskApplicationService implements TaskService {
           && requiredSkills.every((skill) => profile.skills.includes(skill))
           && (counts.get(member.id) ?? 0) < profile.maxConcurrency;
       }).sort((left, right) => (counts.get(left.id) ?? 0) - (counts.get(right.id) ?? 0) || stableCompare(left.name, right.name) || stableCompare(left.id, right.id));
-      if (!candidates.length) throw new ValidationError(`No available agent matches repository ${repository}, task type ${existing.type}, required skills [${requiredSkills.join(", ") || "none"}], and remaining capacity. Update an agent capability profile or use an operator override.`);
+      if (!candidates.length) throw new ValidationError(`No available agent matches repository ${repository}, task type ${existing.type}, required skills [${requiredSkills.join(", ") || "none"}], and remaining capacity. Update an agent capability profile or use an operator override.${invalidProfileCount ? ` ${invalidProfileCount} stored agent profile${invalidProfileCount === 1 ? " is" : "s are"} invalid and must be saved again by an administrator.` : ""}`);
 
       for (const candidate of candidates) {
         const result = await repositories.tasks.assignIfCapacity(existing.id, candidate.id, candidate.capabilityProfile!.maxConcurrency);

@@ -23,11 +23,13 @@ const queryLimit = (value: number) => Math.max(0, Math.trunc(Number.isFinite(val
 
 function toUser(row: Row): UserEntity {
   let capabilityProfile: UserEntity["capabilityProfile"] = null;
+  let capabilityProfileError: string | null = null;
   try {
     const parsed = agentCapabilityProfileSchema.safeParse(typeof row.capability_profile === "string" ? JSON.parse(row.capability_profile) : row.capability_profile);
     if (parsed.success) capabilityProfile = parsed.data;
-  } catch { /* Malformed legacy profiles are ignored until an administrator saves them again. */ }
-  return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), webhookUrl: nullableText(row.webhook_url), webhookSecretConfigured: Boolean(row.webhook_secret_ciphertext), capabilityProfile, createdAt: date(row.created_at) };
+    else if (row.capability_profile != null) capabilityProfileError = "Stored capability profile is invalid; an administrator must save it again.";
+  } catch { capabilityProfileError = "Stored capability profile is invalid; an administrator must save it again."; }
+  return { id: text(row.id), email: nullableText(row.email), name: text(row.name), kind: row.kind as UserEntity["kind"], role: row.role as UserEntity["role"], avatarUrl: nullableText(row.avatar_url), webhookUrl: nullableText(row.webhook_url), webhookSecretConfigured: Boolean(row.webhook_secret_ciphertext), capabilityProfile, capabilityProfileError, createdAt: date(row.created_at) };
 }
 
 function toWebhookDelivery(row: Row): WebhookDeliveryEntity {
@@ -321,12 +323,12 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
     },
     async assignIfCapacity(taskId, agentId, maxConcurrency) {
       if (db.dialect === "mysql") await db.prepare("SELECT id FROM users WHERE id = ? FOR UPDATE").get(agentId);
-      const task = await db.prepare("SELECT assignee_id FROM tasks WHERE id = ?").get(taskId);
+      const task = await db.prepare(`SELECT assignee_id FROM tasks WHERE id = ?${db.dialect === "mysql" ? " FOR UPDATE" : ""}`).get(taskId);
       if (!task) throw new Error("Task not found");
       if (task.assignee_id === agentId) return "ALREADY_ASSIGNED";
       if (task.assignee_id) return "TASK_TAKEN";
-      const workload = await db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE assignee_id = ? AND status NOT IN ('DONE','CANCELLED','FAILED')").get(agentId);
-      if (Number(workload?.count ?? 0) >= maxConcurrency) return "AT_CAPACITY";
+      const activeAssignments = await db.prepare(`SELECT id FROM tasks WHERE assignee_id = ? AND status NOT IN ('DONE','CANCELLED','FAILED')${db.dialect === "mysql" ? " FOR UPDATE" : ""}`).all(agentId);
+      if (activeAssignments.length >= maxConcurrency) return "AT_CAPACITY";
       const result = await db.prepare("UPDATE tasks SET assignee_id = ?, updated_at = ? WHERE id = ? AND assignee_id IS NULL").run(agentId, new Date().toISOString(), taskId);
       return Number(result.changes ?? 0) === 1 ? "ASSIGNED" : "TASK_TAKEN";
     },

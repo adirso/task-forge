@@ -82,11 +82,12 @@ test("user service assembles agent operations and enforces admin access", async 
       listAgentInProgressTasks: async () => [{ id: "task-1", number: 1, title: "Agent task", projectId: "project-1", projectKey: "TAS", projectName: "Task Forge", status: "IN_PROGRESS", assigneeId: "agent-1", assigneeName: "Agent", updatedAt: "2026-08-22T07:00:00.000Z" }],
       listAgentLastActive: async () => [{ agentId: "agent-1", lastActiveAt: "2026-08-22T11:00:00.000Z" }],
     },
+    tasks: { activeAssignmentCounts: async () => new Map([["agent-1", 2]]) },
   } as unknown as RepositorySet;
   const service = new UserApplicationService(unitOfWork(repositories), () => "2026-08-22T12:00:00.000Z");
   const operations = await service.agentOperations(adminContext);
   assert.equal(operations[0]?.lastActiveAt, "2026-08-22T11:00:00.000Z");
-  assert.equal(operations[0]?.openTaskCount, 1);
+  assert.equal(operations[0]?.openTaskCount, 2);
   assert.equal(operations[0]?.stuckTaskCount, 1);
   assert.equal(operations[0]?.inProgressTasks[0]?.isStuck, true);
   await assert.rejects(() => service.agentOperations(memberContext), ForbiddenError);

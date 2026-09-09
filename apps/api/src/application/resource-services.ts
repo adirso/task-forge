@@ -133,9 +133,10 @@ export class UserApplicationService implements UserService {
     return this.unitOfWork.run(async (repositories) => {
       const agents = (await repositories.users.list()).filter((user) => user.kind === "AGENT");
       const agentIds = agents.map((agent) => agent.id);
-      const [tasks, activity] = await Promise.all([
+      const [tasks, activity, activeAssignmentCounts] = await Promise.all([
         repositories.reporting.listAgentInProgressTasks(agentIds),
         repositories.reporting.listAgentLastActive(agentIds),
+        repositories.tasks.activeAssignmentCounts(agentIds),
       ]);
       const tasksByAgent = new Map<string, typeof tasks>();
       for (const task of tasks) {
@@ -155,9 +156,10 @@ export class UserApplicationService implements UserService {
           avatarUrl: agent.avatarUrl,
           webhookUrl: agent.webhookUrl ?? null,
           capabilityProfile: agent.capabilityProfile ?? null,
+          capabilityProfileError: agent.capabilityProfileError ?? null,
           createdAt: agent.createdAt,
           lastActiveAt: lastActiveByAgent.get(agent.id) ?? null,
-          openTaskCount: inProgressTasks.length,
+          openTaskCount: activeAssignmentCounts.get(agent.id) ?? 0,
           stuckTaskCount: inProgressTasks.filter((task) => task.updatedAt < cutoff).length,
           inProgressTasks: inProgressTasks.map((task) => ({ id: task.id, title: task.title, number: task.number, projectId: task.projectId, projectName: task.projectName, projectKey: task.projectKey, updatedAt: task.updatedAt, isStuck: task.updatedAt < cutoff })),
         };

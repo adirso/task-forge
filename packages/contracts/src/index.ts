@@ -409,6 +409,7 @@ export interface User {
   webhookUrl?: string | null;
   webhookSecretConfigured?: boolean;
   capabilityProfile?: AgentCapabilityProfile | null;
+  capabilityProfileError?: string | null;
   createdAt: string;
 }
 
@@ -621,6 +622,7 @@ export interface AgentOpsEntry {
   avatarUrl: string | null;
   webhookUrl: string | null;
   capabilityProfile: AgentCapabilityProfile | null;
+  capabilityProfileError: string | null;
   createdAt: string;
   lastActiveAt: string | null;
   openTaskCount: number;

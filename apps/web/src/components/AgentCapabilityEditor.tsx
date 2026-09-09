@@ -23,6 +23,7 @@ export function AgentCapabilityEditor({ agent, onUpdated, onSuccess, onError }: 
   }
   return <form className="agent-capability-form" onSubmit={submit}>
     <div className="section-heading"><span><Bot /> Routing capabilities</span><small>Used for deterministic automatic assignment</small></div>
+    {agent.capabilityProfileError && <div className="form-error">{agent.capabilityProfileError}</div>}
     <div className="pr-fields-row"><label>Provider<input value={profile.provider} onChange={(event) => setProfile({ ...profile, provider: event.target.value })} required /></label><label>Model<input value={profile.model} onChange={(event) => setProfile({ ...profile, model: event.target.value })} required /></label></div>
     <label>Skills<input value={skills} onChange={(event) => setSkills(event.target.value)} placeholder="typescript, security, ui" /><small>Comma-separated and matched case-insensitively.</small></label>
     <label>Repository access<textarea rows={2} value={repositories} onChange={(event) => setRepositories(event.target.value)} placeholder="github.com/org/repo or *" required /></label>

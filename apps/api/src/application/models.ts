@@ -10,6 +10,7 @@ export interface UserEntity {
   webhookUrl?: string | null;
   webhookSecretConfigured?: boolean;
   capabilityProfile?: AgentCapabilityProfile | null;
+  capabilityProfileError?: string | null;
   createdAt: string;
 }
 

@@ -312,6 +312,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
         avatarUrl: null,
         webhookUrl: null,
         capabilityProfile: MOCK_AGENT.capabilityProfile ?? null,
+        capabilityProfileError: null,
         createdAt: MOCK_AGENT.createdAt,
         lastActiveAt: MOCK_NOW,
         openTaskCount: mockTasks.filter((task) => task.assigneeId === MOCK_AGENT.id && task.status !== "DONE" && task.status !== "CANCELLED").length,
