@@ -13,6 +13,15 @@ export type RunnerResult = { status: number; body: string };
 type AgentWorkflow = { implementationQueue: string; implementationStart: string; reviewHandoff: string; reviewStart: string; approved: string; fixNeeded: string; fixStart: string; reReview: string };
 type TaskFinding = { severity?: string; title?: string; body?: string; disposition?: string; filePath?: string | null; lineNumber?: number | null };
 type VerifiedHandoff = { branch?: string | null; headSha?: string | null; branchPublished?: boolean; pullRequestUrl?: string | null; pullRequestState?: string | null; status?: string };
+type RunContextPack = {
+  version: number; fingerprint: string;
+  content: {
+    history?: { decisions?: Array<{ body?: string }>; recentUpdates?: Array<{ body?: string }>; findings?: TaskFinding[]; summary?: { omittedSummary?: string | null } };
+    dependencies?: Array<{ projectKey?: string; number?: number; title?: string; status?: string; isBlocking?: boolean }>;
+    attachments?: Array<{ fileName?: string; mimeType?: string; size?: number; downloadUrl?: string }>;
+    repository?: { guidanceFiles?: string[]; relevantFiles?: string[] };
+  };
+};
 type ContextResponse = { project: { id?: string; key: string; availableStatuses: string[]; localRepoPath?: string | null; agentWorkflow?: AgentWorkflow | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }>; findings?: TaskFinding[] } };
 type WorktreeFactory = (repo: string, branch: string | null, taskId: string) => Promise<string>;
 
@@ -250,6 +259,8 @@ export class SmithyRunner {
       if (!runCredential?.token?.startsWith("tfr_") || !runCredential.expiresAt || Date.parse(runCredential.expiresAt) <= this.now()) {
         throw new Error("TaskForge did not issue a valid short-lived run credential");
       }
+      const contextPackResponse = await api.request(`/api/runs/${runId}/context-pack`) as unknown as { contextPack?: RunContextPack };
+      const contextPack = contextPackResponse.contextPack?.version && contextPackResponse.contextPack.fingerprint ? contextPackResponse.contextPack : null;
       let verifiedHandoff: VerifiedHandoff | null = null;
       if (kind === "REVIEW" || kind === "RE_REVIEW") {
         try {
@@ -279,13 +290,24 @@ export class SmithyRunner {
       appendLog("system", "lifecycle", `Smithy started ${kind.toLowerCase()} run ${runId}.`);
       const statuses = context.project.availableStatuses;
       const findingResponse = await api.request(`/api/tasks/${task.id}/findings`) as unknown as { findings?: TaskFinding[] };
-      const findings = Array.isArray(findingResponse.findings) ? findingResponse.findings : [];
+      const findings = contextPack?.content.history?.findings ?? (Array.isArray(findingResponse.findings) ? findingResponse.findings : []);
       const contextEndpoint = `/api/context?project=${encodeURIComponent(projectKey)}&task=${encodeURIComponent(`${projectKey}-${taskNumber}`)}`;
       const findingLines = findings.map((finding) => `Finding [${finding.severity ?? "UNKNOWN"}] ${finding.disposition ? `(${finding.disposition}) ` : ""}${redact(finding.title ?? "")}: ${redact(finding.body ?? "")}${finding.filePath ? ` (${finding.filePath}${finding.lineNumber ? `:${finding.lineNumber}` : ""})` : ""}`);
       const prTask = task as typeof task & { pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null; headSha?: string | null; branchPublished?: boolean; status?: string };
       const publication = verifiedHandoff ?? prTask;
       const publicationState = publication.status === "PUBLISHED" && publication.branchPublished && publication.branch && publication.headSha && publication.pullRequestUrl ? "verified" : "incomplete or unverified";
-      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, `Branch: ${task.branch?.trim() || "(no branch configured)"}`, `Canonical publication (${publicationState}): branch ${redact(publication.branch ?? task.branch ?? "(not recorded)")}; head SHA ${redact(publication.headSha ?? "(not recorded)")}; pull request ${redact(publication.pullRequestUrl ?? prTask.pullRequestUrl ?? "(not recorded)")} (${redact(publication.pullRequestState ?? prTask.pullRequestState ?? "unknown")})`, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...(task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`), ...(event.operatorInput ? [`Operator input: ${redact(event.operatorInput)}`] : []), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), `If a decision is required, POST /api/runs/${runId}/interventions with an Idempotency-Key and {"action":"REQUEST_INPUT","controlVersion":${controlVersion},"input":"your concise question"}; stop work after TaskForge accepts it.`, "TaskForge access is available through TASKFORGE_API_URL and the short-lived TASKFORGE_TOKEN. The credential is bound to this task and run; never print, persist, or copy it.", "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
+      const memoryUpdates = contextPack
+        ? [...(contextPack.content.history?.decisions ?? []), ...(contextPack.content.history?.recentUpdates ?? [])].map((update) => `Historical context: ${redact(update.body ?? "")}`)
+        : (task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`);
+      const contextPackLines = contextPack ? [
+        `Durable context pack: version ${contextPack.version}; fingerprint ${contextPack.fingerprint}. Retries must reuse this stored version unless TaskForge records an explicit refresh.`,
+        ...(contextPack.content.history?.summary?.omittedSummary ? [`History summary: ${redact(contextPack.content.history.summary.omittedSummary)}`] : []),
+        ...(contextPack.content.dependencies?.length ? ["Dependencies:", ...contextPack.content.dependencies.map((dependency) => `- ${redact(dependency.projectKey ?? "")}-${dependency.number ?? "?"}: ${redact(dependency.title ?? "")} (${redact(dependency.status ?? "unknown")}${dependency.isBlocking ? ", blocking" : ""})`)] : []),
+        ...(contextPack.content.attachments?.length ? ["Attachments:", ...contextPack.content.attachments.map((attachment) => `- ${redact(attachment.fileName ?? "attachment")} (${redact(attachment.mimeType ?? "unknown")}, ${attachment.size ?? 0} bytes): ${redact(attachment.downloadUrl ?? "")}`)] : []),
+        ...(contextPack.content.repository?.guidanceFiles?.length ? [`Repository guidance: ${contextPack.content.repository.guidanceFiles.map(redact).join(", ")}`] : []),
+        ...(contextPack.content.repository?.relevantFiles?.length ? [`Relevant files: ${contextPack.content.repository.relevantFiles.map(redact).join(", ")}`] : []),
+      ] : ["Durable context pack metadata was not returned; continue with the canonical task context and report the compatibility gap."];
+      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, `Branch: ${task.branch?.trim() || "(no branch configured)"}`, `Canonical publication (${publicationState}): branch ${redact(publication.branch ?? task.branch ?? "(not recorded)")}; head SHA ${redact(publication.headSha ?? "(not recorded)")}; pull request ${redact(publication.pullRequestUrl ?? prTask.pullRequestUrl ?? "(not recorded)")} (${redact(publication.pullRequestState ?? prTask.pullRequestState ?? "unknown")})`, ...contextPackLines, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...memoryUpdates, ...(event.operatorInput ? [`Operator input: ${redact(event.operatorInput)}`] : []), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), `If a decision is required, POST /api/runs/${runId}/interventions with an Idempotency-Key and {"action":"REQUEST_INPUT","controlVersion":${controlVersion},"input":"your concise question"}; stop work after TaskForge accepts it.`, "TaskForge access is available through TASKFORGE_API_URL and the short-lived TASKFORGE_TOKEN. The credential is bound to this task and run; never print, persist, or copy it.", "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);

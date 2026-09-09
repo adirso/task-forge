@@ -4,6 +4,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import type { RequestContext } from "./context.js";
 import type { AgentRunEntity, TaskEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
+import { persistInitialContextPack } from "./context-pack-service.js";
 
 export class AgentRunApplicationService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now = () => new Date().toISOString(), private readonly newId = randomUUID) {}
@@ -22,8 +23,10 @@ export class AgentRunApplicationService {
       if (cycle.count >= cycle.limit) throw new ValidationError("Task has reached the maximum autonomous delivery cycle limit");
       const now = this.now();
       const assignee = task.assigneeId ? await r.users.findById(task.assigneeId) : null;
-      const run: AgentRunEntity = { id: this.newId(), taskId, projectId: task.projectId, requestedById: context.actor.userId, executedById: null, kind: input.kind, status: "PENDING", controlState: "ACTIVE", controlVersion: 0, assignedAgentId: assignee?.kind === "AGENT" ? assignee.id : null, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 0, maxAttempts: Math.max(1, Math.min(10, input.maxAttempts ?? 3)), leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: input.timeoutAt ?? null, lastError: null, createdAt: now, updatedAt: now, completedAt: null };
-      return r.runs.create(run);
+      const run: AgentRunEntity = { id: this.newId(), taskId, projectId: task.projectId, requestedById: context.actor.userId, executedById: null, kind: input.kind, status: "PENDING", controlState: "ACTIVE", controlVersion: 0, assignedAgentId: assignee?.kind === "AGENT" ? assignee.id : null, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 0, maxAttempts: Math.max(1, Math.min(10, input.maxAttempts ?? 3)), leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: input.timeoutAt ?? null, lastError: null, createdAt: now, updatedAt: now, completedAt: null, contextPackVersion: 0, contextPackFingerprint: null };
+      await r.runs.create(run);
+      await persistInitialContextPack(r, run, context.actor.userId, now, this.newId);
+      return r.runs.findById(run.id);
     });
   }
 

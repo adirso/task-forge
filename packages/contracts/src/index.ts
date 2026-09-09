@@ -159,6 +159,49 @@ export const agentPlanDecisionSchema = z.object({
   action: z.enum(["APPROVE", "REJECT"]),
   comment: z.string().trim().max(4000).nullable().optional(),
 });
+
+export const AGENT_CONTEXT_PACK_SCHEMA_VERSION = 1 as const;
+const contextPackTextSchema = z.string().max(10_000);
+export const agentContextPackContentSchema = z.object({
+  schemaVersion: z.literal(AGENT_CONTEXT_PACK_SCHEMA_VERSION),
+  task: z.object({
+    id: z.string(), projectKey: z.string(), number: z.number().int().positive(), title: contextPackTextSchema,
+    description: contextPackTextSchema, definitionOfDone: contextPackTextSchema, status: taskStatusSchema,
+    priority: taskPrioritySchema, type: taskTypeSchema, branch: contextPackTextSchema.nullable(), phaseId: z.string().nullable(),
+  }),
+  project: z.object({
+    id: z.string(), key: z.string(), name: contextPackTextSchema, repositoryUrl: contextPackTextSchema.nullable(),
+    availableStatuses: z.array(taskStatusSchema), mergeTarget: projectMergeTargetSchema,
+  }),
+  dependencies: z.array(z.object({
+    taskId: z.string(), projectKey: z.string(), number: z.number().int().positive(), title: contextPackTextSchema,
+    status: taskStatusSchema, isBlocking: z.boolean(),
+  })),
+  attachments: z.array(z.object({
+    id: z.string(), fileName: contextPackTextSchema, mimeType: contextPackTextSchema, size: z.number().int().nonnegative(), downloadUrl: contextPackTextSchema,
+  })),
+  repository: z.object({ guidanceFiles: z.array(contextPackTextSchema), relevantFiles: z.array(contextPackTextSchema) }),
+  history: z.object({
+    decisions: z.array(z.object({ id: z.string(), body: contextPackTextSchema, createdAt: z.string() })),
+    recentUpdates: z.array(z.object({ id: z.string(), body: contextPackTextSchema, createdAt: z.string() })),
+    findings: z.array(z.object({
+      id: z.string(), severity: z.enum(["P0", "P1", "P2", "P3"]), title: contextPackTextSchema,
+      body: contextPackTextSchema, disposition: z.string(), dispositionReason: contextPackTextSchema.nullable(),
+      filePath: contextPackTextSchema.nullable(), lineNumber: z.number().int().positive().nullable(), updatedAt: z.string(),
+    })),
+    priorRuns: z.array(z.object({ id: z.string(), kind: z.string(), status: z.string(), lastError: contextPackTextSchema.nullable(), completedAt: z.string().nullable() })),
+    summary: z.object({ totalUpdates: z.number().int().nonnegative(), includedUpdates: z.number().int().nonnegative(), omittedUpdates: z.number().int().nonnegative(), omittedSummary: contextPackTextSchema.nullable() }),
+  }),
+});
+export const agentContextPackSchema = z.object({
+  id: z.string(), runId: z.string(), taskId: z.string(), projectId: z.string(),
+  version: z.number().int().positive(), fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  content: agentContextPackContentSchema, refreshedFromVersion: z.number().int().positive().nullable(),
+  refreshReason: z.enum(["INITIAL", "EXPLICIT_REFRESH"]), createdById: z.string(), createdAt: z.string(),
+});
+export const agentContextPackRefreshSchema = z.object({
+  reason: z.string().trim().min(1).max(500).optional(),
+});
 /** Pull requests are intentionally restricted to canonical public GitHub URLs. */
 export const deliveryMonitorPullRequestSchema = z.object({
   owner: z.string().regex(/^[A-Za-z0-9_.-]+$/),
@@ -410,6 +453,9 @@ export type AgentPlanStatus = z.infer<typeof agentPlanStatusSchema>;
 export type AgentPlanItem = z.infer<typeof agentPlanItemSchema>;
 export type AgentPlanProposal = z.infer<typeof agentPlanProposalSchema>;
 export type AgentPlanDecision = z.infer<typeof agentPlanDecisionSchema>;
+export type AgentContextPackContent = z.infer<typeof agentContextPackContentSchema>;
+export type AgentContextPack = z.infer<typeof agentContextPackSchema>;
+export type AgentContextPackRefresh = z.infer<typeof agentContextPackRefreshSchema>;
 export type DeliveryMonitorConfig = z.infer<typeof deliveryMonitorConfigSchema>;
 export type DeliveryMonitorPullRequest = z.infer<typeof deliveryMonitorPullRequestSchema>;
 export type DeliveryMonitorErrorCategory = z.infer<typeof deliveryMonitorErrorCategorySchema>;

@@ -15,6 +15,7 @@ function base(overrides: Partial<RepositorySet> = {}): RepositorySet {
     memberships: { isMember: async () => true } as never,
     tasks: { findById: async () => task } as never,
     runs: {} as never,
+    contextPacks: {} as never,
     users: {} as never, phases: {} as never, tags: {} as never, dependencies: {} as never, updates: {} as never,
     attachments: {} as never, automations: {} as never, notifications: {} as never, activity: {} as never,
     webhookDeliveries: {} as never, reporting: {} as never, tokens: { revokeRunCredential: async () => undefined } as never, search: {} as never,
@@ -23,7 +24,7 @@ function base(overrides: Partial<RepositorySet> = {}): RepositorySet {
 }
 
 function run(overrides: Partial<AgentRunEntity> = {}): AgentRunEntity {
-  return { id: "run-1", taskId: task.id, projectId: project.id, requestedById: "owner-1", executedById: null, kind: "IMPLEMENTATION", status: "PENDING", controlState: "ACTIVE", controlVersion: 0, assignedAgentId: null, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 0, maxAttempts: 2, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: "2026-08-24T10:00:00.000Z", updatedAt: "2026-08-24T10:00:00.000Z", completedAt: null, ...overrides };
+  return { id: "run-1", taskId: task.id, projectId: project.id, requestedById: "owner-1", executedById: null, kind: "IMPLEMENTATION", status: "PENDING", controlState: "ACTIVE", controlVersion: 0, assignedAgentId: null, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 0, maxAttempts: 2, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: "2026-08-24T10:00:00.000Z", updatedAt: "2026-08-24T10:00:00.000Z", completedAt: null, contextPackVersion: 0, contextPackFingerprint: null, ...overrides };
 }
 
 test("run claims are race-safe: only one concurrent claimant wins", async () => {
