@@ -115,6 +115,40 @@ export const agentRunInterventionSchema = z.object({
   if (["REQUEST_INPUT", "ANSWER"].includes(value.action) && !value.input) context.addIssue({ code: "custom", path: ["input"], message: "input is required for this intervention" });
 });
 
+export const agentUsageEventInputSchema = z.object({
+  eventId: z.string().trim().min(1).max(180),
+  provider: z.string().trim().min(1).max(64),
+  model: z.string().trim().min(1).max(120),
+  inputTokens: z.number().int().nonnegative().max(1_000_000_000).default(0),
+  outputTokens: z.number().int().nonnegative().max(1_000_000_000).default(0),
+  costMicros: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
+  toolCalls: z.number().int().nonnegative().max(1_000_000).default(0),
+  runtimeMs: z.number().int().nonnegative().max(86_400_000).default(0),
+});
+export type AgentUsageEventInput = z.infer<typeof agentUsageEventInputSchema>;
+export const agentBudgetScopeSchema = z.enum(["PROJECT", "PHASE", "TASK"]);
+export const agentBudgetActionSchema = z.enum(["WARN", "PAUSE", "BLOCK"]);
+export const agentBudgetLimitsSchema = z.object({
+  totalTokens: z.number().int().positive().optional(),
+  costMicros: z.number().int().positive().optional(),
+  toolCalls: z.number().int().positive().optional(),
+  runtimeMs: z.number().int().positive().optional(),
+  retries: z.number().int().positive().optional(),
+  forcedCycles: z.number().int().positive().optional(),
+}).refine((limits) => Object.keys(limits).length > 0, "At least one budget limit is required");
+export const agentBudgetUpsertSchema = z.object({
+  action: agentBudgetActionSchema,
+  limits: agentBudgetLimitsSchema,
+});
+export type AgentBudgetScope = z.infer<typeof agentBudgetScopeSchema>;
+export type AgentBudgetAction = z.infer<typeof agentBudgetActionSchema>;
+export type AgentBudgetLimits = z.infer<typeof agentBudgetLimitsSchema>;
+export type AgentBudgetUpsert = z.infer<typeof agentBudgetUpsertSchema>;
+export interface AgentUsageTotals { inputTokens: number; outputTokens: number; totalTokens: number; costMicros: number; toolCalls: number; runtimeMs: number; retries: number; forcedCycles: number; runCount: number; eventCount: number; }
+export interface AgentUsageBreakdown extends AgentUsageTotals { key: string; }
+export interface AgentUsageReport { total: AgentUsageTotals; byRun: AgentUsageBreakdown[]; byTask: AgentUsageBreakdown[]; byPhase: AgentUsageBreakdown[]; byProject: AgentUsageBreakdown[]; byProvider: AgentUsageBreakdown[]; byModel: AgentUsageBreakdown[]; }
+export interface AgentBudget { id: string; projectId: string; scope: AgentBudgetScope; scopeId: string; action: AgentBudgetAction; limits: AgentBudgetLimits; createdAt: string; updatedAt: string; }
+
 export const agentPlanStatusSchema = z.enum(["PROPOSED", "APPROVED", "REJECTED"]);
 export const agentPlanItemSchema = z.object({
   key: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, "Item keys may contain letters, numbers, underscores, and hyphens"),
@@ -754,6 +788,7 @@ export interface DashboardSummaryProject {
   nonDoneTaskCount: number;
   cancelledTaskCount: number;
   nonDonePhaseCount: number;
+  agentUsage: AgentUsageTotals;
 }
 
 export interface DashboardSummaryTask {

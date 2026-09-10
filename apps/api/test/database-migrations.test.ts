@@ -163,6 +163,14 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
     ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_context_packs'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_context_packs'", []));
   assert.equal(hasContextPacks, true);
+  const hasUsageEvents = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_usage_events'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_usage_events'", []));
+  const hasAgentBudgets = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_budgets'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_budgets'", []));
+  assert.equal(hasUsageEvents, true);
+  assert.equal(hasAgentBudgets, true);
   if (expectsLegacyTask) {
     const project = await adapter.get<{ dependency_resolution_statuses: string }>("SELECT dependency_resolution_statuses FROM projects WHERE id = ?", ["project-1"]);
     assert.deepEqual(JSON.parse(project!.dependency_resolution_statuses), ["DONE", "CANCELLED"]);

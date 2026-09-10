@@ -12,6 +12,8 @@ export const HEADLESS_PROVIDER_COMMANDS: Readonly<Record<string, string>> = Obje
 
 export interface ProviderConfig {
   cmd: string;
+  /** Stable provider model label used for usage aggregation. */
+  model?: string;
   /** Optional operator-owned command used for authentication diagnostics. */
   healthCmd?: string;
   repo?: string;
@@ -51,8 +53,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SmithyConfig {
     const value = raw as Record<string, unknown>;
     for (const field of ["cmd", "webhookSecret", "apiToken"] as const) if (typeof value[field] !== "string" || !value[field]) throw new Error(`SMITHY_PROVIDERS.${label}.${field} is required`);
     if (value.healthCmd !== undefined && (typeof value.healthCmd !== "string" || !value.healthCmd.trim())) throw new Error(`SMITHY_PROVIDERS.${label}.healthCmd must be a non-empty command when provided`);
+    if (value.model !== undefined && (typeof value.model !== "string" || !value.model.trim() || value.model.length > 120)) throw new Error(`SMITHY_PROVIDERS.${label}.model must be a non-empty model label when provided`);
     if (value.repo !== undefined && (typeof value.repo !== "string" || !value.repo)) throw new Error(`SMITHY_PROVIDERS.${label}.repo must be a non-empty path when provided`);
-    providers[label] = { cmd: value.cmd as string, healthCmd: value.healthCmd as string | undefined, repo: value.repo as string | undefined, webhookSecret: value.webhookSecret as string, apiToken: value.apiToken as string };
+    providers[label] = { cmd: value.cmd as string, model: value.model as string | undefined, healthCmd: value.healthCmd as string | undefined, repo: value.repo as string | undefined, webhookSecret: value.webhookSecret as string, apiToken: value.apiToken as string };
   }
   const host = env.SMITHY_HOST ?? "127.0.0.1";
   if (!(["127.0.0.1", "::1", "localhost"] as string[]).includes(host)) throw new Error("Smithy must bind to loopback; non-loopback SMITHY_HOST is not allowed");

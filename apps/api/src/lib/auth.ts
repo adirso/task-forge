@@ -61,9 +61,9 @@ async function runCredentialMayAccess(request: FastifyRequest, credential: NonNu
   if (runMatch) {
     if (decodeURIComponent(runMatch[1]!) !== credential.runId) return false;
     const suffix = runMatch[2] ?? "";
-    return (method === "GET" && ["/handoff", "/context-pack", "/context-packs"].includes(suffix))
+    return (method === "GET" && ["/handoff", "/context-pack", "/context-packs", "/usage"].includes(suffix))
       || (method === "PUT" && suffix === "/handoff")
-      || (method === "POST" && ["/handoff/validate", "/interventions", "/context-pack/refresh"].includes(suffix));
+      || (method === "POST" && ["/handoff/validate", "/interventions", "/context-pack/refresh", "/usage"].includes(suffix));
   }
 
   const findingMatch = pathname.match(/^\/api\/findings\/([^/]+)\/disposition$/);

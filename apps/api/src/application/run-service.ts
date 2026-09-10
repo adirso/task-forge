@@ -5,6 +5,7 @@ import type { RequestContext } from "./context.js";
 import type { AgentRunEntity, TaskEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
 import { persistInitialContextPack } from "./context-pack-service.js";
+import { assertAgentBudgetAllows } from "./agent-usage-service.js";
 
 export class AgentRunApplicationService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now = () => new Date().toISOString(), private readonly newId = randomUUID) {}
@@ -19,6 +20,7 @@ export class AgentRunApplicationService {
       const task = await r.tasks.findById(taskId);
       if (!task) throw new NotFoundError("Task");
       await this.authorize(r, context, task.projectId);
+      await assertAgentBudgetAllows(r, task);
       const cycle = await r.runs.cycleState(taskId);
       if (cycle.count >= cycle.limit) throw new ValidationError("Task has reached the maximum autonomous delivery cycle limit");
       const now = this.now();
@@ -60,7 +62,7 @@ export class AgentRunApplicationService {
   }
 
   async claim(context: RequestContext, runId: string, leaseMs = 60_000) {
-    return this.unitOfWork.run(async (r) => { await r.runs.expire(this.now()); const run = await r.runs.findById(runId); if (!run) throw new NotFoundError("Agent run"); await this.authorize(r, context, run.projectId); if (context.actor.kind !== "AGENT") throw new ForbiddenError("Only agents can claim agent runs"); if (run.controlState !== "ACTIVE") throw new ValidationError("Agent run is paused or waiting for operator input"); if (run.assignedAgentId && run.assignedAgentId !== context.actor.userId) throw new ForbiddenError("Agent run is assigned to another agent"); if (run.attemptCount >= run.maxAttempts) throw new ValidationError("Agent run has exhausted its retry budget"); const now = this.now(); const claimed = await r.runs.claim(runId, context.actor.userId, now, new Date(Date.parse(now) + Math.max(5_000, Math.min(15 * 60_000, leaseMs))).toISOString()); if (!claimed) throw new ValidationError("Agent run is already leased or no longer runnable"); return r.runs.findById(runId); });
+    return this.unitOfWork.run(async (r) => { await r.runs.expire(this.now()); const run = await r.runs.findById(runId); if (!run) throw new NotFoundError("Agent run"); await this.authorize(r, context, run.projectId); if (context.actor.kind !== "AGENT") throw new ForbiddenError("Only agents can claim agent runs"); const task = await r.tasks.findById(run.taskId); if (!task) throw new NotFoundError("Task"); await assertAgentBudgetAllows(r, task); if (run.controlState !== "ACTIVE") throw new ValidationError("Agent run is paused or waiting for operator input"); if (run.assignedAgentId && run.assignedAgentId !== context.actor.userId) throw new ForbiddenError("Agent run is assigned to another agent"); if (run.attemptCount >= run.maxAttempts) throw new ValidationError("Agent run has exhausted its retry budget"); const now = this.now(); const claimed = await r.runs.claim(runId, context.actor.userId, now, new Date(Date.parse(now) + Math.max(5_000, Math.min(15 * 60_000, leaseMs))).toISOString()); if (!claimed) throw new ValidationError("Agent run is already leased or no longer runnable"); return r.runs.findById(runId); });
   }
 
   async heartbeat(context: RequestContext, runId: string, controlVersion: number, leaseMs = 60_000) { return this.unitOfWork.run(async (r) => { await r.runs.expire(this.now()); const run = await r.runs.findById(runId); if (!run) throw new NotFoundError("Agent run"); await this.authorize(r, context, run.projectId); const now = this.now(); const ok = await r.runs.heartbeat(runId, context.actor.userId, controlVersion, now, new Date(Date.parse(now) + Math.max(5_000, Math.min(15 * 60_000, leaseMs))).toISOString()); if (!ok) { const current = await r.runs.findById(runId); if (current && (current.controlVersion !== controlVersion || current.controlState !== "ACTIVE")) throw new ConflictError("Agent run control decision superseded this worker"); throw new ValidationError("Agent run lease is stale"); } return r.runs.findById(runId); }); }

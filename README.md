@@ -241,6 +241,12 @@ Smithy persists handoff evidence by `runId`. `IN_PROGRESS` with a pending handof
 
 New projects require independent agent review by default. Project owners can configure the required reviewer count and optionally restrict approval to selected agent members in project settings. Task gates bind the implementation run, implementing agent, reviewer approvals, and CI evidence to one head SHA; a new head invalidates the approvals. The implementing agent cannot approve that head, and the current policy is checked again before a project owner or administrator authorizes a merge.
 
+## Agent usage and budgets
+
+Smithy records wall-clock runtime for every provider attempt. Provider-neutral commands can additionally emit one or more single-line `TASKFORGE_USAGE: {"inputTokens":100,"outputTokens":20,"costMicros":5000,"toolCalls":3}` envelopes; Smithy aggregates valid non-negative counters and submits one idempotent event before the run completion callback. Set the optional provider `model` label in `SMITHY_PROVIDERS` to group usage by model. Retries and operator-forced delivery cycles are derived by TaskForge from durable run state rather than trusted provider input.
+
+Authenticated project members can inspect current or historical aggregates with `GET /api/projects/:projectId/agent-usage`, optionally filtered by `phaseId`, `taskId`, `provider`, or `model`; per-run history is available at `GET /api/runs/:runId/usage` and project totals appear on the dashboard. Project owners and administrators configure project, phase, or task limits through `/api/projects/:projectId/agent-budgets/:scope/:scopeId`. `WARN` records an audit event, `PAUSE` fences the active run and revokes its credential, and `BLOCK` prevents new runs and claims after the limit is reached. Usage events remain immutable, and retrying the same run/event identifier never charges it twice.
+
 ## Delivery Monitor
 
 See the complete [Delivery Monitor operator runbook](docs/DELIVERY_MONITOR_RUNBOOK.md) for setup, recovery, and troubleshooting.

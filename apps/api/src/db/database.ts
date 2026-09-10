@@ -731,6 +731,23 @@ export const migrations: readonly Migration[] = [
       if (dialect === "sqlite") await executor.run("CREATE INDEX idx_agent_context_packs_task ON agent_context_packs(task_id, created_at)", []);
     },
   },
+  {
+    version: "0031_agent_usage_budgets",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_usage_events (id CHAR(36) PRIMARY KEY, run_id CHAR(36) NOT NULL, task_id CHAR(36) NOT NULL, phase_id CHAR(36) NULL, project_id CHAR(36) NOT NULL, event_id VARCHAR(180) NOT NULL, provider VARCHAR(64) NOT NULL, model VARCHAR(120) NOT NULL, input_tokens BIGINT NOT NULL DEFAULT 0, output_tokens BIGINT NOT NULL DEFAULT 0, cost_micros BIGINT NOT NULL DEFAULT 0, tool_calls BIGINT NOT NULL DEFAULT 0, runtime_ms BIGINT NOT NULL DEFAULT 0, is_retry BOOLEAN NOT NULL DEFAULT FALSE, is_forced_cycle BOOLEAN NOT NULL DEFAULT FALSE, created_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_agent_usage_run_event (run_id, event_id), INDEX idx_agent_usage_project (project_id, created_at), INDEX idx_agent_usage_task (task_id, created_at), INDEX idx_agent_usage_phase (phase_id, created_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (phase_id) REFERENCES phases(id) ON DELETE SET NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_usage_events (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, phase_id TEXT NULL REFERENCES phases(id) ON DELETE SET NULL, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, event_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cost_micros INTEGER NOT NULL DEFAULT 0, tool_calls INTEGER NOT NULL DEFAULT 0, runtime_ms INTEGER NOT NULL DEFAULT 0, is_retry INTEGER NOT NULL DEFAULT 0, is_forced_cycle INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE (run_id, event_id))", []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_budgets (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, scope_type VARCHAR(12) NOT NULL, scope_id CHAR(36) NOT NULL, action VARCHAR(8) NOT NULL, limits_json JSON NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_agent_budget_scope (scope_type, scope_id), INDEX idx_agent_budgets_project (project_id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_budgets (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, scope_type TEXT NOT NULL CHECK (scope_type IN ('PROJECT','PHASE','TASK')), scope_id TEXT NOT NULL, action TEXT NOT NULL CHECK (action IN ('WARN','PAUSE','BLOCK')), limits_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (scope_type, scope_id))", []);
+      if (dialect === "sqlite") {
+        await executor.run("CREATE INDEX idx_agent_usage_project ON agent_usage_events(project_id, created_at)", []);
+        await executor.run("CREATE INDEX idx_agent_usage_task ON agent_usage_events(task_id, created_at)", []);
+        await executor.run("CREATE INDEX idx_agent_usage_phase ON agent_usage_events(phase_id, created_at)", []);
+        await executor.run("CREATE INDEX idx_agent_budgets_project ON agent_budgets(project_id)", []);
+      }
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {
