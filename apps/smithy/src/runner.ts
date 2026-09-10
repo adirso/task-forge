@@ -41,6 +41,20 @@ const LEGACY_AGENT_WORKFLOW: AgentWorkflow = {
 const noopWorktree: WorktreeFactory = async (repo) => repo;
 const readGit = promisify(execFile);
 
+type ProviderUsage = { inputTokens: number; outputTokens: number; costMicros: number; toolCalls: number };
+export function parseProviderUsage(output: string): ProviderUsage {
+  const total: ProviderUsage = { inputTokens: 0, outputTokens: 0, costMicros: 0, toolCalls: 0 };
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.match(/^TASKFORGE_USAGE\s*[:=]\s*(\{.*\})\s*$/);
+    if (!match) continue;
+    try {
+      const value = JSON.parse(match[1]!) as Record<string, unknown>;
+      for (const key of Object.keys(total) as Array<keyof ProviderUsage>) { const amount = Number(value[key] ?? 0); if (Number.isSafeInteger(amount) && amount >= 0) total[key] += amount; }
+    } catch { /* Malformed optional provider metrics are ignored, never logged. */ }
+  }
+  return total;
+}
+
 export class SmithyRunner {
   private readonly store: JobStore;
   private readonly activeByTask = new Map<string, string>();
@@ -316,11 +330,15 @@ export class SmithyRunner {
         this.store.markComplete(event.id, "CANCELLED");
         return;
       }
+      const startedAt = this.now();
       const result = await this.execute(config.cmd, prompt, cwd, undefined, (stream, chunk) => {
         const text = redact(chunk.trim()).slice(0, 1_000).trim();
         if (!text) return;
         appendLog(stream, "output", text);
       }, controller.signal, providerEnvironment(process.env, { token: runCredential.token, apiUrl: this.apiUrl, runId, taskId: task.id, projectId: context.project.id ?? projectKey }, this.sandboxPolicy.environmentAllow), this.sandboxPolicy);
+      const metrics = parseProviderUsage(`${result.stdout}\n${result.stderr}`);
+      const usageResponse = await api.request(`/api/runs/${runId}/usage`, { method: "POST", body: JSON.stringify({ eventId: `${event.id}:${job.attemptCount + 1}`, provider: job.provider, model: config.model ?? "unspecified", ...metrics, runtimeMs: Math.max(0, this.now() - startedAt) }) }) as { budgetDecisions?: Array<{ action?: string }> };
+      if (usageResponse.budgetDecisions?.some((decision) => decision.action === "PAUSE")) { controlSuperseded = true; controller.abort(); throw new Error("Agent usage budget paused this run"); }
       if (leaseLost) throw new Error("Run lease was lost; provider execution was stopped and recovery will resume the existing run");
       await logQueue;
       this.controllers.delete(event.id);

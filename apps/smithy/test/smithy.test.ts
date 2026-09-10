@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { executeCommand, providerEnvironment, renderCommand } from "../src/command.js";
-import { SmithyRunner } from "../src/runner.js";
+import { SmithyRunner, parseProviderUsage } from "../src/runner.js";
 import { sign, verifySignature, redact } from "../src/security.js";
 import { MemoryJobStore } from "../src/store.js";
 import { loadConfig } from "../src/config.js";
@@ -26,6 +26,10 @@ test("signature verification enforces timestamp and exact body", () => {
   assert.equal(verifySignature(secret, header, body, timestamp), true);
   assert.equal(verifySignature(secret, header, body + " ", timestamp), false);
   assert.equal(verifySignature(secret, header, body, timestamp + 301), false);
+});
+
+test("provider-neutral usage envelopes aggregate valid values and ignore malformed metrics", () => {
+  assert.deepEqual(parseProviderUsage('TASKFORGE_USAGE: {"inputTokens":12,"outputTokens":3,"costMicros":42,"toolCalls":2}\nnoise\nTASKFORGE_USAGE={"inputTokens":8}\nTASKFORGE_USAGE: secret'), { inputTokens: 20, outputTokens: 3, costMicros: 42, toolCalls: 2 });
 });
 
 test("configuration rejects non-loopback execution hosts", () => {
@@ -330,6 +334,7 @@ test("runner routes signed events, executes once, and deduplicates delivery", as
   assert.ok(calls.includes(`/api/tasks/${event.task.id}/runs`));
   assert.ok(calls.includes("/api/runs/run-1/claim"));
   assert.ok(calls.includes("/api/runs/run-1/credential"));
+  assert.ok(calls.includes("/api/runs/run-1/usage"));
   assert.ok(calls.includes("/api/runs/run-1/complete"));
   assert.equal(bodies["/api/runs/run-1/claim"], JSON.stringify({ leaseMs: 120000 }));
   assert.ok(calls.includes(`/api/tasks/${event.task.id}/agent-logs`));

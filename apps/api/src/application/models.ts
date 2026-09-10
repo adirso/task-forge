@@ -1,4 +1,4 @@
-import type { AgentCapabilityProfile, AgentContextPack, AgentPlanItem, AgentPlanStatus, AgentRunControlState, AgentRunInterventionAction, AgentWorkflow, DependencyResolutionStatus, ProjectMergeTarget, ProjectReviewPolicy, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
+import type { AgentBudget, AgentCapabilityProfile, AgentContextPack, AgentPlanItem, AgentPlanStatus, AgentRunControlState, AgentRunInterventionAction, AgentUsageEventInput, AgentWorkflow, DependencyResolutionStatus, ProjectMergeTarget, ProjectReviewPolicy, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
 
 export interface UserEntity {
   id: string;
@@ -67,6 +67,8 @@ export interface AgentRunEntity {
   contextPackVersion: number;
   contextPackFingerprint: string | null;
 }
+export interface AgentUsageEventEntity extends AgentUsageEventInput { id: string; runId: string; taskId: string; phaseId: string | null; projectId: string; retry: boolean; forcedCycle: boolean; createdAt: string; }
+export type AgentBudgetEntity = AgentBudget;
 export type AgentContextPackEntity = AgentContextPack;
 export interface AgentRunInterventionEntity {
   requestId: string;

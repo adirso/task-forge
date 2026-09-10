@@ -20,6 +20,7 @@ process.env.TEST = "1";
 
 const { db } = await import("../src/db/database.js");
 const { buildApp } = await import("../src/app.js");
+const { createJwt } = await import("../src/lib/auth.js");
 const { syncTask } = await import("../../delivery-monitor/src/sync.js");
 const app = await buildApp();
 
@@ -670,6 +671,46 @@ test("administrators manage signed webhook secrets and durable deliveries", asyn
   assert.equal(retried.json().delivery.attemptCount, 0);
   assert.equal((await app.inject({ method: "POST", url: `/api/users/webhook-deliveries/${failedId}/retry`, headers: { authorization: `Bearer ${jwtToken}` } })).statusCode, 400);
   await db.prepare("DELETE FROM notifications WHERE user_id = ? AND task_id = ?").run(agentId, webhookTaskId);
+});
+
+test("agent usage is idempotent, aggregated, visible, and enforces scoped budgets", async () => {
+  const usageAgentToken = createJwt({ id: agentId, kind: "AGENT", role: "MEMBER" });
+  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${projectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Budgeted agent work", assigneeId: agentId, phaseId, status: "TODO" } });
+  assert.equal(createdTask.statusCode, 201, createdTask.body);
+  const usageTaskId = createdTask.json().task.id as string;
+  const runResponse = await app.inject({ method: "POST", url: `/api/tasks/${usageTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "IMPLEMENTATION" } });
+  assert.equal(runResponse.statusCode, 201, runResponse.body);
+  const runId = runResponse.json().run.id as string;
+  const claimed = await app.inject({ method: "POST", url: `/api/runs/${runId}/claim`, headers: { authorization: `Bearer ${usageAgentToken}` }, payload: { leaseMs: 120_000 } });
+  assert.equal(claimed.statusCode, 200, claimed.body);
+  const credential = await app.inject({ method: "POST", url: `/api/runs/${runId}/credential`, headers: { authorization: `Bearer ${usageAgentToken}` } });
+  assert.equal(credential.statusCode, 200, credential.body);
+  const runToken = credential.json().credential.token as string;
+  const configured = await app.inject({ method: "PUT", url: `/api/projects/${projectId}/agent-budgets/PROJECT/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { action: "BLOCK", limits: { totalTokens: 10 } } });
+  assert.equal(configured.statusCode, 200, configured.body);
+  const payload = { eventId: "provider-attempt-1", provider: "fake", model: "deterministic", inputTokens: 8, outputTokens: 4, costMicros: 2500, toolCalls: 3, runtimeMs: 900 };
+  const recorded = await app.inject({ method: "POST", url: `/api/runs/${runId}/usage`, headers: { authorization: `Bearer ${runToken}` }, payload });
+  assert.equal(recorded.statusCode, 201, recorded.body);
+  assert.equal(recorded.json().created, true);
+  assert.equal(recorded.json().budgetDecisions[0].action, "BLOCK");
+  const duplicate = await app.inject({ method: "POST", url: `/api/runs/${runId}/usage`, headers: { authorization: `Bearer ${runToken}` }, payload });
+  assert.equal(duplicate.statusCode, 200, duplicate.body);
+  assert.equal(duplicate.json().created, false);
+  const runUsage = await app.inject({ method: "GET", url: `/api/runs/${runId}/usage`, headers: { authorization: `Bearer ${runToken}` } });
+  assert.equal(runUsage.statusCode, 200, runUsage.body);
+  assert.deepEqual(runUsage.json().usage.total, { inputTokens: 8, outputTokens: 4, totalTokens: 12, costMicros: 2500, toolCalls: 3, runtimeMs: 900, retries: 0, forcedCycles: 0, runCount: 1, eventCount: 1 });
+  assert.equal(runUsage.json().usage.byProvider[0].key, "fake");
+  const report = await app.inject({ method: "GET", url: `/api/projects/${projectId}/agent-usage?phaseId=${phaseId}&model=deterministic`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(report.statusCode, 200, report.body);
+  assert.equal(report.json().usage.total.totalTokens, 12);
+  const blocked = await app.inject({ method: "POST", url: `/api/tasks/${usageTaskId}/runs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { kind: "REVIEW" } });
+  assert.equal(blocked.statusCode, 400, blocked.body);
+  assert.match(blocked.json().error, /budget is exhausted.*totalTokens/i);
+  const dashboard = await app.inject({ method: "GET", url: "/api/dashboard/summary", headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(dashboard.json().projects.find((entry: { id: string }) => entry.id === projectId).agentUsage.totalTokens, 12);
+  const deleted = await app.inject({ method: "DELETE", url: `/api/projects/${projectId}/agent-budgets/PROJECT/${projectId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(deleted.statusCode, 204, deleted.body);
+  await db.prepare("DELETE FROM notifications WHERE task_id = ?").run(usageTaskId);
 });
 
 test("reporting endpoints preserve access, dashboard, and agent operations behavior", async () => {

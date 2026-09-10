@@ -1,5 +1,5 @@
-import type { AgentCapabilityProfile } from "@taskforge/contracts";
-import type { ActivityEntity, AgentContextPackEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { AgentBudgetLimits, AgentBudgetScope, AgentUsageReport, AgentUsageTotals, AgentCapabilityProfile } from "@taskforge/contracts";
+import type { ActivityEntity, AgentBudgetEntity, AgentContextPackEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentUsageEventEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -159,6 +159,17 @@ export interface AgentContextPackRepository {
   nextVersion(runId: string): Promise<number>;
   create(input: AgentContextPackEntity): Promise<AgentContextPackEntity>;
 }
+export interface AgentUsageRepository {
+  append(input: AgentUsageEventEntity): Promise<{ event: AgentUsageEventEntity; created: boolean }>;
+  report(filters: { projectId?: string; phaseId?: string; taskId?: string; runId?: string; provider?: string; model?: string }): Promise<AgentUsageReport>;
+  totals(filters: { projectId?: string; phaseId?: string; taskId?: string; runId?: string }): Promise<AgentUsageTotals>;
+}
+export interface AgentBudgetRepository {
+  list(projectId: string): Promise<AgentBudgetEntity[]>;
+  listApplicable(projectId: string, phaseId: string | null, taskId: string): Promise<AgentBudgetEntity[]>;
+  save(input: AgentBudgetEntity): Promise<AgentBudgetEntity>;
+  delete(projectId: string, scope: AgentBudgetScope, scopeId: string): Promise<boolean>;
+}
 export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; findPublishedByTaskHead(taskId: string, headSha: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
 export interface AgentPlanRepository {
   lockTask(taskId: string): Promise<void>;
@@ -218,6 +229,8 @@ export interface RepositorySet {
   handoffs: AgentHandoffRepository;
   plans: AgentPlanRepository;
   deliveryMonitor: DeliveryMonitorRepository;
+  agentUsage: AgentUsageRepository;
+  agentBudgets: AgentBudgetRepository;
 }
 
 export interface UnitOfWork {

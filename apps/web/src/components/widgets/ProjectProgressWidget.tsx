@@ -3,6 +3,7 @@ import { api } from "../../lib/api";
 import { openProject } from "../../lib/dashboardNav";
 import { useWidgetQuery } from "../../lib/widgetQuery";
 import { WidgetError } from "../WidgetShell";
+import { formatAgentUsage } from "../../lib/agentUsage";
 
 export function ProjectProgressWidget() {
   const { data, error, loading, reload } = useWidgetQuery<DashboardSummary>(() => api.dashboardSummary());
@@ -28,6 +29,7 @@ export function ProjectProgressWidget() {
             </div>
             <div className="wpp-sub">{p.counts.DONE} of {eligible} non-cancelled tasks done · {p.nonDoneTaskCount} remaining · {p.cancelledTaskCount} cancelled</div>
             <div className="wpp-sub">{p.nonDonePhaseCount} non-done phases</div>
+            <div className="wpp-sub">Agent usage: {formatAgentUsage(p.agentUsage)}</div>
           </button>
         );
       })}
