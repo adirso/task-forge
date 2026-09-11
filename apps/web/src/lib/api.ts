@@ -1,10 +1,12 @@
-import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, type ActivityEvent, type AgentOpsEntry, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentArtifact, type AgentCapabilityProfile, type AgentOpsEntry, type AgentPlan, type AgentPlanDecision, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
-  id: string; taskId: string; projectId: string; requestedById: string; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
+  id: string; taskId: string; projectId: string; requestedById: string; executedById: string | null; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
   status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED"; attemptCount: number; maxAttempts: number;
+  controlState: "ACTIVE" | "PAUSED" | "WAITING_FOR_INPUT" | "HUMAN_TAKEOVER"; controlVersion: number; assignedAgentId: string | null;
+  inputRequest: string | null; inputResponse: string | null; inputRequestedAt: string | null; inputAnsweredAt: string | null; takeoverById: string | null;
   leaseOwner: string | null; leaseExpiresAt: string | null; heartbeatAt: string | null; timeoutAt: string | null; lastError: string | null;
-  createdAt: string; updatedAt: string; completedAt: string | null;
+  createdAt: string; updatedAt: string; completedAt: string | null; contextPackVersion: number; contextPackFingerprint: string | null;
 }
 export interface AgentCycleState { count: number; limit: number; limitFailure: boolean; }
 export interface AgentLog { id: string; taskId: string; runId: string | null; provider: string; stream: "stdout" | "stderr" | "system" | "callback"; category: "output" | "progress" | "tool" | "callback" | "lifecycle"; sequence: number; eventId: string | null; content: string; createdAt: string; }
@@ -47,6 +49,7 @@ const MOCK_AGENT: User = {
   kind: "AGENT",
   role: "MEMBER",
   avatarUrl: null,
+  capabilityProfile: { provider: "codex", model: "gpt-5", skills: ["typescript", "ui"], taskTypes: ["FEATURE", "BUG", "UPDATE"], repositories: ["github.com/example/mobile-refresh"], maxConcurrency: 3, availability: "AVAILABLE", health: "HEALTHY" },
   createdAt: MOCK_NOW,
 };
 let mockProjects: Project[] = [{
@@ -63,6 +66,8 @@ let mockProjects: Project[] = [{
   defaultStatus: "TODO",
   agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW },
   mergeTarget: "phase",
+  dependencyResolutionStatuses: [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES],
+  reviewPolicy: { requireIndependentReview: true, requiredReviewerCount: 1, allowedReviewerAgentIds: [] },
   ownerId: MOCK_USER.id,
   createdAt: MOCK_NOW,
   updatedAt: MOCK_NOW,
@@ -112,10 +117,16 @@ const mockNotifications: Notification[] = [
   { id: "n1", userId: MOCK_USER.id, projectId: "p_mobile", taskId: "t3", type: "TASK_UPDATED", title: "Task moved to review", message: "Collapse filters on phones is ready for review.", readAt: null, createdAt: MOCK_NOW, projectName: "Mobile Refresh", projectKey: "MOB", taskNumber: 3 },
 ];
 const mockRuns: Record<string, AgentRun[]> = {
-  t1: [{ id: "run-demo-1", taskId: "t1", projectId: "p_mobile", requestedById: MOCK_USER.id, kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy-demo", leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(), heartbeatAt: MOCK_NOW, timeoutAt: new Date(Date.now() + 900_000).toISOString(), lastError: null, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, completedAt: null }],
+  t1: [{ id: "run-demo-1", taskId: "t1", projectId: "p_mobile", requestedById: MOCK_USER.id, executedById: MOCK_AGENT.id, kind: "IMPLEMENTATION", status: "RUNNING", controlState: "ACTIVE", controlVersion: 1, assignedAgentId: MOCK_AGENT.id, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null, attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy-demo", leaseExpiresAt: new Date(Date.now() + 90_000).toISOString(), heartbeatAt: MOCK_NOW, timeoutAt: new Date(Date.now() + 900_000).toISOString(), lastError: null, createdAt: MOCK_NOW, updatedAt: MOCK_NOW, completedAt: null, contextPackVersion: 1, contextPackFingerprint: "a".repeat(64) }],
 };
 const mockAgentLogs: Record<string, AgentLog[]> = {
   t1: [{ id: "log-demo-1", taskId: "t1", runId: "run-demo-1", provider: "codex", stream: "stdout", category: "progress", sequence: 1, eventId: "demo-event-1", content: "Implementation started on agent/mob-1", createdAt: MOCK_NOW }],
+};
+const mockArtifacts: Record<string, AgentArtifact[]> = {
+  t1: [{ id: "artifact-demo-1", runId: "run-demo-1", taskId: "t1", projectId: "p_mobile", headSha: "a".repeat(40), type: "TEST_RESULT", name: "API test results", mediaType: "application/json", size: 148, contentHash: "b".repeat(64), metadata: { command: "npm test", status: "PASS", durationMs: 4821, summary: "All suites passed" }, createdById: MOCK_AGENT.id, createdAt: MOCK_NOW, downloadUrl: "/api/artifacts/artifact-demo-1/content" }],
+};
+const mockPlans: Record<string, AgentPlan[]> = {
+  t1: [{ id: "plan-demo-1", taskId: "t1", sourceRunId: "00000000-0000-4000-8000-000000000001", version: 1, status: "PROPOSED", summary: "Split the mobile header delivery into independently verifiable work.", risks: ["Navigation state may regress on narrow screens"], acceptanceEvidence: ["Keyboard and responsive browser checks pass"], requiresApproval: true, items: [{ key: "layout", title: "Implement responsive layout", description: "Adapt navigation and task controls for narrow viewports.", definitionOfDone: "Header controls remain usable at mobile and desktop widths.", priority: "HIGH", type: "FEATURE", estimatePoints: 3, dependencyKeys: [] }, { key: "qa", title: "Add mobile interaction coverage", description: "Exercise the responsive navigation and task workflow.", definitionOfDone: "Deterministic mobile browser coverage passes after the layout task.", priority: "MEDIUM", type: "UPDATE", estimatePoints: 2, dependencyKeys: ["layout"] }], createdTaskIds: {}, proposedById: MOCK_AGENT.id, reviewedById: null, reviewComment: null, createdAt: MOCK_NOW, reviewedAt: null }],
 };
 
 function mockPhaseData() {
@@ -199,6 +210,7 @@ function mockDashboardSummary(): DashboardSummary {
       nonDoneTaskCount: mockTasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).length,
       cancelledTaskCount: byStatus("CANCELLED").length,
       nonDonePhaseCount: mockPhases.filter((phase) => mockTasks.some((task) => task.phaseId === phase.id && !["DONE", "CANCELLED"].includes(task.status))).length,
+      agentUsage: { inputTokens: 18240, outputTokens: 6110, totalTokens: 24350, costMicros: 384000, toolCalls: 47, runtimeMs: 926000, retries: 1, forcedCycles: 0, runCount: 4, eventCount: 5 },
     }],
     myTasks: mockTasks.filter((task) => task.assigneeId === MOCK_USER.id).map(toSummaryTask),
     stuckTasks: mockTasks.filter((task) => task.status === "IN_PROGRESS").map(toSummaryTask),
@@ -306,6 +318,8 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
         role: MOCK_AGENT.role,
         avatarUrl: null,
         webhookUrl: null,
+        capabilityProfile: MOCK_AGENT.capabilityProfile ?? null,
+        capabilityProfileError: null,
         createdAt: MOCK_AGENT.createdAt,
         lastActiveAt: MOCK_NOW,
         openTaskCount: mockTasks.filter((task) => task.assigneeId === MOCK_AGENT.id && task.status !== "DONE" && task.status !== "CANCELLED").length,
@@ -329,6 +343,14 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
     if (index < 0) throw new ApiError("Task not found", 404);
     mockTasks[index] = { ...mockTasks[index]!, ...(options.body as Partial<Task>), updatedAt: new Date().toISOString() };
     return { task: mockTasks[index] } as T;
+  }
+  if (/^\/tasks\/[^/]+\/route$/.test(pathname) && method === "POST") {
+    const id = pathname.split("/")[2]!;
+    const task = mockTasks.find((item) => item.id === id);
+    if (!task) throw new ApiError("Task not found", 404);
+    task.assigneeId = (options.body as AgentRoutingRequest).overrideAgentId ?? MOCK_AGENT.id;
+    task.assignee = MOCK_AGENT;
+    return { task, selectedAgentId: task.assigneeId, override: Boolean((options.body as AgentRoutingRequest).overrideAgentId), duplicate: false } as T;
   }
   if (/^\/tasks\/[^/]+$/.test(pathname) && method === "DELETE") {
     const id = pathname.split("/")[2]!;
@@ -355,6 +377,30 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
 
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "GET") return { updates: [] } as T;
   if (/^\/tasks\/[^/]+\/runs$/.test(pathname) && method === "GET") { const runs = mockRuns[pathname.split("/")[2]!] ?? []; return { runs, cycle: { count: runs.length, limit: 6, limitFailure: false } } as T; }
+  if (/^\/tasks\/[^/]+\/artifacts$/.test(pathname) && method === "GET") return { artifacts: mockArtifacts[pathname.split("/")[2]!] ?? [] } as T;
+  if (/^\/tasks\/[^/]+\/plans$/.test(pathname) && method === "GET") return { plans: mockPlans[pathname.split("/")[2]!] ?? [] } as T;
+  if (/^\/tasks\/[^/]+\/plans\/[^/]+\/decision$/.test(pathname) && method === "POST") {
+    const plan = Object.values(mockPlans).flat().find((candidate) => candidate.id === pathname.split("/")[4]);
+    if (!plan) throw new ApiError("Agent plan not found", 404);
+    plan.status = (options.body as AgentPlanDecision).action === "APPROVE" ? "APPROVED" : "REJECTED";
+    if (plan.status === "APPROVED") plan.createdTaskIds = Object.fromEntries(plan.items.map((item) => [item.key, `mock-${item.key}`]));
+    return { plan, duplicate: false } as T;
+  }
+  if (/^\/runs\/[^/]+\/interventions$/.test(pathname) && method === "POST") {
+    const runId = pathname.split("/")[2]!;
+    const input = options.body as AgentRunIntervention;
+    const run = Object.values(mockRuns).flat().find((candidate) => candidate.id === runId);
+    if (!run) throw new ApiError("Agent run not found", 404);
+    if (run.controlVersion !== input.controlVersion) throw new ApiError("Agent run changed; refresh it before applying this intervention", 409);
+    run.controlVersion += 1; run.updatedAt = new Date().toISOString(); run.leaseOwner = null; run.leaseExpiresAt = null;
+    if (input.action === "PAUSE") run.controlState = "PAUSED";
+    if (["RESUME", "RETRY", "REASSIGN", "ANSWER"].includes(input.action)) { run.controlState = "ACTIVE"; run.status = "PENDING"; run.completedAt = null; run.lastError = null; }
+    if (input.action === "REASSIGN") run.assignedAgentId = input.agentId!;
+    if (input.action === "ANSWER") { run.inputResponse = input.input!; run.inputAnsweredAt = run.updatedAt; }
+    if (input.action === "CANCEL") { run.status = "CANCELLED"; run.completedAt = run.updatedAt; run.lastError = "Cancelled by operator"; }
+    if (input.action === "TAKEOVER") { run.status = "CANCELLED"; run.controlState = "HUMAN_TAKEOVER"; run.takeoverById = MOCK_USER.id; run.completedAt = run.updatedAt; }
+    return { run, duplicate: false } as T;
+  }
   if (/^\/tasks\/[^/]+\/runs\/force-cycle$/.test(pathname) && method === "POST") return { cycle: { count: 6, limit: 7, limitFailure: false }, duplicate: false } as T;
   if (/^\/tasks\/[^/]+\/agent-logs$/.test(pathname) && method === "GET") return { agentLogs: mockAgentLogs[pathname.split("/")[2]!] ?? [], page: { limit: 100, hasMore: false, nextCursor: null } } as T;
   if (/^\/tasks\/[^/]+\/updates$/.test(pathname) && method === "POST") {
@@ -376,6 +422,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
   }
   if (/^\/attachments\/[^/]+$/.test(pathname) && method === "DELETE") return undefined as T;
   if (/^\/users\/[^/]+\/tokens$/.test(pathname) && method === "GET") return { tokens: [] } as T;
+  if (/^\/users\/[^/]+\/capabilities$/.test(pathname) && method === "PATCH") return { user: { ...MOCK_AGENT, capabilityProfile: options.body as AgentCapabilityProfile } } as T;
   if (/^\/users\/[^/]+\/tokens$/.test(pathname) && method === "POST") return { token: "tf_mock_token", prefix: "tf_mock", expiresAt: null, warning: "Mock mode token" } as T;
   if (/^\/users\/[^/]+\/tokens\/[^/]+\/reveal$/.test(pathname) && method === "POST") return { token: "tf_mock_token" } as T;
   if (/^\/users\/tokens\/[^/]+$/.test(pathname) && method === "DELETE") return undefined as T;
@@ -435,7 +482,7 @@ export const api = {
   mergePhaseToMain: (projectId: string, phaseId: string) => request<{ merge: { phaseId: string; branchName: string; target: "main" } }>(`/projects/${projectId}/phases/${phaseId}/merge-to-main`, { method: "POST" }),
   createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
-  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"]; mergeTarget?: Project["mergeTarget"] }) =>
+  updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"]; mergeTarget?: Project["mergeTarget"]; dependencyResolutionStatuses?: Project["dependencyResolutionStatuses"]; reviewPolicy?: Project["reviewPolicy"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),
   enableAgentWorkflow: (id: string) => request<{ project: Project }>(`/projects/${id}/agent-workflow/enable`, { method: "POST" }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),
@@ -453,6 +500,7 @@ export const api = {
   task: (id: string) => request<{ task: Task }>(`/tasks/${id}`),
   createTask: (projectId: string, input: TaskCreate) => request<{ task: Task }>(`/projects/${projectId}/tasks`, { method: "POST", body: input }),
   updateTask: (id: string, input: TaskUpdate) => request<{ task: Task }>(`/tasks/${id}`, { method: "PATCH", body: input }),
+  routeTask: (id: string, input: AgentRoutingRequest) => request<{ task: Task; selectedAgentId: string; override: boolean; duplicate: boolean }>(`/tasks/${id}/route`, { method: "POST", body: input }),
   deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: "DELETE" }),
   taskUpdates: async (id: string) => {
     const updates: TaskNote[] = [];
@@ -465,6 +513,17 @@ export const api = {
     return { updates };
   },
   taskRuns: (id: string) => request<{ runs: AgentRun[]; cycle: AgentCycleState }>(`/tasks/${id}/runs`),
+  taskArtifacts: (id: string) => request<{ artifacts: AgentArtifact[] }>(`/tasks/${id}/artifacts`),
+  downloadAgentArtifact: async (id: string) => {
+    if (USE_MOCK) return new Blob(["Mock agent artifact"], { type: "text/plain" });
+    const token = localStorage.getItem("taskforge_token");
+    const response = await fetch(`${API_URL}/artifacts/${id}/content`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!response.ok) throw new ApiError("Could not download agent artifact", response.status);
+    return response.blob();
+  },
+  taskPlans: (id: string) => request<{ plans: AgentPlan[] }>(`/tasks/${id}/plans`),
+  decideTaskPlan: (taskId: string, planId: string, input: AgentPlanDecision) => request<{ plan: AgentPlan; duplicate: boolean }>(`/tasks/${taskId}/plans/${planId}/decision`, { method: "POST", body: input }),
+  interveneRun: (id: string, requestId: string, input: AgentRunIntervention) => request<{ run: AgentRun; duplicate: boolean }>(`/runs/${id}/interventions`, { method: "POST", headers: { "Idempotency-Key": requestId }, body: input }),
   forceTaskCycle: (id: string, requestId: string) => request<{ cycle: AgentCycleState; duplicate: boolean }>(`/tasks/${id}/runs/force-cycle`, { method: "POST", headers: { "Idempotency-Key": requestId } }),
   taskAgentLogs: async (id: string) => {
     const logs: AgentLog[] = []; let cursor: string | null = null;
@@ -482,6 +541,7 @@ export const api = {
   users: () => request<{ users: User[] }>("/users"),
   updateProfile: (input: { name: string; email: string }) => request<{ user: User }>("/users/me", { method: "PATCH", body: input }),
   createAgent: (input: { name: string; email?: string }) => request<{ user: User }>("/users/agents", { method: "POST", body: input }),
+  updateAgentCapabilities: (userId: string, input: AgentCapabilityProfile) => request<{ user: User }>(`/users/${userId}/capabilities`, { method: "PATCH", body: input }),
   uploadUserAvatar: (userId: string, input: { mimeType: string; data: string }) => request<{ user: User }>(`/users/${userId}/avatar`, { method: "POST", body: input }),
   deleteUserAvatar: (userId: string) => request<{ user: User }>(`/users/${userId}/avatar`, { method: "DELETE" }),
   deleteAgent: (userId: string) => request<void>(`/users/${userId}`, { method: "DELETE" }),

@@ -168,12 +168,14 @@ All application endpoints are under `/api`. Send either a human JWT or agent tok
 | `POST` | `/api/projects/:id/members` | Add a person or agent (owner/admin only) |
 | `DELETE` | `/api/projects/:id/members/:userId` | Remove a member and unassign their tasks (owner/admin only) |
 | `GET/POST` | `/api/projects/:id/tasks` | List or create project tasks |
+| `POST` | `/api/projects/:id/tasks/claim` | Atomically claim the next unassigned task whose dependencies satisfy the project policy |
 | `GET/POST` | `/api/projects/:id/phases` | List or create project phases |
 | `PATCH/DELETE` | `/api/phases/:id` | Activate, edit, or delete a phase |
 | `GET/PATCH/DELETE` | `/api/tasks/:id` | Read, update, or delete a task |
 | `GET/POST` | `/api/tasks/:id/updates` | Read or post task notes and progress updates |
 | `GET/POST` | `/api/tasks/:id/runs` | List or create autonomous agent runs |
 | `POST` | `/api/runs/:id/claim` | Claim a run lease |
+| `POST/DELETE` | `/api/runs/:id/credential` | Issue or revoke the current lease's task-scoped credential |
 | `POST` | `/api/runs/:id/heartbeat` | Renew a run lease |
 | `POST` | `/api/runs/:id/complete` | Complete, fail, or cancel a run |
 | `GET` | `/api/users` | List people and agents |
@@ -197,6 +199,8 @@ TaskForge is an open-source project and welcomes issues, documentation improveme
 - Keep Smithy changes provider-agnostic: provider names are routing labels and commands remain operator configuration.
 
 Pull requests should explain the change, list validation commands, call out skipped checks (for example a local native-module limitation), and identify any migration or rollout considerations. Automated checks are required before merge.
+
+Task dependencies gate autonomous work. `DONE` dependencies always unblock a task; project owners and administrators can choose whether `CANCELLED` dependencies also count as resolved in project settings. Blocked tasks stay visible on the board and through the API with an actionable reason, but claim queries omit them until every dependency reaches an accepted terminal status.
 
 ## Troubleshooting
 
@@ -227,11 +231,29 @@ Pull requests should explain the change, list validation commands, call out skip
 
 ## Design choices
 
-Humans receive short-lived JWTs because browser sessions benefit from expiration. Agents receive opaque tokens because automation credentials need simple bearer authentication, revocation, usage timestamps, and optional long expirations. Both resolve to the same user model and are subject to project membership checks, so the task API does not need separate human and agent behavior.
+Humans receive short-lived JWTs, while Smithy keeps an opaque machine token for its control-plane API calls. After claiming a run, Smithy obtains a separate `tfr_` credential for the provider process. That credential is limited to the assigned project, task, run, and current lease attempt; it expires after at most 45 minutes, becomes invalid when the lease expires or rotates, and is revoked when the run completes or on explicit revocation. Smithy launches provider commands with a minimal environment containing only safe process settings, `TASKFORGE_API_URL`, and the run-scoped credential/context variables. Provider processes do not inherit `SMITHY_PROVIDERS`, webhook secrets, Smithy's long-lived TaskForge token, or unrelated credential variables.
+
+Smithy also runs each provider inside the task's dedicated worktree with an OS sandbox policy configured by `SMITHY_SANDBOX_POLICY`. The default required policy uses `sandbox-exec` on macOS and `bwrap` plus `prlimit` on Linux; startup fails visibly when the required backend is unavailable. Operators can grant extra read/write paths, inherited non-secret environment names, and explicit network destinations, while CPU time, memory, wall-clock runtime, process count, and captured output remain bounded. Network is denied by default. The shared Git directory is read-only except for its object, ref, and log stores; hooks, repository configuration, and the worktree `.git` pointer stay read-only. On macOS, child execution is permitted but Mach service lookup is limited to preferences, trust, identity, logging, and DNS services used by provider tooling. Bubblewrap supports isolated networking or an explicit all-network grant; granular hostname rules fail closed unless a network-filtering backend is supplied. Policy violations are recorded as redacted run failures, and cancellation terminates the provider process group. See [`apps/smithy/.env.example`](apps/smithy/.env.example) for the complete policy shape. Setting `mode` to `disabled` is an explicit development escape hatch and should not be used for autonomous production runs.
 
 ## Autonomous delivery handoff states
 
 Smithy persists handoff evidence by `runId`. `IN_PROGRESS` with a pending handoff means work or recovery is active; a failed handoff exposes a redacted publication or credential error for retry. `PUBLISHED` records the pushed branch, head SHA, and pull-request metadata, and is required before `READY_FOR_REVIEW`. Restarts and reassignment reuse the existing branch and run evidence, while duplicate callbacks are safe to retry. Review approval and merge remain separate human-authorized steps; a successful provider run never implies `APPROVED` or `DONE`.
+
+New projects require independent agent review by default. Project owners can configure the required reviewer count and optionally restrict approval to selected agent members in project settings. Task gates bind the implementation run, implementing agent, reviewer approvals, and CI evidence to one head SHA; a new head invalidates the approvals. The implementing agent cannot approve that head, and the current policy is checked again before a project owner or administrator authorizes a merge.
+
+## Agent usage and budgets
+
+Smithy records wall-clock runtime for every provider attempt. Provider-neutral commands can additionally emit one or more single-line `TASKFORGE_USAGE: {"inputTokens":100,"outputTokens":20,"costMicros":5000,"toolCalls":3}` envelopes; Smithy aggregates valid non-negative counters and submits one idempotent event before the run completion callback. Set the optional provider `model` label in `SMITHY_PROVIDERS` to group usage by model. Retries and operator-forced delivery cycles are derived by TaskForge from durable run state rather than trusted provider input.
+
+Authenticated project members can inspect current or historical aggregates with `GET /api/projects/:projectId/agent-usage`, optionally filtered by `phaseId`, `taskId`, `provider`, or `model`; per-run history is available at `GET /api/runs/:runId/usage` and project totals appear on the dashboard. Project owners and administrators configure project, phase, or task limits through `/api/projects/:projectId/agent-budgets/:scope/:scopeId`. `WARN` records an audit event, `PAUSE` fences the active run and revokes its credential, and `BLOCK` prevents new runs and claims after the limit is reached. Usage events remain immutable, and retrying the same run/event identifier never charges it twice.
+
+## Agent evidence and provenance
+
+Agents record structured evidence with `POST /api/runs/:runId/artifacts`. Supported types cover changed files, commits, test results, coverage, screenshots, tool outcomes, prompt versions, model versions, and execution-environment fingerprints. Every artifact is bound to its task, run, and head SHA; TaskForge stores its post-redaction SHA-256 digest and immutable content. Repeating the same type, head, and content upload returns the original record, so retries and Smithy restarts do not create duplicates. Each run accepts at most 100 artifacts of up to 5 MB each.
+
+Only the current run lease owner using a run-scoped `task:artifact` credential, the project owner, or an administrator can upload evidence. Project members can inspect provenance in the task's **Agents** tab or with `GET /api/tasks/:taskId/artifacts`; content downloads expose a `Content-Digest` header for integrity verification. Text, JSON, names, and metadata are redacted before hashing and persistence, and secrets must never be submitted as binary artifacts. Smithy records prompt, provider/model, and environment evidence automatically after a successful provider execution.
+
+Gate evidence may declare `requiredArtifactTypes` through `PUT /api/tasks/:taskId/gate`. Approval then fails closed until each required type exists for that exact head SHA. Changing the head invalidates the prior gate evidence and artifact requirements are evaluated against the replacement head.
 
 ## Delivery Monitor
 

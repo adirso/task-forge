@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -29,6 +30,30 @@ after(async () => {
 });
 
 const mysqlTestUrl = process.env.TEST_DATABASE_URL;
+
+test("SQLite artifacts survive restart and preserve content integrity", async () => {
+  const databasePath = path.join(testRoot, `${crypto.randomUUID()}-artifact-restart.db`);
+  const first = createSqliteAdapter(databasePath);
+  const now = "2026-09-10T12:00:00.000Z";
+  const content = Buffer.from('{"status":"PASS"}');
+  const contentHash = createHash("sha256").update(content).digest("hex");
+  await runMigrations(first, "sqlite");
+  await first.run("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'AGENT', 'MEMBER', ?)", ["agent-artifact", "artifact@example.test", "Artifact agent", now]);
+  await first.run("INSERT INTO projects (id, `key`, name, description, owner_id, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?, ?)", ["project-artifact", "ART", "Artifact project", "agent-artifact", now, now]);
+  await first.run("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, creator_id, created_at, updated_at) VALUES (?, ?, 1, ?, '', '', 'IN_PROGRESS', ?, ?, ?)", ["task-artifact", "project-artifact", "Artifact task", "agent-artifact", now, now]);
+  await first.run("INSERT INTO agent_runs (id, task_id, project_id, requested_by_id, kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'IMPLEMENTATION', 'SUCCEEDED', ?, ?)", ["run-artifact", "task-artifact", "project-artifact", "agent-artifact", now, now]);
+  const insert = "INSERT INTO agent_artifacts (id, run_id, task_id, project_id, head_sha, artifact_type, name, media_type, file_size, content_hash, metadata_json, content, created_by_id, created_at) VALUES (?, ?, ?, ?, ?, 'TEST_RESULT', ?, 'application/json', ?, ?, ?, ?, ?, ?)";
+  const values = ["artifact-1", "run-artifact", "task-artifact", "project-artifact", "a".repeat(40), "Tests", content.length, contentHash, JSON.stringify({ command: "npm test", status: "PASS" }), content, "agent-artifact", now];
+  await first.run(insert, values);
+  await first.close();
+
+  const restarted = createSqliteAdapter(databasePath);
+  const artifact = await restarted.get<{ content_hash: string; content: Buffer }>("SELECT content_hash, content FROM agent_artifacts WHERE id = ?", ["artifact-1"]);
+  assert.equal(artifact?.content_hash, contentHash);
+  assert.equal(createHash("sha256").update(artifact!.content).digest("hex"), contentHash);
+  await assert.rejects(restarted.run(insert, ["artifact-2", ...values.slice(1)]), /UNIQUE constraint failed/);
+  await restarted.close();
+});
 
 async function createFixtureDatabase(driver: DatabaseDriver) {
   if (driver === "sqlite") {
@@ -123,6 +148,66 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
     ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'hidden_empty_statuses'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'hidden_empty_statuses'", []));
   assert.equal(hasHiddenEmptyStatusesColumn, true);
+  const hasDependencyResolutionStatusesColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'dependency_resolution_statuses'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'dependency_resolution_statuses'", []));
+  assert.equal(hasDependencyResolutionStatusesColumn, true);
+  const hasReviewPolicyColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'review_policy'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'review_policy'", []));
+  assert.equal(hasReviewPolicyColumn, true);
+  const hasExecutedByColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('agent_runs') WHERE name = 'executed_by_id'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'agent_runs' AND column_name = 'executed_by_id'", []));
+  assert.equal(hasExecutedByColumn, true);
+  const hasControlStateColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('agent_runs') WHERE name = 'control_state'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'agent_runs' AND column_name = 'control_state'", []));
+  assert.equal(hasControlStateColumn, true);
+  const hasInterventionsTable = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_interventions'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_run_interventions'", []));
+  assert.equal(hasInterventionsTable, true);
+  const hasGateApprovals = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'task_gate_approvals'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'task_gate_approvals'", []));
+  assert.equal(hasGateApprovals, true);
+  const hasCapabilityProfile = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('users') WHERE name = 'capability_profile'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'capability_profile'", []));
+  assert.equal(hasCapabilityProfile, true);
+  const hasAgentPlans = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_plans'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_plans'", []));
+  assert.equal(hasAgentPlans, true);
+  const hasContextPackVersion = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('agent_runs') WHERE name = 'context_pack_version'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'agent_runs' AND column_name = 'context_pack_version'", []));
+  assert.equal(hasContextPackVersion, true);
+  const hasContextPacks = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_context_packs'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_context_packs'", []));
+  assert.equal(hasContextPacks, true);
+  const hasUsageEvents = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_usage_events'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_usage_events'", []));
+  const hasAgentBudgets = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_budgets'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_budgets'", []));
+  assert.equal(hasUsageEvents, true);
+  assert.equal(hasAgentBudgets, true);
+  const hasAgentArtifacts = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_artifacts'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_artifacts'", []));
+  const hasRequiredArtifacts = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('task_gate_evidence') WHERE name = 'required_artifact_types'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'task_gate_evidence' AND column_name = 'required_artifact_types'", []));
+  assert.equal(hasAgentArtifacts, true);
+  assert.equal(hasRequiredArtifacts, true);
+  if (expectsLegacyTask) {
+    const project = await adapter.get<{ dependency_resolution_statuses: string }>("SELECT dependency_resolution_statuses FROM projects WHERE id = ?", ["project-1"]);
+    assert.deepEqual(JSON.parse(project!.dependency_resolution_statuses), ["DONE", "CANCELLED"]);
+  }
   const hasWebhookTable = driver === "sqlite"
     ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'webhook_deliveries'", []));
@@ -157,6 +242,10 @@ for (const driver of ["sqlite", "mysql"] as const) {
           ? await adapter.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_handoffs'", [])
           : await adapter.get("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_run_handoffs'", []);
         assert.ok(handoffTable);
+        const credentialTable = driver === "sqlite"
+          ? await adapter.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_credentials'", [])
+          : await adapter.get("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'agent_run_credentials'", []);
+        assert.ok(credentialTable);
         await runMigrations(adapter, driver);
         assert.equal((await adapter.all("SELECT version FROM schema_migrations", [])).length, migrations.length);
       });

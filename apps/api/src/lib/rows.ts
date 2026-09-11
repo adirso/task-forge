@@ -1,4 +1,4 @@
-import { DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentWorkflowSchema, type Project, type Tag, type Task, type TaskDependency, type User } from "@taskforge/contracts";
+import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentWorkflowSchema, dependencyResolutionStatusesSchema, projectReviewPolicySchema, type Project, type Tag, type Task, type TaskDependency, type User } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 
 type Row = Record<string, unknown>;
@@ -29,6 +29,10 @@ export function toProject(row: Row): Project {
   }
   let hiddenEmptyStatuses = availableStatuses;
   try { const parsed = JSON.parse(String(row.hidden_empty_statuses ?? "")); if (Array.isArray(parsed)) hiddenEmptyStatuses = availableStatuses.filter((status) => parsed.includes(status)); } catch { /* Legacy projects preserve the existing hide-empty behavior. */ }
+  let dependencyResolutionStatuses: Project["dependencyResolutionStatuses"] = [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES];
+  try { const parsed = dependencyResolutionStatusesSchema.safeParse(JSON.parse(String(row.dependency_resolution_statuses ?? "[]"))); if (parsed.success) dependencyResolutionStatuses = parsed.data; } catch { /* Legacy projects use the safe default. */ }
+  let reviewPolicy: Project["reviewPolicy"] = { ...DEFAULT_PROJECT_REVIEW_POLICY, requireIndependentReview: false, allowedReviewerAgentIds: [] };
+  try { const parsed = projectReviewPolicySchema.safeParse(JSON.parse(String(row.review_policy ?? "null"))); if (parsed.success) reviewPolicy = parsed.data; } catch { /* Legacy projects opt in explicitly. */ }
   return {
     id: String(row.id),
     key: String(row.key),
@@ -43,6 +47,8 @@ export function toProject(row: Row): Project {
     agentWorkflow,
     hiddenEmptyStatuses,
     mergeTarget: row.merge_target === "phase" ? "phase" : "main",
+    dependencyResolutionStatuses,
+    reviewPolicy,
     ownerId: String(row.owner_id),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -54,11 +60,22 @@ export async function toTask(row: Row): Promise<Task> {
   const tags = await db.prepare(`SELECT tags.* FROM tags JOIN task_tags ON task_tags.tag_id = tags.id
     WHERE task_tags.task_id = ? ORDER BY tags.name`).all(String(row.id)) as Row[];
   const dependencies = await db.prepare(`SELECT td.task_id, td.depends_on_task_id, dep.project_id, p.\`key\` AS project_key,
-      dep.number, dep.title, dep.status
+      dep.number, dep.title, dep.status, p.dependency_resolution_statuses
     FROM task_dependencies td
     JOIN tasks dep ON dep.id = td.depends_on_task_id
     JOIN projects p ON p.id = dep.project_id
     WHERE td.task_id = ? ORDER BY dep.number`).all(String(row.id)) as Row[];
+  const dependencyItems = dependencies.map((dependency): TaskDependency => {
+    let resolutionStatuses: Project["dependencyResolutionStatuses"] = [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES];
+    try { const parsed = dependencyResolutionStatusesSchema.safeParse(JSON.parse(String(dependency.dependency_resolution_statuses ?? "[]"))); if (parsed.success) resolutionStatuses = parsed.data; } catch { /* Use safe defaults. */ }
+    const status = dependency.status as Task["status"];
+    return {
+      taskId: String(dependency.task_id), dependsOnTaskId: String(dependency.depends_on_task_id), projectId: String(dependency.project_id),
+      projectKey: String(dependency.project_key), number: Number(dependency.number), title: String(dependency.title), status,
+      isBlocking: !resolutionStatuses.includes(status as "DONE" | "CANCELLED"),
+    };
+  });
+  const blockers = dependencyItems.filter((dependency) => dependency.isBlocking);
   const task: Task = {
     id: String(row.id),
     projectId: String(row.project_id),
@@ -83,11 +100,8 @@ export async function toTask(row: Row): Promise<Task> {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     tags: tags.map((tag): Tag => ({ id: String(tag.id), projectId: String(tag.project_id), name: String(tag.name), createdAt: String(tag.created_at) })),
-    dependencies: dependencies.map((dependency): TaskDependency => ({
-      taskId: String(dependency.task_id), dependsOnTaskId: String(dependency.depends_on_task_id), projectId: String(dependency.project_id),
-      projectKey: String(dependency.project_key), number: Number(dependency.number), title: String(dependency.title),
-      status: dependency.status as Task["status"], isBlocking: dependency.status !== "DONE" && dependency.status !== "CANCELLED",
-    })),
+    dependencies: dependencyItems,
+    blockedReason: blockers.length ? `Waiting for dependencies: ${blockers.map((dependency) => `${dependency.projectKey}-${dependency.number} (${dependency.status})`).join(", ")}` : null,
     attachments: [],
   };
   if (row.assignee_name) {

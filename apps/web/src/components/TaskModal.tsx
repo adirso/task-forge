@@ -1,6 +1,6 @@
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
-import type { ActivityEvent, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
-import { Activity, Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, Paperclip, Send, Sparkles, Terminal, Trash2, UploadCloud, X } from "lucide-react";
+import type { ActivityEvent, AgentArtifact, AgentPlan, AgentRunInterventionAction, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
+import { Activity, Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, ListTree, Paperclip, Send, Sparkles, Terminal, Trash2, UploadCloud, X } from "lucide-react";
 import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
 import { api, type AgentCycleState, type AgentLog, type AgentRun } from "../lib/api";
 import { Avatar } from "./Avatar";
@@ -10,12 +10,15 @@ import { TaskTagEditor } from "./TaskTags";
 import { TaskDependencyEditor } from "./TaskDependencies";
 import { formatAge, formatCountdown, getRunHealth, latestRunLog, runIsWaitingForInput, runLogs } from "../lib/runObservability";
 import { canForceCycle, FORCE_CYCLE_FAILURE_MESSAGE, forceCycleRequestId } from "../lib/cycleLimit";
+import { artifactProvenance, artifactTypeLabel } from "../lib/agentArtifacts";
 
-type TaskModalTab = "details" | "updates" | "agents";
+type TaskModalTab = "details" | "updates" | "plans" | "agents";
 
-export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete }: {
+export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete, onRouted, onPlanApplied }: {
   task: Task | null; initialStatus: TaskStatus; defaultPhaseId: string | null; project: Project; currentUser: User; members: User[]; phases: Phase[]; availableTags: Tag[]; tasks: Task[];
   onClose: () => void; onSave: (input: TaskCreate) => Promise<void>; onDelete: (() => Promise<void>) | null;
+  onRouted?: (task: Task) => void;
+  onPlanApplied?: () => Promise<void>;
 }) {
   const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", type: "FEATURE", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: defaultPhaseId, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, tags: [], dependencyIds: [] });
   const [saving, setSaving] = useState(false);
@@ -26,7 +29,13 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [cycle, setCycle] = useState<AgentCycleState | null>(null);
   const [forcingCycle, setForcingCycle] = useState(false);
+  const [controllingRun, setControllingRun] = useState<string | null>(null);
+  const [runInputs, setRunInputs] = useState<Record<string, string>>({});
+  const [runAgents, setRunAgents] = useState<Record<string, string>>({});
   const [agentLogs, setAgentLogs] = useState<AgentLog[]>([]);
+  const [artifacts, setArtifacts] = useState<AgentArtifact[]>([]);
+  const [plans, setPlans] = useState<AgentPlan[]>([]);
+  const [reviewingPlan, setReviewingPlan] = useState<string | null>(null);
   const [updateBody, setUpdateBody] = useState("");
   const [postingUpdate, setPostingUpdate] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -35,6 +44,8 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [observedAt, setObservedAt] = useState(() => Date.now());
+  const [routingSkills, setRoutingSkills] = useState("");
+  const [routing, setRouting] = useState(false);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -47,10 +58,12 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
     if (task) {
       setForm({ title: task.title, description: task.description, definitionOfDone: task.definitionOfDone, status: task.status, priority: task.priority, type: task.type, assigneeId: task.assigneeId, parentId: task.parentId, branch: task.branch, dueDate: task.dueDate, estimatePoints: task.estimatePoints, phaseId: task.phaseId, pullRequestUrl: task.pullRequestUrl, pullRequestTitle: task.pullRequestTitle, pullRequestState: task.pullRequestState, tags: task.tags.map((tag) => tag.name), dependencyIds: task.dependencies.map((dependency) => dependency.dependsOnTaskId) });
       const refreshObservability = async () => {
-        const [updatesResult, runsResult, logsResult] = await Promise.allSettled([api.taskUpdates(task.id), api.taskRuns(task.id), api.taskAgentLogs(task.id)]);
+        const [updatesResult, runsResult, logsResult, plansResult, artifactsResult] = await Promise.allSettled([api.taskUpdates(task.id), api.taskRuns(task.id), api.taskAgentLogs(task.id), api.taskPlans(task.id), api.taskArtifacts(task.id)]);
         if (updatesResult.status === "fulfilled") setUpdates(updatesResult.value.updates);
         if (runsResult.status === "fulfilled") { setRuns(runsResult.value.runs); setCycle(runsResult.value.cycle); }
         if (logsResult.status === "fulfilled") setAgentLogs(logsResult.value.agentLogs);
+        if (plansResult.status === "fulfilled") setPlans(plansResult.value.plans);
+        if (artifactsResult.status === "fulfilled") setArtifacts(artifactsResult.value.artifacts);
         setObservedAt(Date.now());
       };
       api.taskAttachments(task.id).then(({ attachments: taskAttachments }) => setAttachments(taskAttachments)).catch(() => setAttachments(task.attachments ?? []));
@@ -59,7 +72,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
       const timer = window.setInterval(() => { void refreshObservability(); }, 5000);
       const clock = window.setInterval(() => setObservedAt(Date.now()), 1000);
       return () => { window.clearInterval(timer); window.clearInterval(clock); };
-    } else { setUpdates([]); setAttachments([]); setActivity([]); setRuns([]); setCycle(null); setAgentLogs([]); }
+    } else { setUpdates([]); setAttachments([]); setActivity([]); setRuns([]); setCycle(null); setAgentLogs([]); setPlans([]); setArtifacts([]); }
   }, [task]);
 
   const set = <K extends keyof TaskCreate>(key: K, value: TaskCreate[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -83,6 +96,16 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
     url.search = ""; url.searchParams.set("project", project.key); url.searchParams.set("task", `${project.key}-${task.number}`);
     await navigator.clipboard.writeText(url.toString()); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 1800);
   }
+  async function autoRoute() {
+    if (!task) return;
+    setRouting(true); setError("");
+    try {
+      const result = await api.routeTask(task.id, { requiredSkills: routingSkills.split(",").map((value) => value.trim()).filter(Boolean) });
+      set("assigneeId", result.selectedAgentId);
+      onRouted?.(result.task);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not route task"); }
+    finally { setRouting(false); }
+  }
   async function forceCycle() {
     if (!task || !cycle || !canForceCycle(currentUser, project, cycle)) return;
     if (!window.confirm(`Force one additional autonomous delivery cycle for ${project.key}-${task.number}? The safety limit will increase from ${cycle.limit} to ${cycle.limit + 1}.`)) return;
@@ -94,6 +117,38 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
       if (refreshedActivity) setActivity(refreshedActivity.activity);
     } catch { setError(FORCE_CYCLE_FAILURE_MESSAGE); }
     finally { setForcingCycle(false); }
+  }
+  async function controlRun(run: AgentRun, action: AgentRunInterventionAction) {
+    const input = runInputs[run.id]?.trim();
+    const agentId = runAgents[run.id] || run.assignedAgentId || undefined;
+    if (action === "ANSWER" && !input) { setError("Enter an answer before resuming the run"); return; }
+    if (action === "REASSIGN" && !agentId) { setError("Choose an agent before reassigning the run"); return; }
+    if ((action === "CANCEL" || action === "TAKEOVER") && !window.confirm(action === "TAKEOVER" ? "Stop this agent run and take ownership of the task?" : "Cancel this agent run?")) return;
+    setControllingRun(run.id); setError("");
+    try {
+      const result = await api.interveneRun(run.id, crypto.randomUUID(), { action, controlVersion: run.controlVersion, ...(action === "ANSWER" ? { input } : {}), ...(action === "REASSIGN" ? { agentId } : {}) });
+      setRuns((items) => items.map((candidate) => candidate.id === run.id ? result.run : candidate));
+      if (action === "ANSWER") setRunInputs((items) => ({ ...items, [run.id]: "" }));
+      const refreshedActivity = task ? await api.taskActivity(task.id).catch(() => null) : null;
+      if (refreshedActivity) setActivity(refreshedActivity.activity);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not control agent run"); }
+    finally { setControllingRun(null); }
+  }
+  async function reviewPlan(plan: AgentPlan, action: "APPROVE" | "REJECT") {
+    if (!task || !canControlRuns) return;
+    if (action === "REJECT" && !window.confirm(`Reject plan v${plan.version}? The proposal will remain in history.`)) return;
+    setReviewingPlan(plan.id); setError("");
+    try {
+      const result = await api.decideTaskPlan(task.id, plan.id, { action });
+      setPlans((items) => items.map((item) => item.id === plan.id ? result.plan : item));
+      const refreshedPlans = await api.taskPlans(task.id).catch(() => null);
+      if (refreshedPlans) setPlans(refreshedPlans.plans);
+      if (action === "APPROVE" && onPlanApplied) {
+        try { await onPlanApplied(); }
+        catch { setError("Plan approved, but the task list could not be refreshed"); }
+      }
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not review the plan"); }
+    finally { setReviewingPlan(null); }
   }
   async function uploadFiles(files: FileList | File[]) {
     if (!task || !files.length) return;
@@ -110,11 +165,14 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
   }
   function onDrop(event: DragEvent<HTMLDivElement>) { event.preventDefault(); setDraggingFiles(false); void uploadFiles(event.dataTransfer.files); }
   async function downloadAttachment(attachment: Attachment) { try { const blob = await api.downloadTaskAttachment(attachment.id); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = attachment.fileName; link.click(); URL.revokeObjectURL(url); } catch (err) { setError(err instanceof Error ? err.message : "Could not download attachment"); } }
+  async function downloadArtifact(artifact: AgentArtifact) { try { const blob = await api.downloadAgentArtifact(artifact.id); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = artifact.name; link.click(); URL.revokeObjectURL(url); } catch (err) { setError(err instanceof Error ? err.message : "Could not download agent artifact"); } }
   async function removeAttachment(attachment: Attachment) { try { await api.deleteTaskAttachment(attachment.id); setAttachments((items) => items.filter((item) => item.id !== attachment.id)); } catch (err) { setError(err instanceof Error ? err.message : "Could not remove attachment"); } }
 
   const headerTitle = form.title.trim() || (task ? "Untitled task" : "New task");
   const liveProvider = latestProviderLog(agentLogs);
   const runningAgents = runs.filter((run) => run.status === "RUNNING" || run.status === "PENDING").length;
+  const canControlRuns = currentUser.kind === "HUMAN" && (currentUser.role === "ADMIN" || currentUser.id === project.ownerId);
+  const tasksById = new Map(tasks.map((candidate) => [candidate.id, candidate]));
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -135,6 +193,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
         <nav className="task-modal-tabs" role="tablist" aria-label="Task sections">
           <button type="button" role="tab" aria-selected={tab === "details"} className={tab === "details" ? "active" : ""} onClick={() => setTab("details")}><FileText /> Details & information</button>
           <button type="button" role="tab" aria-selected={tab === "updates"} className={tab === "updates" ? "active" : ""} onClick={() => setTab("updates")} disabled={!task}><Activity /> Updates & activity{task ? <b>{updates.length + activity.length}</b> : null}</button>
+          <button type="button" role="tab" aria-selected={tab === "plans"} className={tab === "plans" ? "active" : ""} onClick={() => setTab("plans")} disabled={!task}><ListTree /> Plans{task ? <b>{plans.length}</b> : null}</button>
           <button type="button" role="tab" aria-selected={tab === "agents"} className={tab === "agents" ? "active" : ""} onClick={() => setTab("agents")} disabled={!task}><Terminal /> Agents{task ? <b>{runs.length || agentLogs.length ? `${runs.length}${runningAgents ? ` · ${runningAgents} live` : ""}` : "0"}</b> : null}</button>
         </nav>
         <div className="modal-body">
@@ -144,7 +203,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
                 <label>Task name<input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="What needs to be done?" required /></label>
                 <label>Description<textarea value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Add context, requirements, or useful links…" rows={5} /></label>
                 <label>Definition of done<textarea value={form.definitionOfDone} onChange={(e) => set("definitionOfDone", e.target.value)} placeholder="Describe the observable outcome that marks this complete…" rows={4} /></label>
-                <section className="dependency-field dependency-section"><div className="section-heading"><span>Dependencies</span></div><TaskDependencyEditor value={form.dependencyIds ?? []} tasks={tasks} projectKey={project.key} currentTaskId={task?.id} onChange={(dependencyIds) => set("dependencyIds", dependencyIds)} /></section>
+                <section className="dependency-field dependency-section"><div className="section-heading"><span>Dependencies</span></div><TaskDependencyEditor value={form.dependencyIds ?? []} tasks={tasks} projectKey={project.key} currentTaskId={task?.id} resolutionStatuses={project.dependencyResolutionStatuses} onChange={(dependencyIds) => set("dependencyIds", dependencyIds)} /></section>
                 {task && <section className="attachments-section"><div className="section-heading"><span><Paperclip /> Attachments <b>{attachments.length}</b></span></div><div className={`attachment-dropzone${draggingFiles ? " is-dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDraggingFiles(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDraggingFiles(false); }} onDrop={onDrop}><UploadCloud /><strong>{uploadingFiles ? "Uploading…" : "Drop files here"}</strong><span>PDFs, documents, and photos up to 25 MB</span><label className="button button-secondary attachment-browse"><input type="file" multiple accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" onChange={(event) => { if (event.target.files) void uploadFiles(event.target.files); event.currentTarget.value = ""; }} /> Browse files</label></div>{attachments.length > 0 && <div className="attachment-list">{attachments.map((attachment) => <article className="attachment-item" key={attachment.id}><span className="attachment-icon">{attachment.mimeType.startsWith("image/") ? <Image /> : <FileText />}</span><span><strong title={attachment.fileName}>{attachment.fileName}</strong><small>{formatBytes(attachment.size)} · {attachment.uploadedBy.name}</small></span><button type="button" title="Download attachment" onClick={() => void downloadAttachment(attachment)}><Download /></button><button type="button" title="Remove attachment" onClick={() => void removeAttachment(attachment)}><X /></button></article>)}</div>}</section>}
                 <section className="pr-editor">
                   <div className="section-heading"><span><GitPullRequest /> Pull request</span>{form.pullRequestUrl && <a href={form.pullRequestUrl} target="_blank" rel="noreferrer">Open PR <ExternalLink /></a>}</div>
@@ -159,6 +218,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
                 <label>Phase<select value={form.phaseId ?? ""} onChange={(e) => set("phaseId", e.target.value || null)}><option value="">No phase</option>{phases.map((phase) => <option key={phase.id} value={phase.id}>Phase {phase.number}{phase.isActive ? " · Active" : ""}</option>)}</select></label>
                 <label>Status<select aria-label="Task status" value={form.status ?? initialStatus} onChange={(e) => set("status", e.target.value as TaskStatus)}>{project.availableStatuses.map((status) => <option key={status} value={status}>{statusMeta[status].label}</option>)}</select></label>
                 <label>Assignee<select value={form.assigneeId ?? ""} onChange={(e) => set("assigneeId", e.target.value || null)}><option value="">Unassigned</option>{members.map((user) => <option key={user.id} value={user.id}>{user.name}{user.kind === "AGENT" ? " (Agent)" : ""}</option>)}</select></label>
+                {task && currentUser.kind === "HUMAN" && (currentUser.role === "ADMIN" || currentUser.id === project.ownerId) && <div className="task-routing-control"><label>Required agent skills<input value={routingSkills} onChange={(event) => setRoutingSkills(event.target.value)} placeholder="typescript, security" /></label><button type="button" className="button button-secondary" disabled={routing} onClick={() => void autoRoute()}><Sparkles /> {routing ? "Routing…" : "Auto-route"}</button><small>Chooses an available project agent by capability and capacity. Selecting an assignee above is the operator override.</small></div>}
                 <label>Priority<select aria-label="Task priority" value={form.priority} onChange={(e) => set("priority", e.target.value as TaskPriority)}>{Object.entries(priorityMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
                 <label>Parent task<select value={form.parentId ?? ""} onChange={(e) => set("parentId", e.target.value || null)}><option value="">None</option>{tasks.filter((candidate) => candidate.id !== task?.id).map((candidate) => <option key={candidate.id} value={candidate.id}>{project.key}-{candidate.number} · {candidate.title}</option>)}</select></label>
                 <label>Due date<input type="date" value={form.dueDate ?? ""} onChange={(e) => set("dueDate", e.target.value || null)} /></label>
@@ -176,13 +236,36 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
               {activity.length ? <div className="activity-list">{activity.map((event) => <div className="activity-event" key={event.id}><span className="activity-dot" /><span className="activity-body"><strong>{event.actorName}</strong>{event.actorKind === "AGENT" && <em>Agent</em>}<span>{activityLabel(event.action, event.metadata)}</span><time>{new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(event.createdAt))}</time></span></div>)}</div> : <p className="updates-empty">No activity recorded yet.</p>}
             </section>
           </section>}
+          {tab === "plans" && task && <section className="task-plans task-tab-panel">
+            <div className="section-heading"><span>Implementation plans <b>{plans.length}</b></span><small>Immutable proposals linked to their source run</small></div>
+            {plans.length ? <div className="plan-list">{plans.map((plan) => <article className="plan-item" key={plan.id}>
+              <header><span><strong>Plan v{plan.version}</strong><small>Run {plan.sourceRunId.slice(0, 8)}</small></span><b className={`plan-status plan-status-${plan.status.toLowerCase()}`}>{plan.status}</b></header>
+              <p>{plan.summary}</p>
+              {plan.risks.length > 0 && <div><strong>Risks</strong><ul>{plan.risks.map((risk) => <li key={risk}>{risk}</li>)}</ul></div>}
+              {plan.acceptanceEvidence.length > 0 && <div><strong>Acceptance evidence</strong><ul>{plan.acceptanceEvidence.map((evidence) => <li key={evidence}>{evidence}</li>)}</ul></div>}
+              <div className="plan-items">{plan.items.map((item) => <div key={item.key} className="plan-task-proposal">
+                <div className="plan-task-heading"><span><strong>{item.title}</strong><small>{item.type} · {item.priority}{item.estimatePoints === null ? "" : ` · ${item.estimatePoints} points`}</small></span>{item.dependencyKeys.length > 0 && <small>Depends on {item.dependencyKeys.join(", ")}</small>}</div>
+                <div className="plan-task-review"><p><strong>Description</strong><span>{item.description || "No description provided"}</span></p><p><strong>Definition of Done</strong><span>{item.definitionOfDone || "No Definition of Done provided"}</span></p></div>
+              </div>)}</div>
+              {plan.status === "APPROVED" && <div className="plan-created-tasks"><strong>{Object.keys(plan.createdTaskIds).length} executable task{Object.keys(plan.createdTaskIds).length === 1 ? "" : "s"} created</strong><ul>{Object.entries(plan.createdTaskIds).map(([itemKey, taskId]) => {
+                const createdTask = tasksById.get(taskId);
+                return <li key={itemKey}><span>{itemKey}</span>{createdTask ? <a href={`?view=board&project=${encodeURIComponent(project.key)}&task=${encodeURIComponent(`${project.key}-${createdTask.number}`)}`}>{project.key}-{createdTask.number} · {createdTask.title}</a> : null}<code>{taskId}</code></li>;
+              })}</ul></div>}
+              {plan.reviewComment && <p className="plan-review-comment">Review: {plan.reviewComment}</p>}
+              {plan.status === "PROPOSED" && canControlRuns && <footer><button type="button" className="button button-danger-quiet" disabled={reviewingPlan === plan.id} onClick={() => void reviewPlan(plan, "REJECT")}>Reject</button><button type="button" className="button button-primary" disabled={reviewingPlan === plan.id} onClick={() => void reviewPlan(plan, "APPROVE")}>Approve &amp; create tasks</button></footer>}
+            </article>)}</div> : <div className="task-agents-empty"><span><ListTree /><strong>No implementation plans yet</strong><small>An active agent run can propose a versioned task graph for review.</small></span></div>}
+          </section>}
           {tab === "agents" && task && <section className="task-agents task-tab-panel">
-            {runs.length || agentLogs.length || liveProvider ? <>
+            {runs.length || agentLogs.length || artifacts.length || liveProvider ? <>
               {canForceCycle(currentUser, project, cycle) && <div className="force-cycle-callout" role="alert"><span><strong>Autonomous cycle limit reached</strong><small>{cycle!.count} of {cycle!.limit} delivery cycles have been used. An owner or administrator may authorize exactly one more.</small></span><button type="button" className="button button-danger-quiet" onClick={() => void forceCycle()} disabled={forcingCycle}><Sparkles /> {forcingCycle ? "Starting…" : "Force one additional cycle"}</button></div>}
               {liveProvider && <div className="task-provider-progress"><Terminal /><span><strong>Live provider progress</strong><small>{liveProvider.provider} · {liveProvider.stream} · #{liveProvider.sequence}</small><pre>{liveProvider.content}</pre></span></div>}
               <section className="task-runs">
                 <div className="section-heading"><span>Agent runs <b>{runs.length}</b></span><small>{runningAgents ? "Live · refreshes every 5s" : ""}</small></div>
-                {runs.length ? <div className="run-list">{runs.map((run) => { const health = getRunHealth(run, observedAt); const lastLog = latestRunLog(agentLogs, run.id); const timeline = runLogs(agentLogs, run.id); const timeout = formatCountdown(run.timeoutAt, observedAt); return <article className={`run-item${health.stale ? " is-stale" : ""}`} key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><span className={`run-health run-health-${health.kind.toLowerCase()}`}>{health.label}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-health-detail">{health.detail}{runIsWaitingForInput(lastLog) && <b className="run-waiting">Waiting for provider input</b>}</div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{timeout && <span>Timeout {timeout}</span>}</div>{timeline.length > 0 && <div className="run-output-timeline" aria-label={`${run.kind} provider response timeline`}><small>Provider response timeline · {timeline.length} event{timeline.length === 1 ? "" : "s"}</small>{timeline.slice().reverse().map((log) => <div className="run-timeline-entry" key={log.id}><span>#{log.sequence} · {log.stream}</span><pre>{log.content}</pre></div>)}</div>}{run.lastError && <p className="run-error">{run.lastError}</p>}</article>; })}</div> : <p className="runs-empty">No agent runs yet.</p>}
+                {runs.length ? <div className="run-list">{runs.map((run) => { const health = getRunHealth(run, observedAt); const lastLog = latestRunLog(agentLogs, run.id); const timeline = runLogs(agentLogs, run.id); const timeout = formatCountdown(run.timeoutAt, observedAt); const busy = controllingRun === run.id; const terminal = run.status === "SUCCEEDED" || run.status === "CANCELLED"; return <article className={`run-item${health.stale ? " is-stale" : ""}`} key={run.id}><div className="run-item-header"><strong>{run.kind}</strong><span className={`run-status run-status-${run.status.toLowerCase()}`}>{run.status}</span><span className={`run-health run-health-${health.kind.toLowerCase()}`}>{health.label}</span><time>{formatDate(run.updatedAt)}</time></div><div className="run-health-detail">{health.detail}{run.controlState === "ACTIVE" && runIsWaitingForInput(lastLog) && <b className="run-waiting">Possible unstructured input request</b>}</div><div className="run-item-meta"><span>Attempts {run.attemptCount}/{run.maxAttempts}</span><span>Decision v{run.controlVersion}</span>{run.heartbeatAt && <span>Heartbeat {formatDate(run.heartbeatAt)}</span>}{run.leaseExpiresAt && run.status === "RUNNING" && <span>Lease until {formatDate(run.leaseExpiresAt)}</span>}{timeout && <span>Timeout {timeout}</span>}</div>{run.controlState === "WAITING_FOR_INPUT" && <div className="run-input-request"><strong>Provider question</strong><p>{run.inputRequest}</p>{canControlRuns && <textarea aria-label={`Answer ${run.kind} run`} rows={2} value={runInputs[run.id] ?? ""} onChange={(event) => setRunInputs((items) => ({ ...items, [run.id]: event.target.value }))} placeholder="Provide the decision or missing information" />}</div>}{canControlRuns && !terminal && run.controlState !== "HUMAN_TAKEOVER" && <div className="run-controls" aria-label={`${run.kind} run controls`}>{run.controlState === "ACTIVE" && ["PENDING", "RUNNING"].includes(run.status) && <button type="button" className="button button-secondary" disabled={busy} onClick={() => void controlRun(run, "PAUSE")}>Pause</button>}{run.controlState === "PAUSED" && <button type="button" className="button button-secondary" disabled={busy} onClick={() => void controlRun(run, "RESUME")}>Resume</button>}{run.controlState === "WAITING_FOR_INPUT" && <button type="button" className="button button-primary" disabled={busy || !runInputs[run.id]?.trim()} onClick={() => void controlRun(run, "ANSWER")}>Answer &amp; resume</button>}{run.status === "FAILED" && run.attemptCount < run.maxAttempts && <button type="button" className="button button-secondary" disabled={busy} onClick={() => void controlRun(run, "RETRY")}>Retry</button>}<label>Reassign<select aria-label={`Reassign ${run.kind} run`} value={runAgents[run.id] ?? run.assignedAgentId ?? ""} onChange={(event) => setRunAgents((items) => ({ ...items, [run.id]: event.target.value }))}><option value="">Choose agent</option>{members.filter((member) => member.kind === "AGENT").map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label><button type="button" className="button button-secondary" disabled={busy || !(runAgents[run.id] || run.assignedAgentId)} onClick={() => void controlRun(run, "REASSIGN")}>Apply</button><button type="button" className="button button-danger-quiet" disabled={busy} onClick={() => void controlRun(run, "CANCEL")}>Cancel run</button><button type="button" className="button button-danger-quiet" disabled={busy} onClick={() => void controlRun(run, "TAKEOVER")}>Take over</button></div>}{timeline.length > 0 && <div className="run-output-timeline" aria-label={`${run.kind} provider response timeline`}><small>Provider response timeline · {timeline.length} event{timeline.length === 1 ? "" : "s"}</small>{timeline.slice().reverse().map((log) => <div className="run-timeline-entry" key={log.id}><span>#{log.sequence} · {log.stream}</span><pre>{log.content}</pre></div>)}</div>}{run.lastError && <p className="run-error">{run.lastError}</p>}</article>; })}</div> : <p className="runs-empty">No agent runs yet.</p>}
+              </section>
+              <section className="task-agent-artifacts">
+                <div className="section-heading"><span><Paperclip /> Evidence &amp; provenance <b>{artifacts.length}</b></span><small>Immutable, SHA-bound run artifacts</small></div>
+                {artifacts.length ? <div className="agent-artifact-list">{artifacts.map((artifact) => <button type="button" className="agent-artifact" aria-label={`Download ${artifact.name}`} onClick={() => void downloadArtifact(artifact)} key={artifact.id}><span><strong>{artifact.name}</strong><small>{artifactTypeLabel(artifact.type)} · run {artifact.runId.slice(0, 12)}</small></span><code>{artifactProvenance(artifact)}</code><Download /></button>)}</div> : <p className="logs-empty">No structured evidence recorded yet.</p>}
               </section>
               <section className="task-agent-logs">
                 <div className="section-heading"><span><Terminal /> Agent logs <b>{agentLogs.length}</b></span><small>Provider output and callbacks</small></div>
@@ -211,8 +294,13 @@ function activityLabel(action: string, metadata: Record<string, unknown>): strin
   switch (action) {
     case "task.created": return "created this task";
     case "task.claimed": return "claimed this task";
+    case "task.auto_routed": return `auto-routed this task to agent ${String(metadata.selectedAgentId)}`;
+    case "task.routing_overridden": return `overrode routing to agent ${String(metadata.selectedAgentId)}`;
     case "task.note_added": return "posted an update";
     case "task.agent_cycle_forced": return `authorized one additional agent cycle (${String(metadata.priorCount)} → limit ${String(metadata.newLimit)})`;
+    case "agent_plan.proposed": return `proposed implementation plan v${String(metadata.version)}`;
+    case "agent_plan.approved": return `approved implementation plan v${String(metadata.version)}`;
+    case "agent_plan.rejected": return `rejected implementation plan v${String(metadata.version)}`;
     case "task.updated": {
       const keys = Object.keys(metadata).filter((k) => k !== "updatedAt");
       if (keys.length === 1) {

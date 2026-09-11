@@ -1,4 +1,5 @@
-import type { ActivityEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentRunEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { AgentArtifactType, AgentBudgetLimits, AgentBudgetScope, AgentUsageReport, AgentUsageTotals, AgentCapabilityProfile } from "@taskforge/contracts";
+import type { ActivityEntity, AgentArtifactEntity, AgentBudgetEntity, AgentContextPackEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentUsageEventEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -7,6 +8,7 @@ export interface UserRepository {
   list(): Promise<UserEntity[]>;
   saveProfile(id: string, input: { name: string; email: string }): Promise<UserEntity>;
   updateAvatar(id: string, avatarUrl: string | null): Promise<UserEntity>;
+  updateCapabilityProfile(id: string, profile: AgentCapabilityProfile): Promise<UserEntity>;
   getWebhookConfiguration(id: string): Promise<AgentWebhookConfiguration | null>;
   updateWebhookConfiguration(id: string, input: { webhookUrl?: string | null; secretCiphertext?: string; secretVersion?: number }): Promise<UserEntity>;
   createAgent(input: { id: string; name: string; email: string; createdAt: string }): Promise<UserEntity>;
@@ -21,7 +23,7 @@ export interface ProjectRepository {
   allocateSortOrder(): Promise<number>;
   reorder(ids: string[]): Promise<void>;
   create(input: ProjectEntity): Promise<ProjectEntity>;
-  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget">>): Promise<ProjectEntity>;
+  update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses" | "reviewPolicy">>): Promise<ProjectEntity>;
   delete(id: string): Promise<void>;
 }
 
@@ -50,7 +52,7 @@ export interface TaskRepository {
   listByProject(projectId: string, filters: TaskFilters | undefined, page: PageRequest): Promise<Page<TaskEntity>>;
   listForAssignee(assigneeId: string, status?: string): Promise<TaskEntity[]>;
   listUsedStatuses(projectId: string): Promise<TaskEntity["status"][]>;
-  claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"] }, options?: { phaseId?: string | null; priority?: string; taskId?: string }): Promise<(TaskEntity & { previousStatus?: TaskEntity["status"] }) | null>;
+  claimNext(projectId: string, claimantId: string, workflow: { sourceStatuses: TaskEntity["status"][]; targetStatus: TaskEntity["status"]; dependencyResolutionStatuses: TaskEntity["status"][] }, options?: { phaseId?: string | null; priority?: string; taskId?: string }): Promise<(TaskEntity & { previousStatus?: TaskEntity["status"] }) | null>;
   allocateNumber(projectId: string, status: TaskEntity["status"]): Promise<{ number: number; position: number }>;
   unassignForProjectMember(projectId: string, userId: string): Promise<void>;
   countByPhase(phaseId: string): Promise<number>;
@@ -59,6 +61,8 @@ export interface TaskRepository {
   deleteByPhase(phaseId: string): Promise<number>;
   create(input: TaskEntity): Promise<TaskEntity>;
   update(id: string, input: Partial<TaskEntity>): Promise<TaskEntity>;
+  activeAssignmentCounts(agentIds: string[]): Promise<Map<string, number>>;
+  assignIfCapacity(taskId: string, agentId: string, maxConcurrency: number): Promise<"ASSIGNED" | "ALREADY_ASSIGNED" | "TASK_TAKEN" | "AT_CAPACITY">;
   delete(id: string): Promise<void>;
 }
 
@@ -105,6 +109,9 @@ export interface ApiTokenRepository {
   listForUser(userId: string): Promise<ApiTokenEntity[]>;
   findById(id: string): Promise<(ApiTokenEntity & { userId: string; ciphertext: string | null }) | null>;
   revoke(id: string): Promise<void>;
+  findRunCredential(runId: string): Promise<AgentRunCredentialEntity | null>;
+  saveRunCredential(input: AgentRunCredentialEntity): Promise<AgentRunCredentialEntity>;
+  revokeRunCredential(runId: string, revokedAt: string): Promise<void>;
 }
 
 export interface SearchRepository {
@@ -139,16 +146,55 @@ export interface AgentRunRepository {
   grantCycle(input: AgentCycleGrantEntity): Promise<{ grant: AgentCycleGrantEntity; created: boolean }>;
   expire(now: string): Promise<number>;
   claim(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
-  heartbeat(id: string, owner: string, now: string, leaseExpiresAt: string): Promise<boolean>;
-  complete(id: string, owner: string, status: "SUCCEEDED" | "FAILED" | "CANCELLED", now: string, error?: string | null): Promise<boolean>;
+  heartbeat(id: string, owner: string, controlVersion: number, now: string, leaseExpiresAt: string): Promise<boolean>;
+  complete(id: string, owner: string, controlVersion: number, status: "SUCCEEDED" | "FAILED" | "CANCELLED", now: string, error?: string | null): Promise<boolean>;
   cancel(id: string, now: string, error?: string | null): Promise<boolean>;
+  findIntervention(requestId: string): Promise<AgentRunInterventionEntity | null>;
+  applyIntervention(id: string, expectedVersion: number, update: Partial<Pick<AgentRunEntity, "status" | "controlState" | "assignedAgentId" | "inputRequest" | "inputResponse" | "inputRequestedAt" | "inputAnsweredAt" | "takeoverById" | "lastError" | "completedAt">>, now: string): Promise<boolean>;
+  recordIntervention(input: AgentRunInterventionEntity): Promise<void>;
 }
-export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
+export interface AgentContextPackRepository {
+  findCurrent(runId: string): Promise<AgentContextPackEntity | null>;
+  listForRun(runId: string): Promise<AgentContextPackEntity[]>;
+  nextVersion(runId: string): Promise<number>;
+  create(input: AgentContextPackEntity): Promise<AgentContextPackEntity>;
+}
+export interface AgentUsageRepository {
+  append(input: AgentUsageEventEntity): Promise<{ event: AgentUsageEventEntity; created: boolean }>;
+  report(filters: { projectId?: string; phaseId?: string; taskId?: string; runId?: string; provider?: string; model?: string }): Promise<AgentUsageReport>;
+  totals(filters: { projectId?: string; phaseId?: string; taskId?: string; runId?: string }): Promise<AgentUsageTotals>;
+}
+export interface AgentBudgetRepository {
+  list(projectId: string): Promise<AgentBudgetEntity[]>;
+  listApplicable(projectId: string, phaseId: string | null, taskId: string): Promise<AgentBudgetEntity[]>;
+  save(input: AgentBudgetEntity): Promise<AgentBudgetEntity>;
+  delete(projectId: string, scope: AgentBudgetScope, scopeId: string): Promise<boolean>;
+}
+export interface AgentArtifactRepository {
+  lockRun(runId: string): Promise<void>;
+  countForRun(runId: string): Promise<number>;
+  findDuplicate(runId: string, type: AgentArtifactType, headSha: string, contentHash: string): Promise<AgentArtifactEntity | null>;
+  findById(id: string): Promise<AgentArtifactEntity | null>;
+  listForRun(runId: string): Promise<AgentArtifactEntity[]>;
+  listForTask(taskId: string, headSha?: string): Promise<AgentArtifactEntity[]>;
+  create(input: AgentArtifactEntity): Promise<AgentArtifactEntity>;
+}
+export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; findPublishedByTaskHead(taskId: string, headSha: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
+export interface AgentPlanRepository {
+  lockTask(taskId: string): Promise<void>;
+  listForTask(taskId: string): Promise<AgentPlanEntity[]>;
+  findById(id: string): Promise<AgentPlanEntity | null>;
+  findByIdempotency(sourceRunId: string, key: string): Promise<AgentPlanEntity | null>;
+  nextVersion(taskId: string): Promise<number>;
+  create(input: AgentPlanEntity): Promise<AgentPlanEntity>;
+  decide(id: string, expectedStatus: AgentPlanEntity["status"], input: Pick<AgentPlanEntity, "status" | "createdTaskIds" | "reviewedById" | "reviewComment" | "reviewedAt">): Promise<boolean>;
+}
 export interface DeliveryMonitorRepository { health(now: string, pollIntervalMs: number): Promise<DeliveryMonitorHealthEntity>; taskCheckpoint(taskId: string): Promise<Record<string, unknown> | null>; }
 export interface TaskGateRepository {
   findByTask(taskId: string): Promise<TaskGateEntity | null>;
   save(input: TaskGateEntity): Promise<TaskGateEntity>;
-  approve(taskId: string, headSha: string, actorId: string, now: string): Promise<TaskGateEntity | null>;
+  invalidateApprovals(taskId: string): Promise<void>;
+  approve(taskId: string, headSha: string, actorId: string, policy: { requiredReviewerCount: number; excludedReviewerId: string | null; allowedReviewerIds: string[] }, now: string): Promise<TaskGateEntity | null>;
   merge(taskId: string, headSha: string, actorId: string, now: string): Promise<TaskGateEntity | null>;
 }
 export interface TaskFindingRepository {
@@ -186,10 +232,15 @@ export interface RepositorySet {
   tokens: ApiTokenRepository;
   search: SearchRepository;
   runs: AgentRunRepository;
+  contextPacks: AgentContextPackRepository;
   gates: TaskGateRepository;
   findings: TaskFindingRepository;
   handoffs: AgentHandoffRepository;
+  plans: AgentPlanRepository;
   deliveryMonitor: DeliveryMonitorRepository;
+  agentUsage: AgentUsageRepository;
+  agentBudgets: AgentBudgetRepository;
+  artifacts: AgentArtifactRepository;
 }
 
 export interface UnitOfWork {

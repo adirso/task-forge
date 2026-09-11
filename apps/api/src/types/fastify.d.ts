@@ -11,6 +11,7 @@ declare module "fastify" {
       kind: UserKind;
       role: UserRole;
       tokenScopes: string[] | null;
+      runCredential: { runId: string; taskId: string; projectId: string } | null;
     };
   }
 

@@ -1,18 +1,29 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import type { ProviderConfig, ProviderLabel } from "./config.js";
 import { ApiClient } from "./api.js";
-import { executeCommand } from "./command.js";
+import { executeCommand, providerEnvironment } from "./command.js";
 import { redact, verifySignature } from "./security.js";
 import type { JobStore } from "./store.js";
 import { MemoryJobStore } from "./store.js";
+import { DEFAULT_SANDBOX_POLICY, type SandboxPolicy } from "./sandbox.js";
 
-export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string; pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null }; runId?: string | null; }
+export interface AgentEvent { id: string; event: string; previousStatus?: string; task?: { id: string; number?: number; title?: string; description?: string; definitionOfDone?: string; projectKey?: string; branch?: string | null; status?: string; pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null }; runId?: string | null; runKind?: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX"; interventionAction?: string; operatorInput?: string | null; }
 export type RunnerResult = { status: number; body: string };
 type AgentWorkflow = { implementationQueue: string; implementationStart: string; reviewHandoff: string; reviewStart: string; approved: string; fixNeeded: string; fixStart: string; reReview: string };
 type TaskFinding = { severity?: string; title?: string; body?: string; disposition?: string; filePath?: string | null; lineNumber?: number | null };
 type VerifiedHandoff = { branch?: string | null; headSha?: string | null; branchPublished?: boolean; pullRequestUrl?: string | null; pullRequestState?: string | null; status?: string };
-type ContextResponse = { project: { key: string; availableStatuses: string[]; localRepoPath?: string | null; agentWorkflow?: AgentWorkflow | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }>; findings?: TaskFinding[] } };
+type RunContextPack = {
+  version: number; fingerprint: string;
+  content: {
+    history?: { decisions?: Array<{ body?: string }>; recentUpdates?: Array<{ body?: string }>; findings?: TaskFinding[]; summary?: { omittedSummary?: string | null } };
+    dependencies?: Array<{ projectKey?: string; number?: number; title?: string; status?: string; isBlocking?: boolean }>;
+    attachments?: Array<{ fileName?: string; mimeType?: string; size?: number; downloadUrl?: string }>;
+    repository?: { guidanceFiles?: string[]; relevantFiles?: string[] };
+  };
+};
+type ContextResponse = { project: { id?: string; key: string; availableStatuses: string[]; localRepoPath?: string | null; agentWorkflow?: AgentWorkflow | null }; task: AgentEvent["task"] & { updates?: Array<{ body: string }>; findings?: TaskFinding[] } };
 type WorktreeFactory = (repo: string, branch: string | null, taskId: string) => Promise<string>;
 
 // Legacy projects have no persisted mapping. Keep their historical routing
@@ -30,6 +41,22 @@ const LEGACY_AGENT_WORKFLOW: AgentWorkflow = {
 
 const noopWorktree: WorktreeFactory = async (repo) => repo;
 const readGit = promisify(execFile);
+const SMITHY_PROMPT_VERSION = "smithy-task-v1";
+const artifactData = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64");
+
+type ProviderUsage = { inputTokens: number; outputTokens: number; costMicros: number; toolCalls: number };
+export function parseProviderUsage(output: string): ProviderUsage {
+  const total: ProviderUsage = { inputTokens: 0, outputTokens: 0, costMicros: 0, toolCalls: 0 };
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.match(/^TASKFORGE_USAGE\s*[:=]\s*(\{.*\})\s*$/);
+    if (!match) continue;
+    try {
+      const value = JSON.parse(match[1]!) as Record<string, unknown>;
+      for (const key of Object.keys(total) as Array<keyof ProviderUsage>) { const amount = Number(value[key] ?? 0); if (Number.isSafeInteger(amount) && amount >= 0) total[key] += amount; }
+    } catch { /* Malformed optional provider metrics are ignored, never logged. */ }
+  }
+  return total;
+}
 
 export class SmithyRunner {
   private readonly store: JobStore;
@@ -44,6 +71,8 @@ export class SmithyRunner {
     store: JobStore = new MemoryJobStore(),
     private readonly worktree: WorktreeFactory = noopWorktree,
     private readonly heartbeatIntervalMs = 30_000,
+    private readonly apiUrl = process.env.TASKFORGE_API_URL ?? "http://127.0.0.1:4000",
+    private readonly sandboxPolicy: SandboxPolicy = DEFAULT_SANDBOX_POLICY,
   ) { this.store = store; }
 
   async resume() {
@@ -95,8 +124,15 @@ export class SmithyRunner {
     }
     const owner = this.activeByTask.get(event.task.id);
     if (owner && owner !== event.id) {
-      this.store.markComplete(event.id, "CANCELLED");
-      return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, activeEventId: owner }) };
+      if (event.runId && event.runKind) {
+        this.cancelled.add(owner);
+        this.controllers.get(owner)?.abort();
+        this.store.cancel(owner);
+        this.activeByTask.delete(event.task.id);
+      } else {
+        this.store.markComplete(event.id, "CANCELLED");
+        return { status: 202, body: JSON.stringify({ accepted: true, duplicate: true, activeEventId: owner }) };
+      }
     }
     void this.process(config, event, accepted.job).catch(() => undefined);
     return { status: 202, body: JSON.stringify({ accepted: true, eventId: event.id }) };
@@ -121,6 +157,7 @@ export class SmithyRunner {
   }
 
   private kind(event: AgentEvent, workflow: AgentWorkflow | null | undefined): "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX" | null {
+    if (event.event === "task.assigned" && event.runId && event.runKind) return event.runKind;
     const status = event.task?.status;
     if (!status && event.event === "task.assigned") return "IMPLEMENTATION";
     if (!status || !["task.assigned", "task.status_changed"].includes(event.event)) return null;
@@ -160,7 +197,7 @@ export class SmithyRunner {
       "- Run completion is separate from task status: Smithy records the run result, but a successful run does not authorize or perform a task transition.",
     ];
     const configured = workflow ?? LEGACY_AGENT_WORKFLOW;
-    if (kind === "IMPLEMENTATION") lines.push(transition(configured.implementationStart, "implementation start"), "- First make the implementation-start status transition, then edit and test the task.", "- Before requesting review, commit all changes, push the existing task branch, and create or update the pull request with the git/GitHub credentials available to you. Capture the exact pushed commit SHA and PR URL/title/state; never claim publication from a local branch alone.", `- Persist verified handoff evidence with PUT /api/runs/${runId}/handoff: include branch, pushed commit headSha, branchPublished=true, and pull-request URL/title/state. Retry idempotently if the callback fails; do not request review until it is accepted.`, `- If git, GitHub CLI, credentials, push, or PR creation fails, redact the diagnostic, record it in the agent log and task update, and leave the task in progress for recovery.`, transition(configured.reviewHandoff, "implementation handoff for review"));
+    if (kind === "IMPLEMENTATION") lines.push(transition(configured.implementationStart, "implementation start"), "- First make the implementation-start status transition, then edit and test the task.", `- Record changed-file, commit, test, coverage, screenshot, and tool evidence as applicable with POST /api/runs/${runId}/artifacts. Artifacts must use the final head SHA and base64 content; duplicate uploads are idempotent.`, "- Before requesting review, commit all changes, push the existing task branch, and create or update the pull request with the git/GitHub credentials available to you. Capture the exact pushed commit SHA and PR URL/title/state; never claim publication from a local branch alone.", `- Persist verified handoff evidence with PUT /api/runs/${runId}/handoff: include branch, pushed commit headSha, branchPublished=true, and pull-request URL/title/state. Retry idempotently if the callback fails; do not request review until it is accepted.`, `- If git, GitHub CLI, credentials, push, or PR creation fails, redact the diagnostic, record it in the agent log and task update, and leave the task in progress for recovery.`, transition(configured.reviewHandoff, "implementation handoff for review"));
     else if (kind === "FIX") lines.push(task.branch ? `- Fix needed mode: remain on the existing branch ${task.branch}; do not create or switch branches.` : "- Fix needed mode requires a configured existing task branch; stop before editing and ask the operator to set it. Never invent a branch.", `- Read the latest review findings from ${findings}, resolve and test each finding, then commit the fixes, push this same branch, and create or update the existing pull request. Capture the exact new head SHA and PR metadata.`, `- Persist the verified fix handoff with PUT /api/runs/${runId}/handoff using branchPublished=true, the pushed headSha, and pull-request URL/title/state; retry idempotently and request re-review only after it is accepted.`, "- If git/GitHub credentials, push, or PR publication fails, redact and record the actionable error and leave the task in fix progress for recovery.", transition(configured.fixStart, "fix start"), transition(configured.reReview, "fix handoff for re-review"));
     else if (kind === "RE_REVIEW") lines.push(`- Re-review mode: this task was previously reviewed. Read the latest findings from ${findings}, compare the current head against each finding and the Definition of done, and report remaining issues.`, `- Verify the task's canonical branch, pushed head SHA, and pull-request URL/state before reviewing; report missing or inconsistent publication evidence instead of assuming it is valid.`, transition(configured.reReview, "re-review start"), transition(configured.approved, "clean re-review approval"), transition(configured.fixNeeded, "remaining-finding fix request"), "- Do not assume approval or merge; report findings and evidence for the human/operator decision.");
     else lines.push(transition(configured.reviewStart, "review start"), `- Verify the task's canonical branch, pushed head SHA, and pull-request URL/state before reviewing; report missing or inconsistent publication evidence instead of assuming it is valid.`, `- After review, record structured findings and evidence. If clean, PATCH the task to ${configured.approved}; if changes are required, dispose findings as ${configured.fixNeeded}. Do not implement or merge changes in review mode.`);
@@ -172,8 +209,15 @@ export class SmithyRunner {
     const taskId = event.task?.id ?? job.taskId;
     const owner = this.activeByTask.get(taskId);
     if (owner && owner !== event.id) {
-      this.store.markComplete(event.id, "CANCELLED");
-      return;
+      if (event.runId && event.runKind) {
+        this.cancelled.add(owner);
+        this.controllers.get(owner)?.abort();
+        this.store.cancel(owner);
+        this.activeByTask.delete(taskId);
+      } else {
+        this.store.markComplete(event.id, "CANCELLED");
+        return;
+      }
     }
     this.activeByTask.set(taskId, event.id);
     const controller = new AbortController();
@@ -187,8 +231,10 @@ export class SmithyRunner {
     this.store.markRunning(event.id);
     const api = this.apiFactory(config);
     let runId = event.runId ?? job.runId ?? null;
+    let controlVersion: number | null = null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
     let leaseLost = false;
+    let controlSuperseded = false;
     let logSequence = 0;
     let logQueue = Promise.resolve();
     try {
@@ -222,7 +268,16 @@ export class SmithyRunner {
         runId = String((created.run as { id: string }).id);
         this.store.setRunId(event.id, runId);
       }
-      await api.request(`/api/runs/${runId}/claim`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) });
+      const claimResponse = await api.request(`/api/runs/${runId}/claim`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }) as unknown as { run?: { controlVersion?: number } };
+      controlVersion = claimResponse.run?.controlVersion ?? 1;
+      if (!Number.isInteger(controlVersion) || controlVersion! < 1) throw new Error("TaskForge claim did not return a valid run control version");
+      const credentialResponse = await api.request(`/api/runs/${runId}/credential`, { method: "POST" }) as unknown as { credential?: { token?: string; expiresAt?: string } };
+      const runCredential = credentialResponse.credential;
+      if (!runCredential?.token?.startsWith("tfr_") || !runCredential.expiresAt || Date.parse(runCredential.expiresAt) <= this.now()) {
+        throw new Error("TaskForge did not issue a valid short-lived run credential");
+      }
+      const contextPackResponse = await api.request(`/api/runs/${runId}/context-pack`) as unknown as { contextPack?: RunContextPack };
+      const contextPack = contextPackResponse.contextPack?.version && contextPackResponse.contextPack.fingerprint ? contextPackResponse.contextPack : null;
       let verifiedHandoff: VerifiedHandoff | null = null;
       if (kind === "REVIEW" || kind === "RE_REVIEW") {
         try {
@@ -241,7 +296,7 @@ export class SmithyRunner {
           }
         } catch { verifiedHandoff = null; }
       }
-      heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000 }) }).catch((error) => { if (error instanceof Error && /lease is not owned|already leased|no longer runnable/i.test(error.message)) { leaseLost = true; controller.abort(); } }); }, this.heartbeatIntervalMs);
+      heartbeat = setInterval(() => { void api.request(`/api/runs/${runId}/heartbeat`, { method: "POST", body: JSON.stringify({ leaseMs: 120_000, controlVersion }) }).catch((error) => { if (!(error instanceof Error)) return; if (/control decision superseded/i.test(error.message)) { controlSuperseded = true; controller.abort(); } else if (/lease|already leased|no longer runnable/i.test(error.message)) { leaseLost = true; controller.abort(); } }); }, this.heartbeatIntervalMs);
       heartbeat.unref?.();
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: `Smithy started ${kind.toLowerCase()} run ${runId}.` }) });
       const appendLog = (stream: "stdout" | "stderr" | "system" | "callback", category: "output" | "progress" | "tool" | "callback" | "lifecycle", content: string) => {
@@ -252,27 +307,41 @@ export class SmithyRunner {
       appendLog("system", "lifecycle", `Smithy started ${kind.toLowerCase()} run ${runId}.`);
       const statuses = context.project.availableStatuses;
       const findingResponse = await api.request(`/api/tasks/${task.id}/findings`) as unknown as { findings?: TaskFinding[] };
-      const findings = Array.isArray(findingResponse.findings) ? findingResponse.findings : [];
+      const findings = contextPack?.content.history?.findings ?? (Array.isArray(findingResponse.findings) ? findingResponse.findings : []);
       const contextEndpoint = `/api/context?project=${encodeURIComponent(projectKey)}&task=${encodeURIComponent(`${projectKey}-${taskNumber}`)}`;
       const findingLines = findings.map((finding) => `Finding [${finding.severity ?? "UNKNOWN"}] ${finding.disposition ? `(${finding.disposition}) ` : ""}${redact(finding.title ?? "")}: ${redact(finding.body ?? "")}${finding.filePath ? ` (${finding.filePath}${finding.lineNumber ? `:${finding.lineNumber}` : ""})` : ""}`);
       const prTask = task as typeof task & { pullRequestUrl?: string | null; pullRequestTitle?: string | null; pullRequestState?: "DRAFT" | "OPEN" | "MERGED" | "CLOSED" | null; headSha?: string | null; branchPublished?: boolean; status?: string };
       const publication = verifiedHandoff ?? prTask;
       const publicationState = publication.status === "PUBLISHED" && publication.branchPublished && publication.branch && publication.headSha && publication.pullRequestUrl ? "verified" : "incomplete or unverified";
-      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, `Branch: ${task.branch?.trim() || "(no branch configured)"}`, `Canonical publication (${publicationState}): branch ${redact(publication.branch ?? task.branch ?? "(not recorded)")}; head SHA ${redact(publication.headSha ?? "(not recorded)")}; pull request ${redact(publication.pullRequestUrl ?? prTask.pullRequestUrl ?? "(not recorded)")} (${redact(publication.pullRequestState ?? prTask.pullRequestState ?? "unknown")})`, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...(task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
+      const memoryUpdates = contextPack
+        ? [...(contextPack.content.history?.decisions ?? []), ...(contextPack.content.history?.recentUpdates ?? [])].map((update) => `Historical context: ${redact(update.body ?? "")}`)
+        : (task.updates ?? []).map((update) => `Human update: ${redact(update.body)}`);
+      const contextPackLines = contextPack ? [
+        `Durable context pack: version ${contextPack.version}; fingerprint ${contextPack.fingerprint}. Retries must reuse this stored version unless TaskForge records an explicit refresh.`,
+        ...(contextPack.content.history?.summary?.omittedSummary ? [`History summary: ${redact(contextPack.content.history.summary.omittedSummary)}`] : []),
+        ...(contextPack.content.dependencies?.length ? ["Dependencies:", ...contextPack.content.dependencies.map((dependency) => `- ${redact(dependency.projectKey ?? "")}-${dependency.number ?? "?"}: ${redact(dependency.title ?? "")} (${redact(dependency.status ?? "unknown")}${dependency.isBlocking ? ", blocking" : ""})`)] : []),
+        ...(contextPack.content.attachments?.length ? ["Attachments:", ...contextPack.content.attachments.map((attachment) => `- ${redact(attachment.fileName ?? "attachment")} (${redact(attachment.mimeType ?? "unknown")}, ${attachment.size ?? 0} bytes): ${redact(attachment.downloadUrl ?? "")}`)] : []),
+        ...(contextPack.content.repository?.guidanceFiles?.length ? [`Repository guidance: ${contextPack.content.repository.guidanceFiles.map(redact).join(", ")}`] : []),
+        ...(contextPack.content.repository?.relevantFiles?.length ? [`Relevant files: ${contextPack.content.repository.relevantFiles.map(redact).join(", ")}`] : []),
+      ] : ["Durable context pack metadata was not returned; continue with the canonical task context and report the compatibility gap."];
+      const prompt = [`TaskForge task ${projectKey}-${taskNumber}: ${redact(task.title ?? "")}`, `Branch: ${task.branch?.trim() || "(no branch configured)"}`, `Canonical publication (${publicationState}): branch ${redact(publication.branch ?? task.branch ?? "(not recorded)")}; head SHA ${redact(publication.headSha ?? "(not recorded)")}; pull request ${redact(publication.pullRequestUrl ?? prTask.pullRequestUrl ?? "(not recorded)")} (${redact(publication.pullRequestState ?? prTask.pullRequestState ?? "unknown")})`, ...contextPackLines, redact(task.description ?? ""), `Definition of done: ${redact(task.definitionOfDone ?? "")}`, ...memoryUpdates, ...(event.operatorInput ? [`Operator input: ${redact(event.operatorInput)}`] : []), ...(findingLines.length ? ["Review findings:", ...findingLines] : []), this.statusPrompt(task, statuses, workflow, kind, contextEndpoint, runId), `If a decision is required, POST /api/runs/${runId}/interventions with an Idempotency-Key and {"action":"REQUEST_INPUT","controlVersion":${controlVersion},"input":"your concise question"}; stop work after TaskForge accepts it.`, "TaskForge access is available through TASKFORGE_API_URL and the short-lived TASKFORGE_TOKEN. The credential is bound to this task and run; never print, persist, or copy it.", "Report provider output through agent logs and keep human updates focused on decisions and handoffs. Do not merge changes yourself."].join("\n\n");
       const repo = context.project.localRepoPath || config.repo;
       if (!repo) throw new Error("Project localRepoPath is not configured and no Smithy provider fallback repo is set");
       const cwd = await this.worktree(repo, task.branch ?? event.task?.branch ?? null, task.id);
       if (this.cancelled.has(event.id)) {
         await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: "Smithy run cancelled by operator." }) }).catch(() => undefined);
-        await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "CANCELLED" }) }).catch(() => undefined);
         this.store.markComplete(event.id, "CANCELLED");
         return;
       }
+      const startedAt = this.now();
       const result = await this.execute(config.cmd, prompt, cwd, undefined, (stream, chunk) => {
         const text = redact(chunk.trim()).slice(0, 1_000).trim();
         if (!text) return;
         appendLog(stream, "output", text);
-      }, controller.signal);
+      }, controller.signal, providerEnvironment(process.env, { token: runCredential.token, apiUrl: this.apiUrl, runId, taskId: task.id, projectId: context.project.id ?? projectKey }, this.sandboxPolicy.environmentAllow), this.sandboxPolicy);
+      const metrics = parseProviderUsage(`${result.stdout}\n${result.stderr}`);
+      const usageResponse = await api.request(`/api/runs/${runId}/usage`, { method: "POST", body: JSON.stringify({ eventId: `${event.id}:${job.attemptCount + 1}`, provider: job.provider, model: config.model ?? "unspecified", ...metrics, runtimeMs: Math.max(0, this.now() - startedAt) }) }) as { budgetDecisions?: Array<{ action?: string }> };
+      if (usageResponse.budgetDecisions?.some((decision) => decision.action === "PAUSE")) { controlSuperseded = true; controller.abort(); throw new Error("Agent usage budget paused this run"); }
       if (leaseLost) throw new Error("Run lease was lost; provider execution was stopped and recovery will resume the existing run");
       await logQueue;
       this.controllers.delete(event.id);
@@ -280,13 +349,14 @@ export class SmithyRunner {
         const message = "Smithy run cancelled by operator.";
         appendLog("system", "lifecycle", message);
         await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: message }) }).catch(() => undefined);
-        await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "CANCELLED" }) }).catch(() => undefined);
         this.store.markComplete(event.id, "CANCELLED");
         await logQueue;
         return;
       }
       if (result.code !== 0) {
-        const rawReason = result.timedOut ? "Provider command timed out" : (result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`));
+        const rawReason = result.policyViolation
+          ? `Provider sandbox policy violation (${result.policyViolation}): ${(result.error?.message ?? result.stderr) || "execution was stopped"}`
+          : result.timedOut ? "Provider command exceeded the sandbox runtime limit" : (result.error?.message ?? (result.stderr || `Provider exited with code ${result.code}`));
         const reason = /(git|github|gh\b|credential|authentication|permission denied|could not read username|push|pull request)/i.test(rawReason) ? `Provider publication or authentication failed: ${rawReason}` : rawReason;
         appendLog("system", "lifecycle", reason);
         throw new Error(redact(reason));
@@ -295,17 +365,34 @@ export class SmithyRunner {
       // PR fields are sourced from the canonical task context and never guessed.
       let headSha: string | null = null;
       try { headSha = (await readGit("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim() || null; } catch { /* provider may use a non-git checkout */ }
+      if (headSha) {
+        const environment = { platform: process.platform, architecture: process.arch, runtime: process.version, sandboxMode: this.sandboxPolicy.mode, sandboxBackend: this.sandboxPolicy.backend };
+        const environmentFingerprint = createHash("sha256").update(JSON.stringify(environment)).digest("hex");
+        const provenance = [
+          { type: "PROMPT", name: "Smithy prompt version", metadata: { version: SMITHY_PROMPT_VERSION }, value: { version: SMITHY_PROMPT_VERSION } },
+          { type: "MODEL", name: "Provider model", metadata: { provider: job.provider, model: config.model ?? "unspecified" }, value: { provider: job.provider, model: config.model ?? "unspecified" } },
+          { type: "EXECUTION_ENVIRONMENT", name: "Execution environment", metadata: { fingerprint: environmentFingerprint, platform: process.platform, architecture: process.arch, runtime: process.version }, value: environment },
+        ];
+        for (const artifact of provenance) await api.request(`/api/runs/${runId}/artifacts`, { method: "POST", body: JSON.stringify({ type: artifact.type, name: artifact.name, headSha, mediaType: "application/json", data: artifactData(artifact.value), metadata: artifact.metadata }) });
+      }
       // A local branch is not proof that it was pushed. Only an explicit
       // provider callback may mark branchPublished/PUBLISHED.
       const existingHandoff = await api.request(`/api/runs/${runId}/handoff`).catch(() => ({})) as { handoff?: { status?: string } };
-      if (existingHandoff.handoff?.status !== "PUBLISHED") await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: task.branch ?? null, headSha, branchPublished: false, pullRequestUrl: prTask.pullRequestUrl ?? null, pullRequestTitle: prTask.pullRequestTitle ?? null, pullRequestState: prTask.pullRequestState ?? null, status: "PENDING", lastError: "Provider completed without explicit branch publication evidence" }) });
+      if (existingHandoff.handoff?.status !== "PUBLISHED") await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: task.branch ?? null, headSha, branchPublished: false, pullRequestUrl: prTask.pullRequestUrl ?? null, pullRequestTitle: prTask.pullRequestTitle ?? null, pullRequestState: prTask.pullRequestState ?? null, status: "PENDING", lastError: "Provider completed without explicit branch publication evidence", controlVersion }) });
       await api.request(`/api/tasks/${task.id}/updates`, { method: "POST", body: JSON.stringify({ body: kind === "REVIEW" || kind === "RE_REVIEW" ? "Smithy review completed; human approval is still required." : `Smithy ${kind.toLowerCase()} run completed successfully.` }) });
-      await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }) });
+      await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "SUCCEEDED", controlVersion }) });
       appendLog("system", "lifecycle", `Smithy ${kind.toLowerCase()} run completed successfully.`);
       await logQueue;
       this.store.markComplete(event.id, "SUCCEEDED");
     } catch (error) {
       const wasCancelled = this.cancelled.has(event.id);
+      if (error instanceof Error && /control decision superseded/i.test(error.message)) controlSuperseded = true;
+      if (controlSuperseded) {
+        this.store.markComplete(event.id, "CANCELLED");
+        logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:${job.attemptCount + 1}:superseded`, content: "An operator control decision superseded this worker; stopped without a terminal callback." }) }); }).catch(() => undefined);
+        await logQueue;
+        return;
+      }
       if (leaseLost) {
         this.store.requeue(event.id);
         logQueue = logQueue.then(async () => { await api.request(`/api/tasks/${event.task!.id}/agent-logs`, { method: "POST", body: JSON.stringify({ runId, provider: job.provider, stream: "system", category: "lifecycle", sequence: logSequence++, eventId: `${event.id}:${job.attemptCount + 1}:lease-lost`, content: "Run lease was lost; queued the existing run for recovery." }) }); }).catch(() => undefined);
@@ -318,8 +405,8 @@ export class SmithyRunner {
       await logQueue;
       const message = wasCancelled ? "Smithy run cancelled by operator." : `Smithy run failed: ${redact(error instanceof Error ? error.message : "Runner failure")}`;
       await api.request(`/api/tasks/${event.task!.id}/updates`, { method: "POST", body: JSON.stringify({ body: message }) }).catch(() => undefined);
-      if (runId) await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: event.task?.branch ?? null, headSha: null, branchPublished: false, pullRequestUrl: event.task?.pullRequestUrl ?? null, pullRequestTitle: event.task?.pullRequestTitle ?? null, pullRequestState: event.task?.pullRequestState ?? null, status: "FAILED", lastError: redact(error instanceof Error ? error.message : "Runner failure") }) }).catch(() => undefined);
-      if (runId) await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: wasCancelled ? "CANCELLED" : "FAILED", ...(wasCancelled ? {} : { error: redact(error instanceof Error ? error.message : "Runner failure") }) }) }).catch(() => undefined);
+      if (runId) await api.request(`/api/runs/${runId}/handoff`, { method: "PUT", body: JSON.stringify({ branch: event.task?.branch ?? null, headSha: null, branchPublished: false, pullRequestUrl: event.task?.pullRequestUrl ?? null, pullRequestTitle: event.task?.pullRequestTitle ?? null, pullRequestState: event.task?.pullRequestState ?? null, status: "FAILED", lastError: redact(error instanceof Error ? error.message : "Runner failure"), controlVersion }) }).catch(() => undefined);
+      if (runId && !wasCancelled && controlVersion !== null) await api.request(`/api/runs/${runId}/complete`, { method: "POST", body: JSON.stringify({ status: "FAILED", controlVersion, error: redact(error instanceof Error ? error.message : "Runner failure") }) }).catch(() => undefined);
     } finally {
       this.controllers.delete(event.id);
       this.cancelled.delete(event.id);

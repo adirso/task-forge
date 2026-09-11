@@ -11,7 +11,17 @@ export const TASK_CLAIM_SOURCE_STATUSES = ["BACKLOG", "TODO"] as const;
 export const TASK_CLAIM_TARGET_STATUS = "IN_PROGRESS" as const;
 export const TASK_REVIEW_STATUSES = ["READY_FOR_REVIEW", "IN_REVIEW", "RE_REVIEW"] as const;
 export const TASK_COMPLETION_STATUS = "DONE" as const;
+export const DEPENDENCY_RESOLUTION_STATUSES = ["DONE", "CANCELLED"] as const;
+export const DEFAULT_DEPENDENCY_RESOLUTION_STATUSES = [...DEPENDENCY_RESOLUTION_STATUSES] as const;
 export const taskStatusSchema = z.enum(TASK_STATUSES);
+export const dependencyResolutionStatusSchema = z.enum(DEPENDENCY_RESOLUTION_STATUSES);
+export const dependencyResolutionStatusesSchema = z.array(dependencyResolutionStatusSchema)
+  .min(1, "DONE must resolve task dependencies")
+  .max(DEPENDENCY_RESOLUTION_STATUSES.length)
+  .refine((statuses) => new Set(statuses).size === statuses.length, "Dependency resolution statuses must be unique")
+  .refine((statuses) => statuses.includes("DONE"), "DONE must resolve task dependencies")
+  .transform((statuses) => DEPENDENCY_RESOLUTION_STATUSES.filter((status) => statuses.includes(status)));
+export type DependencyResolutionStatus = z.infer<typeof dependencyResolutionStatusSchema>;
 export const projectAvailableStatusesSchema = z.array(taskStatusSchema)
   .min(1, "At least one status must be available")
   .max(TASK_STATUSES.length)
@@ -29,6 +39,22 @@ export const agentWorkflowSchema = z.object({
 });
 export const projectMergeTargetSchema = z.enum(["main", "phase"]);
 export type ProjectMergeTarget = z.infer<typeof projectMergeTargetSchema>;
+export const projectReviewPolicySchema = z.object({
+  requireIndependentReview: z.boolean(),
+  requiredReviewerCount: z.number().int().min(1).max(10),
+  allowedReviewerAgentIds: z.array(z.string().uuid()).max(50)
+    .refine((ids) => new Set(ids).size === ids.length, "Allowed reviewer agents must be unique"),
+}).superRefine((policy, context) => {
+  if (policy.allowedReviewerAgentIds.length > 0 && policy.requiredReviewerCount > policy.allowedReviewerAgentIds.length) {
+    context.addIssue({ code: "custom", path: ["requiredReviewerCount"], message: "Reviewer count cannot exceed the allowed reviewer agent count" });
+  }
+});
+export type ProjectReviewPolicy = z.infer<typeof projectReviewPolicySchema>;
+export const DEFAULT_PROJECT_REVIEW_POLICY: ProjectReviewPolicy = {
+  requireIndependentReview: true,
+  requiredReviewerCount: 1,
+  allowedReviewerAgentIds: [],
+};
 export function phaseBranchName(projectKey: string, phaseNumber: number) {
   return `phase/${projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-")}-${phaseNumber}`;
 }
@@ -44,8 +70,204 @@ export const DEFAULT_AGENT_WORKFLOW: AgentWorkflow = {
   reReview: "RE_REVIEW",
 };
 export const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
-export const taskTypeSchema = z.enum(["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"]);
+export const TASK_TYPES = ["FEATURE", "BUG", "INFRA", "UPDATE", "SECURITY", "DOCS", "CHORE"] as const;
+export const taskTypeSchema = z.enum(TASK_TYPES);
+export const agentAvailabilitySchema = z.enum(["AVAILABLE", "PAUSED"]);
+export const agentHealthSchema = z.enum(["HEALTHY", "DEGRADED", "OFFLINE", "UNKNOWN"]);
+const normalizedCapabilityList = (maximum: number) => z.array(z.string().trim().min(1).max(160)).max(maximum)
+  .transform((values) => [...new Set(values.map((value) => value.toLowerCase()))].sort());
+const repositoryCapabilitySchema = z.string().trim().min(1).max(300).superRefine((value, context) => {
+  if (value === "*") return;
+  if (/^[^\s/:]+\/[^\s/]+(?:\/[^\s/]+)?$/.test(value) || /^git@[^:]+:[^\s/]+\/[^\s/]+(?:\.git)?$/.test(value)) return;
+  try {
+    const url = new URL(value);
+    if (["http:", "https:", "ssh:"].includes(url.protocol) && !url.username && !url.password && url.hostname && url.pathname.split("/").filter(Boolean).length >= 2) return;
+  } catch { /* Report one stable validation issue below. */ }
+  context.addIssue({ code: "custom", message: "Repositories must be *, owner/repository, host/owner/repository, or a credential-free repository URL" });
+});
+export const agentCapabilityProfileSchema = z.object({
+  provider: z.string().trim().min(1).max(64),
+  model: z.string().trim().min(1).max(120),
+  skills: normalizedCapabilityList(50),
+  taskTypes: z.array(taskTypeSchema).min(1).max(TASK_TYPES.length)
+    .refine((values) => new Set(values).size === values.length, "Task types must be unique")
+    .transform((values) => TASK_TYPES.filter((value) => values.includes(value))),
+  repositories: z.array(repositoryCapabilitySchema).min(1, "At least one repository is required").max(50)
+    .transform((values) => [...new Set(values.map((value) => value.toLowerCase()))].sort()),
+  maxConcurrency: z.number().int().min(1).max(32),
+  availability: agentAvailabilitySchema,
+  health: agentHealthSchema,
+});
+export const agentRoutingSchema = z.object({
+  requiredSkills: normalizedCapabilityList(20).optional().default([]),
+  overrideAgentId: z.string().uuid().optional(),
+});
 export const pullRequestStateSchema = z.enum(["DRAFT", "OPEN", "MERGED", "CLOSED"]);
+export const agentRunControlStateSchema = z.enum(["ACTIVE", "PAUSED", "WAITING_FOR_INPUT", "HUMAN_TAKEOVER"]);
+export const agentRunInterventionActionSchema = z.enum(["PAUSE", "RESUME", "CANCEL", "RETRY", "REASSIGN", "REQUEST_INPUT", "ANSWER", "TAKEOVER"]);
+export const agentRunInterventionSchema = z.object({
+  action: agentRunInterventionActionSchema,
+  controlVersion: z.number().int().nonnegative(),
+  agentId: z.string().uuid().optional(),
+  input: z.string().trim().min(1).max(4000).optional(),
+}).superRefine((value, context) => {
+  if (value.action === "REASSIGN" && !value.agentId) context.addIssue({ code: "custom", path: ["agentId"], message: "agentId is required when reassigning a run" });
+  if (["REQUEST_INPUT", "ANSWER"].includes(value.action) && !value.input) context.addIssue({ code: "custom", path: ["input"], message: "input is required for this intervention" });
+});
+
+export const agentUsageEventInputSchema = z.object({
+  eventId: z.string().trim().min(1).max(180),
+  provider: z.string().trim().min(1).max(64),
+  model: z.string().trim().min(1).max(120),
+  inputTokens: z.number().int().nonnegative().max(1_000_000_000).default(0),
+  outputTokens: z.number().int().nonnegative().max(1_000_000_000).default(0),
+  costMicros: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
+  toolCalls: z.number().int().nonnegative().max(1_000_000).default(0),
+  runtimeMs: z.number().int().nonnegative().max(86_400_000).default(0),
+});
+export type AgentUsageEventInput = z.infer<typeof agentUsageEventInputSchema>;
+export const agentBudgetScopeSchema = z.enum(["PROJECT", "PHASE", "TASK"]);
+export const agentBudgetActionSchema = z.enum(["WARN", "PAUSE", "BLOCK"]);
+export const agentBudgetLimitsSchema = z.object({
+  totalTokens: z.number().int().positive().optional(),
+  costMicros: z.number().int().positive().optional(),
+  toolCalls: z.number().int().positive().optional(),
+  runtimeMs: z.number().int().positive().optional(),
+  retries: z.number().int().positive().optional(),
+  forcedCycles: z.number().int().positive().optional(),
+}).refine((limits) => Object.keys(limits).length > 0, "At least one budget limit is required");
+export const agentBudgetUpsertSchema = z.object({
+  action: agentBudgetActionSchema,
+  limits: agentBudgetLimitsSchema,
+});
+export type AgentBudgetScope = z.infer<typeof agentBudgetScopeSchema>;
+export type AgentBudgetAction = z.infer<typeof agentBudgetActionSchema>;
+export type AgentBudgetLimits = z.infer<typeof agentBudgetLimitsSchema>;
+export type AgentBudgetUpsert = z.infer<typeof agentBudgetUpsertSchema>;
+export interface AgentUsageTotals { inputTokens: number; outputTokens: number; totalTokens: number; costMicros: number; toolCalls: number; runtimeMs: number; retries: number; forcedCycles: number; runCount: number; eventCount: number; }
+export interface AgentUsageBreakdown extends AgentUsageTotals { key: string; }
+export interface AgentUsageReport { total: AgentUsageTotals; byRun: AgentUsageBreakdown[]; byTask: AgentUsageBreakdown[]; byPhase: AgentUsageBreakdown[]; byProject: AgentUsageBreakdown[]; byProvider: AgentUsageBreakdown[]; byModel: AgentUsageBreakdown[]; }
+export interface AgentBudget { id: string; projectId: string; scope: AgentBudgetScope; scopeId: string; action: AgentBudgetAction; limits: AgentBudgetLimits; createdAt: string; updatedAt: string; }
+
+export const agentArtifactTypeSchema = z.enum([
+  "CHANGED_FILES", "COMMIT", "TEST_RESULT", "COVERAGE", "SCREENSHOT", "TOOL_OUTCOME", "PROMPT", "MODEL", "EXECUTION_ENVIRONMENT",
+]);
+const artifactSha = z.string().regex(/^[0-9a-f]{7,64}$/i);
+const artifactPath = z.string().trim().min(1).max(2048).refine((value) => !value.startsWith("/") && !value.split("/").includes(".."), "Artifact file paths must be repository-relative");
+const artifactCommon = {
+  name: z.string().trim().min(1).max(180),
+  headSha: artifactSha,
+  mediaType: z.string().trim().min(1).max(160),
+  data: z.string().min(1).max(7_000_000),
+  payloadSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+};
+export const agentArtifactCreateSchema = z.discriminatedUnion("type", [
+  z.object({ ...artifactCommon, type: z.literal("CHANGED_FILES"), metadata: z.object({ files: z.array(artifactPath).min(1).max(1_000) }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("COMMIT"), metadata: z.object({ sha: artifactSha, message: z.string().trim().max(500).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("TEST_RESULT"), metadata: z.object({ command: z.string().trim().min(1).max(1_000), status: z.enum(["PASS", "FAIL"]), durationMs: z.number().int().nonnegative().max(86_400_000).optional(), summary: z.string().trim().max(2_000).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("COVERAGE"), metadata: z.object({ format: z.enum(["SUMMARY", "LCOV", "COBERTURA"]), lines: z.number().min(0).max(100).optional(), branches: z.number().min(0).max(100).optional(), functions: z.number().min(0).max(100).optional(), statements: z.number().min(0).max(100).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("SCREENSHOT"), metadata: z.object({ width: z.number().int().positive().max(20_000).optional(), height: z.number().int().positive().max(20_000).optional(), description: z.string().trim().max(1_000).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("TOOL_OUTCOME"), metadata: z.object({ tool: z.string().trim().min(1).max(160), status: z.enum(["PASS", "FAIL"]), summary: z.string().trim().max(2_000).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("PROMPT"), metadata: z.object({ version: z.string().trim().min(1).max(120) }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("MODEL"), metadata: z.object({ provider: z.string().trim().min(1).max(64), model: z.string().trim().min(1).max(120), version: z.string().trim().max(120).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("EXECUTION_ENVIRONMENT"), metadata: z.object({ fingerprint: z.string().regex(/^[0-9a-f]{64}$/i), platform: z.string().trim().min(1).max(64).optional(), architecture: z.string().trim().min(1).max(64).optional(), runtime: z.string().trim().max(120).optional() }).strict() }),
+]);
+export type AgentArtifactType = z.infer<typeof agentArtifactTypeSchema>;
+export type AgentArtifactCreate = z.infer<typeof agentArtifactCreateSchema>;
+export type AgentArtifactMetadata = AgentArtifactCreate["metadata"];
+export interface AgentArtifact {
+  id: string; runId: string; taskId: string; projectId: string; headSha: string; type: AgentArtifactType;
+  name: string; mediaType: string; size: number; contentHash: string; metadata: AgentArtifactMetadata;
+  createdById: string; createdAt: string; downloadUrl: string;
+}
+
+export const agentPlanStatusSchema = z.enum(["PROPOSED", "APPROVED", "REJECTED"]);
+export const agentPlanItemSchema = z.object({
+  key: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, "Item keys may contain letters, numbers, underscores, and hyphens"),
+  title: z.string().trim().min(1).max(240),
+  description: z.string().trim().max(10_000).default(""),
+  definitionOfDone: z.string().trim().max(10_000).default(""),
+  priority: taskPrioritySchema.default("MEDIUM"),
+  type: taskTypeSchema.default("FEATURE"),
+  estimatePoints: z.number().int().min(0).max(100).nullable().default(null),
+  dependencyKeys: z.array(z.string().trim().min(1).max(64)).max(50).default([])
+    .refine((keys) => new Set(keys).size === keys.length, "Dependencies must be unique"),
+});
+export const agentPlanProposalSchema = z.object({
+  sourceRunId: z.string().uuid(),
+  summary: z.string().trim().min(1).max(10_000),
+  risks: z.array(z.string().trim().min(1).max(1000)).max(50).default([]),
+  acceptanceEvidence: z.array(z.string().trim().min(1).max(1000)).max(50).default([]),
+  requiresApproval: z.boolean().default(true),
+  items: z.array(agentPlanItemSchema).min(1).max(50),
+}).superRefine((plan, context) => {
+  const keys = new Set(plan.items.map((item) => item.key));
+  if (keys.size !== plan.items.length) context.addIssue({ code: "custom", path: ["items"], message: "Item keys must be unique" });
+  for (const [index, item] of plan.items.entries()) {
+    for (const dependency of item.dependencyKeys) {
+      if (!keys.has(dependency)) context.addIssue({ code: "custom", path: ["items", index, "dependencyKeys"], message: `Unknown dependency key: ${dependency}` });
+      if (dependency === item.key) context.addIssue({ code: "custom", path: ["items", index, "dependencyKeys"], message: "An item cannot depend on itself" });
+    }
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const dependencies = new Map(plan.items.map((item) => [item.key, item.dependencyKeys]));
+  const cyclic = (key: string): boolean => {
+    if (visiting.has(key)) return true;
+    if (visited.has(key)) return false;
+    visiting.add(key);
+    for (const dependency of dependencies.get(key) ?? []) if (cyclic(dependency)) return true;
+    visiting.delete(key); visited.add(key); return false;
+  };
+  if (plan.items.some((item) => cyclic(item.key))) context.addIssue({ code: "custom", path: ["items"], message: "Plan dependencies must be acyclic" });
+});
+export const agentPlanDecisionSchema = z.object({
+  action: z.enum(["APPROVE", "REJECT"]),
+  comment: z.string().trim().max(4000).nullable().optional(),
+});
+
+export const AGENT_CONTEXT_PACK_SCHEMA_VERSION = 1 as const;
+const contextPackTextSchema = z.string().max(10_000);
+export const agentContextPackContentSchema = z.object({
+  schemaVersion: z.literal(AGENT_CONTEXT_PACK_SCHEMA_VERSION),
+  task: z.object({
+    id: z.string(), projectKey: z.string(), number: z.number().int().positive(), title: contextPackTextSchema,
+    description: contextPackTextSchema, definitionOfDone: contextPackTextSchema, status: taskStatusSchema,
+    priority: taskPrioritySchema, type: taskTypeSchema, branch: contextPackTextSchema.nullable(), phaseId: z.string().nullable(),
+  }),
+  project: z.object({
+    id: z.string(), key: z.string(), name: contextPackTextSchema, repositoryUrl: contextPackTextSchema.nullable(),
+    availableStatuses: z.array(taskStatusSchema), mergeTarget: projectMergeTargetSchema,
+  }),
+  dependencies: z.array(z.object({
+    taskId: z.string(), projectKey: z.string(), number: z.number().int().positive(), title: contextPackTextSchema,
+    status: taskStatusSchema, isBlocking: z.boolean(),
+  })),
+  attachments: z.array(z.object({
+    id: z.string(), fileName: contextPackTextSchema, mimeType: contextPackTextSchema, size: z.number().int().nonnegative(), downloadUrl: contextPackTextSchema,
+  })),
+  repository: z.object({ guidanceFiles: z.array(contextPackTextSchema), relevantFiles: z.array(contextPackTextSchema) }),
+  history: z.object({
+    decisions: z.array(z.object({ id: z.string(), body: contextPackTextSchema, createdAt: z.string() })),
+    recentUpdates: z.array(z.object({ id: z.string(), body: contextPackTextSchema, createdAt: z.string() })),
+    findings: z.array(z.object({
+      id: z.string(), severity: z.enum(["P0", "P1", "P2", "P3"]), title: contextPackTextSchema,
+      body: contextPackTextSchema, disposition: z.string(), dispositionReason: contextPackTextSchema.nullable(),
+      filePath: contextPackTextSchema.nullable(), lineNumber: z.number().int().positive().nullable(), updatedAt: z.string(),
+    })),
+    priorRuns: z.array(z.object({ id: z.string(), kind: z.string(), status: z.string(), lastError: contextPackTextSchema.nullable(), completedAt: z.string().nullable() })),
+    summary: z.object({ totalUpdates: z.number().int().nonnegative(), includedUpdates: z.number().int().nonnegative(), omittedUpdates: z.number().int().nonnegative(), omittedSummary: contextPackTextSchema.nullable() }),
+  }),
+});
+export const agentContextPackSchema = z.object({
+  id: z.string(), runId: z.string(), taskId: z.string(), projectId: z.string(),
+  version: z.number().int().positive(), fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  content: agentContextPackContentSchema, refreshedFromVersion: z.number().int().positive().nullable(),
+  refreshReason: z.enum(["INITIAL", "EXPLICIT_REFRESH"]), createdById: z.string(), createdAt: z.string(),
+});
+export const agentContextPackRefreshSchema = z.object({
+  reason: z.string().trim().min(1).max(500).optional(),
+});
 /** Pull requests are intentionally restricted to canonical public GitHub URLs. */
 export const deliveryMonitorPullRequestSchema = z.object({
   owner: z.string().regex(/^[A-Za-z0-9_.-]+$/),
@@ -147,6 +369,8 @@ export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).parti
   agentWorkflow: agentWorkflowSchema.nullable().optional(),
   hiddenEmptyStatuses: projectAvailableStatusesSchema.optional(),
   mergeTarget: projectMergeTargetSchema.optional(),
+  dependencyResolutionStatuses: dependencyResolutionStatusesSchema.optional(),
+  reviewPolicy: projectReviewPolicySchema.optional(),
 });
 export const projectOrderSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(500) });
 
@@ -205,6 +429,11 @@ export const agentCreateSchema = z.object({
   email: z.string().email().optional(),
 });
 
+export type AgentAvailability = z.infer<typeof agentAvailabilitySchema>;
+export type AgentHealth = z.infer<typeof agentHealthSchema>;
+export type AgentCapabilityProfile = z.infer<typeof agentCapabilityProfileSchema>;
+export type AgentRoutingRequest = z.infer<typeof agentRoutingSchema>;
+
 export const agentWebhookSchema = z.object({
   webhookUrl: z.string().url().nullable().superRefine((value, context) => {
     if (!value) return;
@@ -243,6 +472,8 @@ export const TOKEN_SCOPES = [
   "task:update:meta",
   "task:gate:evidence",
   "task:gate:approve",
+  "task:plan",
+  "task:artifact",
 ] as const;
 export type TokenScope = typeof TOKEN_SCOPES[number];
 
@@ -282,6 +513,16 @@ export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 export type TaskType = z.infer<typeof taskTypeSchema>;
 export type PullRequestState = z.infer<typeof pullRequestStateSchema>;
+export type AgentRunControlState = z.infer<typeof agentRunControlStateSchema>;
+export type AgentRunInterventionAction = z.infer<typeof agentRunInterventionActionSchema>;
+export type AgentRunIntervention = z.infer<typeof agentRunInterventionSchema>;
+export type AgentPlanStatus = z.infer<typeof agentPlanStatusSchema>;
+export type AgentPlanItem = z.infer<typeof agentPlanItemSchema>;
+export type AgentPlanProposal = z.infer<typeof agentPlanProposalSchema>;
+export type AgentPlanDecision = z.infer<typeof agentPlanDecisionSchema>;
+export type AgentContextPackContent = z.infer<typeof agentContextPackContentSchema>;
+export type AgentContextPack = z.infer<typeof agentContextPackSchema>;
+export type AgentContextPackRefresh = z.infer<typeof agentContextPackRefreshSchema>;
 export type DeliveryMonitorConfig = z.infer<typeof deliveryMonitorConfigSchema>;
 export type DeliveryMonitorPullRequest = z.infer<typeof deliveryMonitorPullRequestSchema>;
 export type DeliveryMonitorErrorCategory = z.infer<typeof deliveryMonitorErrorCategorySchema>;
@@ -330,6 +571,8 @@ export interface User {
   avatarUrl: string | null;
   webhookUrl?: string | null;
   webhookSecretConfigured?: boolean;
+  capabilityProfile?: AgentCapabilityProfile | null;
+  capabilityProfileError?: string | null;
   createdAt: string;
 }
 
@@ -371,6 +614,8 @@ export interface Project {
   agentWorkflow: AgentWorkflow | null;
   hiddenEmptyStatuses: TaskStatus[];
   mergeTarget: ProjectMergeTarget;
+  dependencyResolutionStatuses: DependencyResolutionStatus[];
+  reviewPolicy: ProjectReviewPolicy;
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -442,9 +687,29 @@ export interface Task {
   subtasks?: Task[];
   tags: Tag[];
   dependencies: TaskDependency[];
+  blockedReason?: string | null;
   attachments: Attachment[];
   updates?: TaskNote[];
   updatesPage?: PageInfo;
+}
+
+export interface AgentPlan {
+  id: string;
+  taskId: string;
+  sourceRunId: string;
+  version: number;
+  status: AgentPlanStatus;
+  summary: string;
+  risks: string[];
+  acceptanceEvidence: string[];
+  requiresApproval: boolean;
+  items: AgentPlanItem[];
+  createdTaskIds: Record<string, string>;
+  proposedById: string;
+  reviewedById: string | null;
+  reviewComment: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
 }
 
 export interface AutomationCondition { field: z.infer<typeof automationFieldSchema>; operator: z.infer<typeof automationOperatorSchema>; value: string | null; fromValue?: string | null; }
@@ -538,6 +803,8 @@ export interface AgentOpsEntry {
   role: UserRole;
   avatarUrl: string | null;
   webhookUrl: string | null;
+  capabilityProfile: AgentCapabilityProfile | null;
+  capabilityProfileError: string | null;
   createdAt: string;
   lastActiveAt: string | null;
   openTaskCount: number;
@@ -554,6 +821,7 @@ export interface DashboardSummaryProject {
   nonDoneTaskCount: number;
   cancelledTaskCount: number;
   nonDonePhaseCount: number;
+  agentUsage: AgentUsageTotals;
 }
 
 export interface DashboardSummaryTask {

@@ -11,3 +11,6 @@ export * from "./attachment-service.js";
 export * from "./webhook-service.js";
 export * from "./agent-log-service.js";
 export * from "./handoff-service.js";
+export * from "./context-pack-service.js";
+export * from "./agent-usage-service.js";
+export * from "./artifact-service.js";

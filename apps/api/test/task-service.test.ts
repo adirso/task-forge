@@ -5,7 +5,7 @@ import type { RepositorySet } from "../src/application/repositories.js";
 
 function repositories(overrides: Partial<RepositorySet> = {}): RepositorySet {
   return {
-    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"], defaultStatus: "TODO", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["BACKLOG", "REFINING", "TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "DONE", "CANCELLED"], defaultStatus: "TODO", dependencyResolutionStatuses: ["DONE", "CANCELLED"], ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
     memberships: { isMember: async () => true } as never,
     tasks: { allocateNumber: async () => ({ number: 7, position: 2 }), create: async (task: unknown) => task } as never,
     phases: { findById: async () => null } as never,
@@ -51,20 +51,20 @@ test("task service rejects self dependencies before persistence", async () => {
 });
 
 test("task claiming passes enabled sources and target to the atomic repository operation", async () => {
-  let workflow: { sourceStatuses: string[]; targetStatus: string } | undefined;
+  let workflow: { sourceStatuses: string[]; targetStatus: string; dependencyResolutionStatuses: string[] } | undefined;
   const claimed = {
     id: "task-49", projectId: "project-1", number: 49, title: "Ready work", description: "", definitionOfDone: "", status: "IN_PROGRESS", priority: "HIGH", type: "BUG",
     assigneeId: "agent-1", creatorId: "owner-1", parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: null, pullRequestUrl: null,
     pullRequestTitle: null, pullRequestState: null, position: 0, createdAt: "", updatedAt: "",
   };
   const set = repositories({
-    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["TODO", "IN_PROGRESS", "DONE"], defaultStatus: "TODO", ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
+    projects: { findById: async () => ({ id: "project-1", key: "TAS", name: "Task Forge", description: "", repoUrl: null, color: "#000000", availableStatuses: ["TODO", "IN_PROGRESS", "DONE"], defaultStatus: "TODO", dependencyResolutionStatuses: ["DONE"], ownerId: "owner-1", createdAt: "", updatedAt: "" }) } as never,
     tasks: { claimNext: async (_projectId: string, _claimantId: string, input: typeof workflow) => { workflow = input; return claimed; } } as never,
   });
   const service = new TaskApplicationService({ run: async (work) => work(set) });
   const task = await service.claimTask({ actor: { userId: "agent-1", kind: "AGENT", role: "MEMBER", tokenScopes: ["task:claim"] }, projectId: "project-1" });
   assert.equal(task.id, "task-49");
-  assert.deepEqual(workflow, { sourceStatuses: ["TODO"], targetStatus: "IN_PROGRESS" });
+  assert.deepEqual(workflow, { sourceStatuses: ["TODO"], targetStatus: "IN_PROGRESS", dependencyResolutionStatuses: ["DONE"] });
 });
 
 test("task claiming reports actionable workflow configuration errors", async () => {

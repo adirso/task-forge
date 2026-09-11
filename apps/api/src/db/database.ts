@@ -625,6 +625,144 @@ export const migrations: readonly Migration[] = [
         : "CREATE TABLE IF NOT EXISTS agent_cycle_grants (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, prior_count INTEGER NOT NULL, new_limit INTEGER NOT NULL, request_id TEXT NOT NULL UNIQUE, smithy_event_id TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, PRIMARY KEY (task_id, prior_count))", []);
     },
   },
+  {
+    version: "0024_agent_run_credentials",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS agent_run_credentials (run_id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, project_id CHAR(36) NOT NULL, user_id CHAR(36) NOT NULL, run_attempt INT NOT NULL, token_prefix VARCHAR(32) NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, token_ciphertext TEXT NOT NULL, permissions TEXT NOT NULL, expires_at VARCHAR(30) NOT NULL, last_used_at VARCHAR(30), revoked_at VARCHAR(30), created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, INDEX idx_agent_run_credentials_hash (token_hash), INDEX idx_agent_run_credentials_expiry (expires_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE IF NOT EXISTS agent_run_credentials (run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, run_attempt INTEGER NOT NULL, token_prefix TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_ciphertext TEXT NOT NULL, permissions TEXT NOT NULL, expires_at TEXT NOT NULL, last_used_at TEXT, revoked_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)", []);
+      if (dialect === "sqlite") {
+        await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_run_credentials_hash ON agent_run_credentials(token_hash)", []);
+        await executor.run("CREATE INDEX IF NOT EXISTS idx_agent_run_credentials_expiry ON agent_run_credentials(expires_at)", []);
+      }
+    },
+  },
+  {
+    version: "0025_project_dependency_resolution_statuses",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE projects ADD COLUMN dependency_resolution_statuses VARCHAR(64) NOT NULL DEFAULT '[\"DONE\",\"CANCELLED\"]'"
+        : "ALTER TABLE projects ADD COLUMN dependency_resolution_statuses TEXT NOT NULL DEFAULT '[\"DONE\",\"CANCELLED\"]'", []);
+    },
+  },
+  {
+    version: "0026_independent_review_policy",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE projects ADD COLUMN review_policy JSON NULL"
+        : "ALTER TABLE projects ADD COLUMN review_policy TEXT NULL", []);
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE agent_runs ADD COLUMN executed_by_id CHAR(36) NULL"
+        : "ALTER TABLE agent_runs ADD COLUMN executed_by_id TEXT NULL REFERENCES users(id)", []);
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE task_gate_evidence ADD COLUMN implementation_run_id CHAR(36) NULL"
+        : "ALTER TABLE task_gate_evidence ADD COLUMN implementation_run_id TEXT NULL REFERENCES agent_runs(id)", []);
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE task_gate_evidence ADD COLUMN implementation_agent_id CHAR(36) NULL"
+        : "ALTER TABLE task_gate_evidence ADD COLUMN implementation_agent_id TEXT NULL REFERENCES users(id)", []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE task_gate_approvals (task_id CHAR(36) NOT NULL, head_sha CHAR(64) NOT NULL, reviewer_id CHAR(36) NOT NULL, approved_at VARCHAR(30) NOT NULL, PRIMARY KEY (task_id, head_sha, reviewer_id), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (reviewer_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE task_gate_approvals (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, head_sha TEXT NOT NULL, reviewer_id TEXT NOT NULL REFERENCES users(id), approved_at TEXT NOT NULL, PRIMARY KEY (task_id, head_sha, reviewer_id))", []);
+      await executor.run(dialect === "mysql"
+        ? "INSERT IGNORE INTO task_gate_approvals (task_id, head_sha, reviewer_id, approved_at) SELECT task_id, approved_head_sha, approved_by_id, approved_at FROM task_gate_evidence WHERE approved_head_sha IS NOT NULL AND approved_by_id IS NOT NULL AND approved_at IS NOT NULL"
+        : "INSERT OR IGNORE INTO task_gate_approvals (task_id, head_sha, reviewer_id, approved_at) SELECT task_id, approved_head_sha, approved_by_id, approved_at FROM task_gate_evidence WHERE approved_head_sha IS NOT NULL AND approved_by_id IS NOT NULL AND approved_at IS NOT NULL", []);
+    },
+  },
+  {
+    version: "0027_agent_run_interventions",
+    async up(executor, dialect) {
+      const columns = dialect === "mysql"
+        ? [
+            "ADD COLUMN control_state VARCHAR(24) NOT NULL DEFAULT 'ACTIVE'",
+            "ADD COLUMN control_version INT NOT NULL DEFAULT 0",
+            "ADD COLUMN assigned_agent_id CHAR(36) NULL",
+            "ADD COLUMN input_request TEXT NULL",
+            "ADD COLUMN input_response TEXT NULL",
+            "ADD COLUMN input_requested_at VARCHAR(30) NULL",
+            "ADD COLUMN input_answered_at VARCHAR(30) NULL",
+            "ADD COLUMN takeover_by_id CHAR(36) NULL",
+          ]
+        : [
+            "ADD COLUMN control_state TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (control_state IN ('ACTIVE','PAUSED','WAITING_FOR_INPUT','HUMAN_TAKEOVER'))",
+            "ADD COLUMN control_version INTEGER NOT NULL DEFAULT 0",
+            "ADD COLUMN assigned_agent_id TEXT NULL REFERENCES users(id)",
+            "ADD COLUMN input_request TEXT NULL",
+            "ADD COLUMN input_response TEXT NULL",
+            "ADD COLUMN input_requested_at TEXT NULL",
+            "ADD COLUMN input_answered_at TEXT NULL",
+            "ADD COLUMN takeover_by_id TEXT NULL REFERENCES users(id)",
+          ];
+      for (const column of columns) await executor.run(`ALTER TABLE agent_runs ${column}`, []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_run_interventions (request_id VARCHAR(180) PRIMARY KEY, run_id CHAR(36) NOT NULL, actor_id CHAR(36) NOT NULL, action VARCHAR(24) NOT NULL, payload_hash CHAR(64) NOT NULL, result_version INT NOT NULL, created_at VARCHAR(30) NOT NULL, INDEX idx_run_interventions_run (run_id, created_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (actor_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_run_interventions (request_id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, actor_id TEXT NOT NULL REFERENCES users(id), action TEXT NOT NULL, payload_hash TEXT NOT NULL, result_version INTEGER NOT NULL, created_at TEXT NOT NULL)", []);
+      if (dialect === "sqlite") await executor.run("CREATE INDEX idx_run_interventions_run ON agent_run_interventions(run_id, created_at)", []);
+    },
+  },
+  {
+    version: "0028_agent_capability_profiles",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE users ADD COLUMN capability_profile JSON NULL"
+        : "ALTER TABLE users ADD COLUMN capability_profile TEXT NULL", []);
+    },
+  },
+  {
+    version: "0029_agent_plans",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_plans (id CHAR(36) PRIMARY KEY, task_id CHAR(36) NOT NULL, source_run_id CHAR(36) NOT NULL, version INT NOT NULL, status VARCHAR(16) NOT NULL, summary TEXT NOT NULL, risks JSON NOT NULL, acceptance_evidence JSON NOT NULL, requires_approval BOOLEAN NOT NULL DEFAULT TRUE, items JSON NOT NULL, created_task_ids JSON NOT NULL, idempotency_key VARCHAR(180) NOT NULL, proposed_by_id CHAR(36) NOT NULL, reviewed_by_id CHAR(36) NULL, review_comment TEXT NULL, created_at VARCHAR(30) NOT NULL, reviewed_at VARCHAR(30) NULL, UNIQUE KEY uq_agent_plans_task_version (task_id, version), UNIQUE KEY uq_agent_plans_run_request (source_run_id, idempotency_key), INDEX idx_agent_plans_task (task_id, version), FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (source_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (proposed_by_id) REFERENCES users(id), FOREIGN KEY (reviewed_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_plans (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, source_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, version INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('PROPOSED','APPROVED','REJECTED')), summary TEXT NOT NULL, risks TEXT NOT NULL, acceptance_evidence TEXT NOT NULL, requires_approval INTEGER NOT NULL DEFAULT 1, items TEXT NOT NULL, created_task_ids TEXT NOT NULL, idempotency_key TEXT NOT NULL, proposed_by_id TEXT NOT NULL REFERENCES users(id), reviewed_by_id TEXT NULL REFERENCES users(id), review_comment TEXT NULL, created_at TEXT NOT NULL, reviewed_at TEXT NULL, UNIQUE (task_id, version), UNIQUE (source_run_id, idempotency_key))", []);
+      if (dialect === "sqlite") await executor.run("CREATE INDEX idx_agent_plans_task ON agent_plans(task_id, version)", []);
+    },
+  },
+  {
+    version: "0030_agent_context_packs",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE agent_runs ADD COLUMN context_pack_version INT NOT NULL DEFAULT 0"
+        : "ALTER TABLE agent_runs ADD COLUMN context_pack_version INTEGER NOT NULL DEFAULT 0", []);
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE agent_runs ADD COLUMN context_pack_fingerprint CHAR(64) NULL"
+        : "ALTER TABLE agent_runs ADD COLUMN context_pack_fingerprint TEXT NULL", []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_context_packs (id CHAR(36) PRIMARY KEY, run_id CHAR(36) NOT NULL, task_id CHAR(36) NOT NULL, project_id CHAR(36) NOT NULL, version INT NOT NULL, fingerprint CHAR(64) NOT NULL, content JSON NOT NULL, refreshed_from_version INT NULL, refresh_reason VARCHAR(24) NOT NULL, created_by_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_agent_context_packs_run_version (run_id, version), INDEX idx_agent_context_packs_task (task_id, created_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (created_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_context_packs (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, version INTEGER NOT NULL, fingerprint TEXT NOT NULL, content TEXT NOT NULL, refreshed_from_version INTEGER NULL, refresh_reason TEXT NOT NULL CHECK (refresh_reason IN ('INITIAL','EXPLICIT_REFRESH')), created_by_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE (run_id, version))", []);
+      if (dialect === "sqlite") await executor.run("CREATE INDEX idx_agent_context_packs_task ON agent_context_packs(task_id, created_at)", []);
+    },
+  },
+  {
+    version: "0031_agent_usage_budgets",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_usage_events (id CHAR(36) PRIMARY KEY, run_id CHAR(36) NOT NULL, task_id CHAR(36) NOT NULL, phase_id CHAR(36) NULL, project_id CHAR(36) NOT NULL, event_id VARCHAR(180) NOT NULL, provider VARCHAR(64) NOT NULL, model VARCHAR(120) NOT NULL, input_tokens BIGINT NOT NULL DEFAULT 0, output_tokens BIGINT NOT NULL DEFAULT 0, cost_micros BIGINT NOT NULL DEFAULT 0, tool_calls BIGINT NOT NULL DEFAULT 0, runtime_ms BIGINT NOT NULL DEFAULT 0, is_retry BOOLEAN NOT NULL DEFAULT FALSE, is_forced_cycle BOOLEAN NOT NULL DEFAULT FALSE, created_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_agent_usage_run_event (run_id, event_id), INDEX idx_agent_usage_project (project_id, created_at), INDEX idx_agent_usage_task (task_id, created_at), INDEX idx_agent_usage_phase (phase_id, created_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (phase_id) REFERENCES phases(id) ON DELETE SET NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_usage_events (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, phase_id TEXT NULL REFERENCES phases(id) ON DELETE SET NULL, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, event_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cost_micros INTEGER NOT NULL DEFAULT 0, tool_calls INTEGER NOT NULL DEFAULT 0, runtime_ms INTEGER NOT NULL DEFAULT 0, is_retry INTEGER NOT NULL DEFAULT 0, is_forced_cycle INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE (run_id, event_id))", []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_budgets (id CHAR(36) PRIMARY KEY, project_id CHAR(36) NOT NULL, scope_type VARCHAR(12) NOT NULL, scope_id CHAR(36) NOT NULL, action VARCHAR(8) NOT NULL, limits_json JSON NOT NULL, created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_agent_budget_scope (scope_type, scope_id), INDEX idx_agent_budgets_project (project_id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_budgets (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, scope_type TEXT NOT NULL CHECK (scope_type IN ('PROJECT','PHASE','TASK')), scope_id TEXT NOT NULL, action TEXT NOT NULL CHECK (action IN ('WARN','PAUSE','BLOCK')), limits_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (scope_type, scope_id))", []);
+      if (dialect === "sqlite") {
+        await executor.run("CREATE INDEX idx_agent_usage_project ON agent_usage_events(project_id, created_at)", []);
+        await executor.run("CREATE INDEX idx_agent_usage_task ON agent_usage_events(task_id, created_at)", []);
+        await executor.run("CREATE INDEX idx_agent_usage_phase ON agent_usage_events(phase_id, created_at)", []);
+        await executor.run("CREATE INDEX idx_agent_budgets_project ON agent_budgets(project_id)", []);
+      }
+    },
+  },
+  {
+    version: "0032_agent_artifacts",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE task_gate_evidence ADD COLUMN required_artifact_types JSON NULL"
+        : "ALTER TABLE task_gate_evidence ADD COLUMN required_artifact_types TEXT NOT NULL DEFAULT '[]'", []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_artifacts (id CHAR(36) PRIMARY KEY, run_id CHAR(36) NOT NULL, task_id CHAR(36) NOT NULL, project_id CHAR(36) NOT NULL, head_sha CHAR(64) NOT NULL, artifact_type VARCHAR(32) NOT NULL, name VARCHAR(180) NOT NULL, media_type VARCHAR(160) NOT NULL, file_size BIGINT NOT NULL, content_hash CHAR(64) NOT NULL, metadata_json JSON NOT NULL, content MEDIUMBLOB NOT NULL, created_by_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_agent_artifact_content (run_id, artifact_type, head_sha, content_hash), INDEX idx_agent_artifacts_task_head (task_id, head_sha, artifact_type), INDEX idx_agent_artifacts_run (run_id, created_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (created_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_artifacts (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, head_sha TEXT NOT NULL, artifact_type TEXT NOT NULL CHECK (artifact_type IN ('CHANGED_FILES','COMMIT','TEST_RESULT','COVERAGE','SCREENSHOT','TOOL_OUTCOME','PROMPT','MODEL','EXECUTION_ENVIRONMENT')), name TEXT NOT NULL, media_type TEXT NOT NULL, file_size INTEGER NOT NULL, content_hash TEXT NOT NULL, metadata_json TEXT NOT NULL, content BLOB NOT NULL, created_by_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE (run_id, artifact_type, head_sha, content_hash))", []);
+      if (dialect === "sqlite") {
+        await executor.run("CREATE INDEX idx_agent_artifacts_task_head ON agent_artifacts(task_id, head_sha, artifact_type)", []);
+        await executor.run("CREATE INDEX idx_agent_artifacts_run ON agent_artifacts(run_id, created_at)", []);
+      }
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

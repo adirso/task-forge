@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { X } from "lucide-react";
-import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, type AgentWorkflow, type Project, type TaskStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, TASK_STATUSES, type AgentWorkflow, type DependencyResolutionStatus, type Project, type ProjectReviewPolicy, type TaskStatus } from "@taskforge/contracts";
 import { statusMeta } from "../lib/ui";
 
-type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus; agentWorkflow?: AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[]; mergeTarget?: "main" | "phase" };
+type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus; agentWorkflow?: AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[]; mergeTarget?: "main" | "phase"; dependencyResolutionStatuses?: DependencyResolutionStatus[]; reviewPolicy?: ProjectReviewPolicy };
 
 export function ProjectModal({ project, projects = [], onClose, onSave, onEnableWorkflow }: { project?: Project | null; projects?: Project[]; onClose: () => void; onSave: (project: ProjectFormInput) => Promise<void>; onEnableWorkflow?: () => Promise<void> }) {
   const [name, setName] = useState(project?.name ?? "");
@@ -18,6 +18,8 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
   const [hiddenEmptyStatuses, setHiddenEmptyStatuses] = useState<TaskStatus[]>(project?.hiddenEmptyStatuses ?? project?.availableStatuses ?? [...TASK_STATUSES]);
   const [agentWorkflow, setAgentWorkflow] = useState<AgentWorkflow | null>(project?.agentWorkflow ?? null);
   const [mergeTarget, setMergeTarget] = useState<"main" | "phase">(project?.mergeTarget ?? "main");
+  const [dependencyResolutionStatuses, setDependencyResolutionStatuses] = useState<DependencyResolutionStatus[]>(project?.dependencyResolutionStatuses ?? [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES]);
+  const [reviewPolicy, setReviewPolicy] = useState<ProjectReviewPolicy>(project?.reviewPolicy ?? { ...DEFAULT_PROJECT_REVIEW_POLICY, allowedReviewerAgentIds: [] });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [enabling, setEnabling] = useState(false);
@@ -34,7 +36,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    try { await onSave({ name, key, description, repoUrl: repoUrl || null, localRepoPath: localRepoPath.trim() || null, color, ...(project ? { availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget } : {}) }); onClose(); }
+    try { await onSave({ name, key, description, repoUrl: repoUrl || null, localRepoPath: localRepoPath.trim() || null, color, ...(project ? { availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget, dependencyResolutionStatuses, reviewPolicy } : {}) }); onClose(); }
     catch (err) { setError(err instanceof Error ? err.message : `Could not ${project ? "update" : "create"} project`); }
     finally { setSaving(false); }
   }
@@ -59,6 +61,8 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
               <label>Local Smithy repository path <span className="optional">Optional</span><input value={localRepoPath} onChange={(e) => setLocalRepoPath(e.target.value)} placeholder="/Users/me/Development/task-forge" /><small>Used by the optional Smithy runner on the machine where it runs. This does not replace the repository URL.</small></label>
               <label>Project color<input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
               {project && <label>Merge target<select aria-label="Merge target" value={mergeTarget} onChange={(event) => setMergeTarget(event.target.value as "main" | "phase")}><option value="main">Main / master branch</option><option value="phase">Phase branch</option></select><small>Task pull requests target main by default. Phase mode uses a dedicated branch per phase and enables a guarded merge to main after completion.</small></label>}
+              {project && <section className="dependency-policy-setting"><strong>Dependency completion</strong><label><input aria-label="Cancelled tasks satisfy dependencies" type="checkbox" checked={dependencyResolutionStatuses.includes("CANCELLED")} onChange={(event) => setDependencyResolutionStatuses(event.target.checked ? ["DONE", "CANCELLED"] : ["DONE"])} /> Cancelled tasks satisfy dependencies</label><small>DONE always unblocks dependent work. Choose whether cancellation also counts as an accepted terminal state.</small></section>}
+              {project && <section className="dependency-policy-setting"><strong>Review policy</strong><label><input aria-label="Require independent review" type="checkbox" checked={reviewPolicy.requireIndependentReview} onChange={(event) => setReviewPolicy({ ...reviewPolicy, requireIndependentReview: event.target.checked })} /> Require a reviewer other than the implementing agent</label><label>Required reviewers<input aria-label="Required reviewer count" type="number" min={1} max={10} value={reviewPolicy.requiredReviewerCount} onChange={(event) => setReviewPolicy({ ...reviewPolicy, requiredReviewerCount: Number(event.target.value) })} /></label><div className="project-status-options">{project.members?.filter((member) => member.kind === "AGENT").map((agent) => <label key={agent.id} className={reviewPolicy.allowedReviewerAgentIds.includes(agent.id) ? "is-selected" : ""}><input aria-label={`Allowed reviewer: ${agent.name}`} type="checkbox" checked={reviewPolicy.allowedReviewerAgentIds.includes(agent.id)} onChange={() => setReviewPolicy({ ...reviewPolicy, allowedReviewerAgentIds: reviewPolicy.allowedReviewerAgentIds.includes(agent.id) ? reviewPolicy.allowedReviewerAgentIds.filter((id) => id !== agent.id) : [...reviewPolicy.allowedReviewerAgentIds, agent.id] })} />{agent.name}</label>)}</div><small>Leave every agent unchecked to allow any authorized agent member. Approvals are tied to the current head commit.</small></section>}
             </div>
             {project && <aside className="project-modal-side">
               <section className="project-status-settings">

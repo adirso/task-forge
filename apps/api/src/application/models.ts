@@ -1,4 +1,4 @@
-import type { AgentWorkflow, ProjectMergeTarget, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
+import type { AgentArtifactMetadata, AgentArtifactType, AgentBudget, AgentCapabilityProfile, AgentContextPack, AgentPlanItem, AgentPlanStatus, AgentRunControlState, AgentRunInterventionAction, AgentUsageEventInput, AgentWorkflow, DependencyResolutionStatus, ProjectMergeTarget, ProjectReviewPolicy, PullRequestState, TaskPriority, TaskStatus, TaskType, UserKind, UserRole, WebhookDeliveryStatus, WebhookEventType } from "@taskforge/contracts";
 
 export interface UserEntity {
   id: string;
@@ -9,6 +9,8 @@ export interface UserEntity {
   avatarUrl: string | null;
   webhookUrl?: string | null;
   webhookSecretConfigured?: boolean;
+  capabilityProfile?: AgentCapabilityProfile | null;
+  capabilityProfileError?: string | null;
   createdAt: string;
 }
 
@@ -41,8 +43,17 @@ export interface AgentRunEntity {
   taskId: string;
   projectId: string;
   requestedById: string;
+  executedById: string | null;
   kind: AgentRunKind;
   status: AgentRunStatus;
+  controlState: AgentRunControlState;
+  controlVersion: number;
+  assignedAgentId: string | null;
+  inputRequest: string | null;
+  inputResponse: string | null;
+  inputRequestedAt: string | null;
+  inputAnsweredAt: string | null;
+  takeoverById: string | null;
   attemptCount: number;
   maxAttempts: number;
   leaseOwner: string | null;
@@ -53,6 +64,60 @@ export interface AgentRunEntity {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  contextPackVersion: number;
+  contextPackFingerprint: string | null;
+}
+export interface AgentUsageEventEntity extends AgentUsageEventInput { id: string; runId: string; taskId: string; phaseId: string | null; projectId: string; retry: boolean; forcedCycle: boolean; createdAt: string; }
+export type AgentBudgetEntity = AgentBudget;
+export interface AgentArtifactEntity {
+  id: string; runId: string; taskId: string; projectId: string; headSha: string; type: AgentArtifactType;
+  name: string; mediaType: string; size: number; contentHash: string; metadata: AgentArtifactMetadata;
+  content: Buffer; createdById: string; createdAt: string;
+}
+export type AgentContextPackEntity = AgentContextPack;
+export interface AgentRunInterventionEntity {
+  requestId: string;
+  runId: string;
+  actorId: string;
+  action: AgentRunInterventionAction;
+  payloadHash: string;
+  resultVersion: number;
+  createdAt: string;
+}
+export interface AgentPlanEntity {
+  id: string;
+  taskId: string;
+  sourceRunId: string;
+  version: number;
+  status: AgentPlanStatus;
+  summary: string;
+  risks: string[];
+  acceptanceEvidence: string[];
+  requiresApproval: boolean;
+  items: AgentPlanItem[];
+  createdTaskIds: Record<string, string>;
+  idempotencyKey: string;
+  proposedById: string;
+  reviewedById: string | null;
+  reviewComment: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+}
+export interface AgentRunCredentialEntity {
+  runId: string;
+  taskId: string;
+  projectId: string;
+  userId: string;
+  runAttempt: number;
+  prefix: string;
+  hash: string;
+  ciphertext: string;
+  permissions: string[];
+  expiresAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 export interface AgentCycleStateEntity {
   count: number;
@@ -86,7 +151,11 @@ export interface TaskGateEntity {
   taskId: string;
   headSha: string;
   requiredChecks: string[];
+  requiredArtifactTypes: AgentArtifactType[];
   checks: Array<{ name: string; status: GateCheckStatus; headSha: string; detailsUrl?: string | null }>;
+  implementationRunId: string | null;
+  implementationAgentId: string | null;
+  approvals: Array<{ reviewerId: string; approvedAt: string }>;
   approvedHeadSha: string | null;
   approvedById: string | null;
   approvedAt: string | null;
@@ -185,6 +254,8 @@ export interface ProjectEntity {
   agentWorkflow: AgentWorkflow | null;
   hiddenEmptyStatuses: TaskStatus[];
   mergeTarget: ProjectMergeTarget;
+  dependencyResolutionStatuses: DependencyResolutionStatus[];
+  reviewPolicy: ProjectReviewPolicy;
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -235,6 +306,7 @@ export interface TaskEntity {
   phase?: PhaseEntity | null;
   tags?: TaskTagEntity[];
   dependencies?: TaskDependencyEntity[];
+  blockedReason?: string | null;
   attachments?: AttachmentEntity[];
   updates?: TaskUpdateEntity[];
   updatesPage?: PageInfo;

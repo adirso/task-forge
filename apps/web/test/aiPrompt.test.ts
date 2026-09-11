@@ -14,6 +14,7 @@ const project: Project = {
   availableStatuses: ["TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"],
   defaultStatus: "TODO",
   mergeTarget: "main",
+  dependencyResolutionStatuses: ["DONE", "CANCELLED"],
   ownerId: "owner-id",
   createdAt: "2026-08-06T00:00:00.000Z",
   updatedAt: "2026-08-06T00:00:00.000Z",

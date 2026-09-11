@@ -40,11 +40,14 @@ test.describe("workspace browser smoke", () => {
     await openProjectSettings(page);
 
     await expect(page.getByText("Agent workflow", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Require independent review")).toBeChecked();
+    await page.getByLabel("Required reviewer count").fill("2");
     await expect(page.getByLabel("Implementation Queue")).toHaveValue("TODO");
     await page.getByLabel("Implementation Queue").selectOption("IN_PROGRESS");
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByText("Project updated")).toBeVisible();
     await openProjectSettings(page);
+    await expect(page.getByLabel("Required reviewer count")).toHaveValue("2");
 
     await page.getByRole("checkbox", { name: "Available status: Backlog" }).uncheck();
     await page.getByRole("checkbox", { name: "Available status: Refining" }).uncheck();
@@ -130,6 +133,108 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByRole("menuitem", { name: "Delete" })).toHaveCount(0);
   });
 
+  test("an implementation agent cannot self-review while an independent agent can approve", async ({ page, request }) => {
+    await signIn(page);
+    const adminToken = await page.evaluate(() => localStorage.getItem("taskforge_token"));
+    expect(adminToken).toBeTruthy();
+    const call = async (method: string, url: string, token: string, data?: unknown) => {
+      const response = await request.fetch(url, { method, headers: { authorization: `Bearer ${token}` }, data });
+      expect(response.ok(), `${method} ${url} returned ${response.status()}`).toBeTruthy();
+      return response.status() === 204 ? null : response.json();
+    };
+    const suffix = String(Date.now());
+    const implementer = (await call("POST", "/api/users/agents", adminToken!, { name: `Browser implementer ${suffix}` })).user;
+    const reviewer = (await call("POST", "/api/users/agents", adminToken!, { name: `Browser reviewer ${suffix}` })).user;
+    const project = (await call("POST", "/api/projects", adminToken!, { key: `R${Date.now() % 1000000}`, name: `Independent review ${suffix}`, description: "Browser-backed separation of duties", color: "#0052CC" })).project;
+    for (const userId of [implementer.id, reviewer.id]) await call("POST", `/api/projects/${project.id}/members`, adminToken!, { userId, role: "MEMBER" });
+    await call("PATCH", `/api/projects/${project.id}`, adminToken!, { reviewPolicy: { requireIndependentReview: true, requiredReviewerCount: 1, allowedReviewerAgentIds: [reviewer.id] } });
+    const implementerToken = (await call("POST", `/api/users/${implementer.id}/tokens`, adminToken!, { name: "Browser implementation token", permissions: ["task:gate:approve"] })).token;
+    const reviewerToken = (await call("POST", `/api/users/${reviewer.id}/tokens`, adminToken!, { name: "Browser reviewer token", permissions: ["task:gate:approve"] })).token;
+    const task = (await call("POST", `/api/projects/${project.id}/tasks`, adminToken!, { title: "Independent browser approval", status: "IN_REVIEW", assigneeId: implementer.id, branch: `agent/browser-review-${suffix}` })).task;
+    const run = (await call("POST", `/api/tasks/${task.id}/runs`, adminToken!, { kind: "IMPLEMENTATION" })).run;
+    await call("POST", `/api/runs/${run.id}/claim`, implementerToken, { leaseMs: 60_000 });
+    const headSha = "5555555555555555555555555555555555555555";
+    await call("PUT", `/api/runs/${run.id}/handoff`, implementerToken, { branch: task.branch, headSha, branchPublished: true, pullRequestUrl: "https://github.com/example/repo/pull/55", pullRequestTitle: "Independent browser approval", pullRequestState: "OPEN", status: "PUBLISHED" });
+    await call("PUT", `/api/tasks/${task.id}/gate`, adminToken!, { headSha, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha }] });
+
+    const selfReview = await request.post(`/api/tasks/${task.id}/gate/approve`, { headers: { authorization: `Bearer ${implementerToken}` }, data: { headSha } });
+    expect(selfReview.status()).toBe(403);
+    expect((await selfReview.json()).error).toMatch(/implementing agent cannot approve/i);
+    const independentReview = await call("POST", `/api/tasks/${task.id}/gate/approve`, reviewerToken, { headSha });
+    expect(independentReview.gate.approvedHeadSha).toBe(headSha);
+    expect(independentReview.gate.approvals.map((approval: { reviewerId: string }) => approval.reviewerId)).toEqual([reviewer.id]);
+    await call("DELETE", `/api/projects/${project.id}`, adminToken!);
+  });
+
+  test("operators edit capability profiles and auto-route work", async ({ page, request }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const adminToken = await page.evaluate(() => localStorage.getItem("taskforge_token"));
+    expect(adminToken).toBeTruthy();
+    const suffix = String(Date.now());
+    const agentResponse = await request.post("/api/users/agents", { headers: { authorization: `Bearer ${adminToken}` }, data: { name: `Routing agent ${suffix}` } });
+    expect(agentResponse.ok()).toBeTruthy();
+    const agent = (await agentResponse.json()).user;
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Create project", exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Settings" }).first().click();
+    await page.getByRole("button", { name: "Agents" }).click();
+    await page.getByRole("button", { name: new RegExp(`Routing agent ${suffix}`) }).click();
+    await expect(page.getByText("Routing capabilities", { exact: true })).toBeVisible();
+    await page.getByLabel("Provider").fill("fake-github");
+    await page.getByLabel("Model").fill("deterministic-v1");
+    await page.getByLabel("Skills").fill("typescript, browser");
+    await page.getByLabel("Repository access").fill("github.com/example/browser-routing");
+    await page.getByLabel("Health").selectOption("HEALTHY");
+    await page.getByRole("button", { name: "Save capabilities" }).click();
+    await expect(page.getByText("Capability profile saved")).toBeVisible();
+
+    const projectResponse = await request.post("/api/projects", { headers: { authorization: `Bearer ${adminToken}` }, data: { key: `A${Date.now() % 1000000}`, name: `Routing workspace ${suffix}`, description: "Browser routing coverage", repoUrl: "https://github.com/example/browser-routing", color: "#6554C0" } });
+    expect(projectResponse.ok()).toBeTruthy();
+    const project = (await projectResponse.json()).project;
+    expect((await request.post(`/api/projects/${project.id}/members`, { headers: { authorization: `Bearer ${adminToken}` }, data: { userId: agent.id, role: "MEMBER" } })).ok()).toBeTruthy();
+    const taskResponse = await request.post(`/api/projects/${project.id}/tasks`, { headers: { authorization: `Bearer ${adminToken}` }, data: { title: "Browser auto-route task", type: "FEATURE" } });
+    expect(taskResponse.ok()).toBeTruthy();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Create project", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: new RegExp(`Routing workspace ${suffix}.*Drag to reorder`) }).click();
+    await page.getByRole("button", { name: /Browser auto-route task/ }).click();
+    await page.getByLabel("Required agent skills").fill("browser");
+    await page.getByRole("button", { name: "Auto-route", exact: true }).click();
+    await expect(page.getByRole("dialog").locator("label").filter({ hasText: "Assignee" }).locator("select")).toHaveValue(agent.id);
+    await request.delete(`/api/projects/${project.id}`, { headers: { authorization: `Bearer ${adminToken}` } });
+  });
+
+  test("shows dependency blockers and configures cancellation semantics", async ({ page }) => {
+    await signIn(page);
+    const projectKey = `D${Date.now() % 1000000}`;
+    await createProject(page, `Dependency Workspace ${Date.now() % 10000}`, projectKey);
+
+    await page.getByRole("button", { name: "Create task" }).first().click();
+    await page.getByLabel("Task name").fill("Dependency blocker");
+    await page.getByLabel("Task status").selectOption("TODO");
+    await page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true }).click({ force: true });
+    await expect(page.getByRole("button", { name: new RegExp(`${projectKey}-\\d+: Dependency blocker`) })).toBeVisible();
+
+    await page.getByRole("button", { name: "Create task" }).first().click();
+    await page.getByLabel("Task name").fill("Blocked dependent task");
+    await page.getByLabel("Task status").selectOption("TODO");
+    await page.getByRole("button", { name: "Select a task dependency…" }).click();
+    await page.getByRole("listbox", { name: "Available dependencies" }).getByRole("option", { name: /Dependency blocker/ }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true }).click({ force: true });
+    await expect(page.getByText(new RegExp(`Waiting for dependencies: ${projectKey}-\\d+ \\(TODO\\)`))).toBeVisible();
+
+    await openProjectSettings(page);
+    const cancellationPolicy = page.getByLabel("Cancelled tasks satisfy dependencies");
+    await expect(cancellationPolicy).toBeChecked();
+    await cancellationPolicy.uncheck();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Project updated")).toBeVisible();
+    await openProjectSettings(page);
+    await expect(page.getByLabel("Cancelled tasks satisfy dependencies")).not.toBeChecked();
+  });
+
   test("shows live, stalled, failed, and completed Smithy run observability", async ({ page }) => {
     await signIn(page);
     await createProject(page, `Observability Workspace ${Date.now() % 10000}`, `O${Date.now() % 1000000}`);
@@ -142,16 +247,29 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByRole("button", { name: /Browser observability task/ })).toBeVisible();
 
     const now = Date.now();
+    const controls = { controlState: "ACTIVE", controlVersion: 1, assignedAgentId: null, inputRequest: null, inputResponse: null, inputRequestedAt: null, inputAnsweredAt: null, takeoverById: null };
     await page.route("**/api/tasks/*/runs", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ runs: [
-      { id: "00000000-0000-4000-8000-000000000701", taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now + 120000).toISOString(), heartbeatAt: new Date(now - 30000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 60000).toISOString(), updatedAt: new Date(now - 30000).toISOString(), completedAt: null },
-      { id: "00000000-0000-4000-8000-000000000702", taskId: "task", projectId: "project", requestedById: "agent", kind: "FIX", status: "RUNNING", attemptCount: 2, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now - 1000).toISOString(), heartbeatAt: new Date(now - 180000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 240000).toISOString(), updatedAt: new Date(now - 180000).toISOString(), completedAt: null },
-      { id: "00000000-0000-4000-8000-000000000703", taskId: "task", projectId: "project", requestedById: "agent", kind: "REVIEW", status: "FAILED", attemptCount: 3, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: "Provider exited", createdAt: new Date(now - 300000).toISOString(), updatedAt: new Date(now - 240000).toISOString(), completedAt: new Date(now - 240000).toISOString() },
-      { id: "00000000-0000-4000-8000-000000000704", taskId: "task", projectId: "project", requestedById: "agent", kind: "RE_REVIEW", status: "SUCCEEDED", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: new Date(now - 600000).toISOString(), timeoutAt: null, lastError: null, createdAt: new Date(now - 600000).toISOString(), updatedAt: new Date(now - 500000).toISOString(), completedAt: new Date(now - 500000).toISOString() },
+      { ...controls, id: "00000000-0000-4000-8000-000000000701", taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "RUNNING", attemptCount: 1, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now + 120000).toISOString(), heartbeatAt: new Date(now - 30000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 60000).toISOString(), updatedAt: new Date(now - 30000).toISOString(), completedAt: null },
+      { ...controls, id: "00000000-0000-4000-8000-000000000702", taskId: "task", projectId: "project", requestedById: "agent", kind: "FIX", status: "RUNNING", attemptCount: 2, maxAttempts: 3, leaseOwner: "smithy", leaseExpiresAt: new Date(now - 1000).toISOString(), heartbeatAt: new Date(now - 180000).toISOString(), timeoutAt: new Date(now + 300000).toISOString(), lastError: null, createdAt: new Date(now - 240000).toISOString(), updatedAt: new Date(now - 180000).toISOString(), completedAt: null },
+      { ...controls, id: "00000000-0000-4000-8000-000000000703", taskId: "task", projectId: "project", requestedById: "agent", kind: "REVIEW", status: "FAILED", attemptCount: 2, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: "Provider exited", createdAt: new Date(now - 300000).toISOString(), updatedAt: new Date(now - 240000).toISOString(), completedAt: new Date(now - 240000).toISOString() },
+      { ...controls, id: "00000000-0000-4000-8000-000000000704", taskId: "task", projectId: "project", requestedById: "agent", kind: "RE_REVIEW", status: "SUCCEEDED", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: new Date(now - 600000).toISOString(), timeoutAt: null, lastError: null, createdAt: new Date(now - 600000).toISOString(), updatedAt: new Date(now - 500000).toISOString(), completedAt: new Date(now - 500000).toISOString() },
+      { ...controls, id: "00000000-0000-4000-8000-000000000705", taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "RUNNING", controlState: "WAITING_FOR_INPUT", controlVersion: 2, inputRequest: "Choose the deployment region", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: new Date(now - 30000).toISOString(), timeoutAt: null, lastError: null, createdAt: new Date(now - 60000).toISOString(), updatedAt: new Date(now - 30000).toISOString(), completedAt: null },
     ] }) }));
+    let intervention: unknown = null;
+    await page.route("**/api/runs/*/interventions", async (route) => {
+      intervention = route.request().postDataJSON();
+      return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ duplicate: false, run: { ...controls, id: "00000000-0000-4000-8000-000000000705", taskId: "task", projectId: "project", requestedById: "agent", kind: "IMPLEMENTATION", status: "PENDING", controlVersion: 3, inputResponse: "Use eu-west-1", attemptCount: 1, maxAttempts: 3, leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null, timeoutAt: null, lastError: null, createdAt: new Date(now - 60000).toISOString(), updatedAt: new Date().toISOString(), completedAt: null } }) });
+    });
     await page.route("**/api/tasks/*/agent-logs*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agentLogs: [
       { id: "log-701", taskId: "task", runId: "00000000-0000-4000-8000-000000000701", provider: "codex", stream: "stdout", category: "output", sequence: 3, eventId: null, content: "Waiting for permission to continue", createdAt: new Date(now - 10000).toISOString() },
       { id: "log-702", taskId: "task", runId: "00000000-0000-4000-8000-000000000702", provider: "codex", stream: "stderr", category: "output", sequence: 2, eventId: null, content: "Last stalled output", createdAt: new Date(now - 180000).toISOString() },
     ], page: { limit: 100, hasMore: false, nextCursor: null } }) }));
+    await page.route("**/api/tasks/*/artifacts*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ artifacts: [{
+      id: "artifact-701", runId: "00000000-0000-4000-8000-000000000701", taskId: "task", projectId: "project",
+      headSha: "abcdef1234567890abcdef1234567890abcdef12", type: "TEST_RESULT", name: "API integration tests", mediaType: "application/json", size: 128,
+      contentHash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", metadata: { command: "npm test", status: "PASS" },
+      createdById: "agent", createdAt: new Date(now - 5000).toISOString(), downloadUrl: "/api/artifacts/artifact-701/content",
+    }] }) }));
     await page.getByRole("button", { name: /Browser observability task/ }).click();
     await page.getByRole("tab", { name: /Agents/ }).click();
     await expect(page.getByText("Agent runs")).toBeVisible();
@@ -159,7 +277,19 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByText("Lease expired", { exact: true })).toBeVisible();
     await expect(page.getByText("Failed", { exact: true })).toBeVisible();
     await expect(page.getByText("Completed", { exact: true })).toBeVisible();
-    await expect(page.getByText("Waiting for provider input", { exact: true })).toBeVisible();
+    await expect(page.getByText("Needs input", { exact: true })).toBeVisible();
+    await expect(page.locator(".task-agent-artifacts").getByText("Evidence & provenance")).toBeVisible();
+    await expect(page.getByText("API integration tests", { exact: true })).toBeVisible();
+    await expect(page.getByText(/abcdef123456.*sha256:1234567890ab/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pause" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry" }).first()).toBeVisible();
+    await expect(page.getByLabel("Reassign IMPLEMENTATION run").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Take over" }).first()).toBeVisible();
+    await expect(page.getByRole("paragraph").filter({ hasText: "Choose the deployment region" })).toBeVisible();
+    await page.getByLabel("Answer IMPLEMENTATION run").fill("Use eu-west-1");
+    await page.getByRole("button", { name: "Answer & resume" }).click();
+    expect(intervention).toEqual({ action: "ANSWER", controlVersion: 2, input: "Use eu-west-1" });
+    await expect(page.getByText("Decision v3", { exact: true })).toBeVisible();
     await expect(page.getByText("Provider response timeline", { exact: false }).first()).toBeVisible();
   });
 
@@ -209,6 +339,48 @@ test.describe("workspace browser smoke", () => {
     await expect(card.getByText("7", { exact: true })).toBeVisible();
     await expect(card.getByText("monitor-1", { exact: false })).toBeVisible();
     await expect(card.getByText("RATE_LIMIT", { exact: false })).toBeVisible();
+  });
+
+  test("reviews immutable agent plans before creating their task graph", async ({ page }) => {
+    await signIn(page);
+    const key = `P${Date.now() % 1000000}`;
+    await createProject(page, `Planning Workspace ${Date.now() % 10000}`, key);
+    await page.getByRole("button", { name: "Create task" }).first().click();
+    await page.getByLabel("Task name").fill("Decompose delivery work");
+    await page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true }).click({ force: true });
+    const plans = [
+      { id: "plan-reject", taskId: "task", sourceRunId: "00000000-0000-4000-8000-000000000201", version: 1, status: "PROPOSED", summary: "First proposal", risks: ["Unbounded scope"], acceptanceEvidence: ["Review complete"], requiresApproval: true, items: [{ key: "large", title: "One large task", description: "Implement the entire workflow at once.", definitionOfDone: "All planning behavior ships in one task.", type: "FEATURE", priority: "MEDIUM", estimatePoints: 8, dependencyKeys: [] }], createdTaskIds: {}, proposedById: "agent", reviewedById: null, reviewComment: null, createdAt: new Date().toISOString(), reviewedAt: null },
+      { id: "plan-approve", taskId: "task", sourceRunId: "00000000-0000-4000-8000-000000000202", version: 2, status: "PROPOSED", summary: "Split into executable work", risks: [], acceptanceEvidence: ["Browser coverage"], requiresApproval: true, items: [{ key: "schema", title: "Create schema", description: "Persist immutable plan versions.", definitionOfDone: "SQLite and MySQL migrations pass.", type: "INFRA", priority: "HIGH", estimatePoints: 2, dependencyKeys: [] }, { key: "ui", title: "Build plan UI", description: "Render the complete proposal for reviewers.", definitionOfDone: "Reviewers can inspect descriptions and acceptance criteria.", type: "FEATURE", priority: "MEDIUM", estimatePoints: 3, dependencyKeys: ["schema"] }], createdTaskIds: {}, proposedById: "agent", reviewedById: null, reviewComment: null, createdAt: new Date().toISOString(), reviewedAt: null },
+    ];
+    await page.route("**/api/tasks/*/plans**", async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ plans }) });
+      const plan = plans.find((candidate) => request.url().includes(candidate.id))!;
+      const action = (request.postDataJSON() as { action: "APPROVE" | "REJECT" }).action;
+      plan.status = action === "APPROVE" ? "APPROVED" : "REJECTED";
+      if (action === "APPROVE") plan.createdTaskIds = { schema: "task-schema", ui: "task-ui" };
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ plan, duplicate: false }) });
+    });
+    await page.getByRole("button", { name: /Decompose delivery work/ }).click();
+    await page.getByRole("tab", { name: /Plans/ }).click();
+    await expect(page.getByText("Split into executable work")).toBeVisible();
+    await expect(page.getByText("Persist immutable plan versions.")).toBeVisible();
+    await expect(page.getByText("SQLite and MySQL migrations pass.")).toBeVisible();
+    await expect(page.getByText("Reviewers can inspect descriptions and acceptance criteria.")).toBeVisible();
+    await expect(page.getByText("Depends on schema")).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator(".plan-item").filter({ hasText: "First proposal" }).getByRole("button", { name: "Reject" }).click();
+    await expect(page.locator(".plan-item").filter({ hasText: "First proposal" }).getByText("REJECTED")).toBeVisible();
+    let taskRefreshes = 0;
+    await page.route("**/api/projects/*/tasks*", async (route) => {
+      if (route.request().method() === "GET") taskRefreshes += 1;
+      await route.continue();
+    });
+    await page.locator(".plan-item").filter({ hasText: "Split into executable work" }).getByRole("button", { name: "Approve & create tasks" }).click();
+    await expect(page.getByText("2 executable tasks created")).toBeVisible();
+    await expect(page.getByText("task-schema", { exact: true })).toBeVisible();
+    await expect(page.getByText("task-ui", { exact: true })).toBeVisible();
+    await expect.poll(() => taskRefreshes).toBeGreaterThan(0);
   });
 });
 

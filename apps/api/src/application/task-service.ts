@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { TASK_CLAIM_SOURCE_STATUSES, TASK_CLAIM_TARGET_STATUS, TASK_REVIEW_STATUSES, type TaskStatus } from "@taskforge/contracts";
-import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
+import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_CLAIM_SOURCE_STATUSES, TASK_CLAIM_TARGET_STATUS, TASK_REVIEW_STATUSES, type AgentRoutingRequest, type TaskStatus } from "@taskforge/contracts";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext, TokenScope } from "./context.js";
 import type { PageRequest, TaskDependencyEntity, TaskEntity, TaskUpdateEntity } from "./models.js";
 import type { RepositorySet, UnitOfWork } from "./repositories.js";
@@ -61,6 +61,11 @@ export class TaskApplicationService implements TaskService {
         const project = await repositories.projects.findById(existing.projectId);
         if (!project) throw new NotFoundError("Project");
         this.assertStatusAvailable(project.availableStatuses, input.status);
+        if (context.actor.kind === "AGENT" && input.status === TASK_CLAIM_TARGET_STATUS && TASK_CLAIM_SOURCE_STATUSES.includes(existing.status as (typeof TASK_CLAIM_SOURCE_STATUSES)[number])) {
+          const resolutionStatuses = project.dependencyResolutionStatuses ?? DEFAULT_DEPENDENCY_RESOLUTION_STATUSES;
+          const blockers = (await repositories.dependencies.listForTask(existing.id)).filter((dependency) => !resolutionStatuses.includes(dependency.status as (typeof resolutionStatuses)[number]));
+          if (blockers.length) throw new ValidationError(`Task is blocked by incomplete dependencies: ${blockers.map((dependency) => `${dependency.projectKey}-${dependency.number} (${dependency.status})`).join(", ")}`);
+        }
         const reviewHandoff = project.agentWorkflow?.reviewHandoff ?? "READY_FOR_REVIEW";
         if (input.status === reviewHandoff && context.actor.kind === "AGENT") {
           if (input.runId) {
@@ -109,11 +114,75 @@ export class TaskApplicationService implements TaskService {
       if (!sourceStatuses.length) {
         throw new ValidationError(`Task claiming requires at least one claim source status (${TASK_CLAIM_SOURCE_STATUSES.join(", ")}) to be enabled. Enable one in project settings before claiming tasks.`);
       }
-      const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS }, { ...options, taskId: run?.taskId });
+      const task = await repositories.tasks.claimNext(context.projectId, context.actor.userId, { sourceStatuses, targetStatus: TASK_CLAIM_TARGET_STATUS, dependencyResolutionStatuses: [...(project.dependencyResolutionStatuses ?? DEFAULT_DEPENDENCY_RESOLUTION_STATUSES)] }, { ...options, taskId: run?.taskId });
       if (!task) throw new NotFoundError("No unclaimed tasks match the given criteria");
       await repositories.activity.record({ projectId: task.projectId, taskId: task.id, actorId: context.actor.userId, action: "task.claimed" });
       if (task.assigneeId !== context.actor.userId) await enqueueTaskStatusWebhook(repositories, task, task.previousStatus ?? "TODO", context, options?.runId ?? null, this.newId, this.now);
       return task;
+    });
+  }
+
+  async routeTask(context: RequestContext, taskId: string, input: AgentRoutingRequest) {
+    return this.unitOfWork.run(async (repositories) => {
+      const existing = await this.requireTask(repositories, taskId);
+      const project = await this.assertProjectAccess(repositories, context, existing.projectId);
+      if (context.actor.kind !== "HUMAN" || (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId)) throw new ForbiddenError("Only the project owner or an administrator can route tasks");
+
+      if (input.overrideAgentId) {
+        const agent = await repositories.users.findById(input.overrideAgentId);
+        if (!agent || agent.kind !== "AGENT" || !(await repositories.memberships.isMember(project.id, agent.id))) throw new ValidationError("Override agent must be an agent identity in this project");
+        const duplicate = existing.assigneeId === agent.id;
+        const task = duplicate ? existing : await repositories.tasks.update(existing.id, { assigneeId: agent.id });
+        if (!duplicate) {
+          await repositories.activity.record({ projectId: project.id, taskId, actorId: context.actor.userId, action: "task.routing_overridden", metadata: { selectedAgentId: agent.id } });
+          await this.notify(repositories, agent.id, task, context, "TASK_ASSIGNED", "Task routed to you");
+          await this.enqueueAssignmentWebhook(repositories, task, context);
+        }
+        return { task, selectedAgentId: agent.id, override: true, duplicate };
+      }
+
+      if (existing.assigneeId) {
+        const assigned = await repositories.users.findById(existing.assigneeId);
+        if (assigned?.kind === "AGENT") return { task: existing, selectedAgentId: assigned.id, override: false, duplicate: true };
+        throw new ConflictError("Task is already assigned. Clear the assignee or use an operator override.");
+      }
+      if (!project.repoUrl) throw new ValidationError("Automatic routing requires a project repository URL");
+      const repository = normalizeRepository(project.repoUrl);
+      if (!repository) throw new ValidationError("Automatic routing could not normalize the project repository URL");
+      const projectAgents = (await repositories.memberships.list(project.id)).filter((member) => member.kind === "AGENT");
+      const invalidProfileCount = projectAgents.filter((member) => member.capabilityProfileError).length;
+      const members = projectAgents.filter((member) => member.capabilityProfile);
+      const counts = await repositories.tasks.activeAssignmentCounts(members.map((member) => member.id));
+      const requiredSkills = input.requiredSkills ?? [];
+      const candidates = members.filter((member) => {
+        const profile = member.capabilityProfile!;
+        const allowedRepositories = profile.repositories.map(normalizeRepository);
+        return profile.availability === "AVAILABLE" && profile.health === "HEALTHY"
+          && profile.taskTypes.includes(existing.type)
+          && (allowedRepositories.includes("*") || allowedRepositories.includes(repository))
+          && requiredSkills.every((skill) => profile.skills.includes(skill))
+          && (counts.get(member.id) ?? 0) < profile.maxConcurrency;
+      }).sort((left, right) => (counts.get(left.id) ?? 0) - (counts.get(right.id) ?? 0) || stableCompare(left.name, right.name) || stableCompare(left.id, right.id));
+      if (!candidates.length) throw new ValidationError(`No available agent matches repository ${repository}, task type ${existing.type}, required skills [${requiredSkills.join(", ") || "none"}], and remaining capacity. Update an agent capability profile or use an operator override.${invalidProfileCount ? ` ${invalidProfileCount} stored agent profile${invalidProfileCount === 1 ? " is" : "s are"} invalid and must be saved again by an administrator.` : ""}`);
+
+      for (const candidate of candidates) {
+        const result = await repositories.tasks.assignIfCapacity(existing.id, candidate.id, candidate.capabilityProfile!.maxConcurrency);
+        if (result === "AT_CAPACITY") continue;
+        if (result === "TASK_TAKEN") {
+          const task = await this.requireTask(repositories, taskId);
+          if (!task.assigneeId) continue;
+          return { task, selectedAgentId: task.assigneeId, override: false, duplicate: true };
+        }
+        const task = await this.requireTask(repositories, taskId);
+        const duplicate = result === "ALREADY_ASSIGNED";
+        if (!duplicate) {
+          await repositories.activity.record({ projectId: project.id, taskId, actorId: context.actor.userId, action: "task.auto_routed", metadata: { selectedAgentId: candidate.id, candidateCount: candidates.length, requiredSkills, repository, workload: counts.get(candidate.id) ?? 0, maxConcurrency: candidate.capabilityProfile!.maxConcurrency, policy: "workload,name,id" } });
+          await this.notify(repositories, candidate.id, task, context, "TASK_ASSIGNED", "Task routed to you");
+          await this.enqueueAssignmentWebhook(repositories, task, context);
+        }
+        return { task, selectedAgentId: candidate.id, override: false, duplicate };
+      }
+      throw new ConflictError("Matching agents reached capacity during routing. Retry the request or use an operator override.");
     });
   }
 
@@ -234,4 +303,20 @@ export class TaskApplicationService implements TaskService {
     await repositories.webhookDeliveries.create({ id, agentId: assignee.id, taskId: task.id, eventType: "task.update_added", payload: JSON.stringify(payload), status: "PENDING", attemptCount: 0, nextAttemptAt: update.createdAt, lockedUntil: null, lastAttemptAt: null, deliveredAt: null, failedAt: null, lastError: null, httpStatus: null, createdAt: update.createdAt, updatedAt: update.createdAt });
   }
 
+}
+
+function normalizeRepository(value: string): string | null {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "*") return "*";
+  const ssh = normalized.match(/^git@([^:]+):(.+)$/);
+  const withoutProtocol = ssh ? `${ssh[1]}/${ssh[2]}` : normalized.replace(/^[a-z][a-z0-9+.-]*:\/\//, "");
+  const withoutCredentials = withoutProtocol.replace(/^[^/@]+@/, "");
+  const result = withoutCredentials.replace(/[?#].*$/, "").replace(/\/+$/, "").replace(/\.git$/, "");
+  return result.includes("/") ? result : null;
+}
+
+function stableCompare(left: string, right: string) {
+  const first = left.toLowerCase();
+  const second = right.toLowerCase();
+  return first < second ? -1 : first > second ? 1 : 0;
 }

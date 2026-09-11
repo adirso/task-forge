@@ -59,11 +59,12 @@ export class DashboardApplicationService implements DashboardService {
       const projectsByName = [...accessible].sort((left, right) => left.name.localeCompare(right.name));
       const projectIds = projectsByName.map((project) => project.id);
       const cutoff = new Date(new Date(this.now()).getTime() - STUCK_THRESHOLD_MS).toISOString();
-      const [counts, phaseMetrics, myTasks, stuckTasks] = await Promise.all([
+      const [counts, phaseMetrics, myTasks, stuckTasks, projectUsage] = await Promise.all([
         repositories.reporting.countTasksByProject(projectIds),
         repositories.reporting.countNonDonePhasesByProject(projectIds),
         repositories.reporting.listMyOpenTasks(context.actor.userId, 30),
         repositories.reporting.listStuckTasks(projectIds, cutoff, 20),
+        Promise.all(projectIds.map(async (projectId) => [projectId, repositories.agentUsage ? await repositories.agentUsage.totals({ projectId }) : { inputTokens: 0, outputTokens: 0, totalTokens: 0, costMicros: 0, toolCalls: 0, runtimeMs: 0, retries: 0, forcedCycles: 0, runCount: 0, eventCount: 0 }] as const)),
       ]);
       const countsByProject = new Map<string, Map<TaskStatus, number>>();
       for (const count of counts) {
@@ -72,12 +73,13 @@ export class DashboardApplicationService implements DashboardService {
         countsByProject.set(count.projectId, projectCounts);
       }
       const nonDonePhasesByProject = new Map(phaseMetrics.map((metric) => [metric.projectId, metric.nonDonePhaseCount]));
+      const usageByProject = new Map(projectUsage);
       return {
         projects: projectsByName.map((project) => {
           const projectCounts = countsByProject.get(project.id);
           const statusCounts = Object.fromEntries(TASK_STATUSES.map((status) => [status, projectCounts?.get(status) ?? 0])) as Record<TaskStatus, number>;
           const total = TASK_STATUSES.reduce((sum, status) => sum + statusCounts[status], 0);
-          return { id: project.id, name: project.name, key: project.key, color: project.color, counts: { ...statusCounts, total }, nonDoneTaskCount: total - statusCounts.DONE - statusCounts.CANCELLED, cancelledTaskCount: statusCounts.CANCELLED, nonDonePhaseCount: nonDonePhasesByProject.get(project.id) ?? 0 };
+          return { id: project.id, name: project.name, key: project.key, color: project.color, counts: { ...statusCounts, total }, nonDoneTaskCount: total - statusCounts.DONE - statusCounts.CANCELLED, cancelledTaskCount: statusCounts.CANCELLED, nonDonePhaseCount: nonDonePhasesByProject.get(project.id) ?? 0, agentUsage: usageByProject.get(project.id)! };
         }),
         myTasks: myTasks.map(toDashboardTask),
         stuckTasks: stuckTasks.map(toDashboardTask),
