@@ -247,6 +247,14 @@ Smithy records wall-clock runtime for every provider attempt. Provider-neutral c
 
 Authenticated project members can inspect current or historical aggregates with `GET /api/projects/:projectId/agent-usage`, optionally filtered by `phaseId`, `taskId`, `provider`, or `model`; per-run history is available at `GET /api/runs/:runId/usage` and project totals appear on the dashboard. Project owners and administrators configure project, phase, or task limits through `/api/projects/:projectId/agent-budgets/:scope/:scopeId`. `WARN` records an audit event, `PAUSE` fences the active run and revokes its credential, and `BLOCK` prevents new runs and claims after the limit is reached. Usage events remain immutable, and retrying the same run/event identifier never charges it twice.
 
+## Agent evidence and provenance
+
+Agents record structured evidence with `POST /api/runs/:runId/artifacts`. Supported types cover changed files, commits, test results, coverage, screenshots, tool outcomes, prompt versions, model versions, and execution-environment fingerprints. Every artifact is bound to its task, run, and head SHA; TaskForge stores its post-redaction SHA-256 digest and immutable content. Repeating the same type, head, and content upload returns the original record, so retries and Smithy restarts do not create duplicates. Each run accepts at most 100 artifacts of up to 5 MB each.
+
+Only the current run lease owner using a run-scoped `task:artifact` credential, the project owner, or an administrator can upload evidence. Project members can inspect provenance in the task's **Agents** tab or with `GET /api/tasks/:taskId/artifacts`; content downloads expose a `Content-Digest` header for integrity verification. Text, JSON, names, and metadata are redacted before hashing and persistence, and secrets must never be submitted as binary artifacts. Smithy records prompt, provider/model, and environment evidence automatically after a successful provider execution.
+
+Gate evidence may declare `requiredArtifactTypes` through `PUT /api/tasks/:taskId/gate`. Approval then fails closed until each required type exists for that exact head SHA. Changing the head invalidates the prior gate evidence and artifact requirements are evaluated against the replacement head.
+
 ## Delivery Monitor
 
 See the complete [Delivery Monitor operator runbook](docs/DELIVERY_MONITOR_RUNBOOK.md) for setup, recovery, and troubleshooting.

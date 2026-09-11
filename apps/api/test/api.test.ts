@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1350,6 +1350,36 @@ test("Smithy agents receive revocable credentials bound to one run, task, projec
   assert.equal(stablePack.json().contextPack.fingerprint, firstFingerprint);
   const ownBranch = await app.inject({ method: "PATCH", url: `/api/tasks/${scopedTask.id}`, headers: { authorization: `Bearer ${credential.token}` }, payload: { branch: "agent/run-credential-published" } });
   assert.equal(ownBranch.statusCode, 200, ownBranch.body);
+
+  const artifactHead = "a".repeat(40);
+  const artifactPayload = Buffer.from('{"status":"PASS","token":"tf_artifact_secret"}');
+  const artifactInput = {
+    type: "TEST_RESULT", name: "API tests token=tf_name_secret", headSha: artifactHead, mediaType: "application/json",
+    data: artifactPayload.toString("base64"), payloadSha256: createHash("sha256").update(artifactPayload).digest("hex"),
+    metadata: { command: "npm test", status: "PASS", summary: "Authorization: Bearer tf_summary_secret" },
+  };
+  const artifactCreated = await app.inject({ method: "POST", url: `/api/runs/${runId}/artifacts`, headers: { authorization: `Bearer ${credential.token}` }, payload: artifactInput });
+  assert.equal(artifactCreated.statusCode, 201, artifactCreated.body);
+  assert.equal(artifactCreated.json().created, true);
+  assert.match(artifactCreated.json().artifact.contentHash, /^[0-9a-f]{64}$/);
+  assert.doesNotMatch(artifactCreated.body, /tf_name_secret|tf_summary_secret|tf_artifact_secret/);
+  const artifactDuplicate = await app.inject({ method: "POST", url: `/api/runs/${runId}/artifacts`, headers: { authorization: `Bearer ${credential.token}` }, payload: artifactInput });
+  assert.equal(artifactDuplicate.statusCode, 200, artifactDuplicate.body);
+  assert.equal(artifactDuplicate.json().created, false);
+  assert.equal(artifactDuplicate.json().artifact.id, artifactCreated.json().artifact.id);
+  const artifactList = await app.inject({ method: "GET", url: `/api/tasks/${scopedTask.id}/artifacts?headSha=${artifactHead}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(artifactList.statusCode, 200, artifactList.body);
+  assert.equal(artifactList.json().artifacts.length, 1);
+  assert.doesNotMatch(artifactList.body, /tf_name_secret|tf_summary_secret|tf_artifact_secret/);
+  const artifactDownload = await app.inject({ method: "GET", url: artifactCreated.json().artifact.downloadUrl, headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(artifactDownload.statusCode, 200, artifactDownload.body);
+  assert.match(String(artifactDownload.headers["content-digest"]), /^sha-256=:/);
+  assert.doesNotMatch(artifactDownload.body, /tf_artifact_secret/);
+  assert.match(artifactDownload.body, /\[REDACTED\]/);
+  const invalidArtifact = await app.inject({ method: "POST", url: `/api/runs/${runId}/artifacts`, headers: { authorization: `Bearer ${credential.token}` }, payload: { ...artifactInput, payloadSha256: "b".repeat(64) } });
+  assert.equal(invalidArtifact.statusCode, 400, invalidArtifact.body);
+  const otherRunArtifact = await app.inject({ method: "POST", url: `/api/runs/${randomUUID()}/artifacts`, headers: { authorization: `Bearer ${credential.token}` }, payload: artifactInput });
+  assert.equal(otherRunArtifact.statusCode, 403, otherRunArtifact.body);
 
   const otherTask = await app.inject({ method: "GET", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${credential.token}` } });
   assert.equal(otherTask.statusCode, 403, otherTask.body);

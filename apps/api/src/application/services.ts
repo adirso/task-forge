@@ -67,7 +67,7 @@ export interface AgentLogService {
 export interface AgentHandoffService { get(context: RequestContext, runId: string): Promise<AgentHandoffEntity | null>; save(context: RequestContext, runId: string, input: Omit<AgentHandoffEntity, "runId" | "taskId" | "createdAt" | "updatedAt">): Promise<AgentHandoffEntity>; validate(context: RequestContext, runId: string): Promise<AgentHandoffEntity>; }
 export interface TaskGateService {
   get(context: RequestContext, taskId: string): Promise<TaskGateEntity | null>;
-  record(context: RequestContext, taskId: string, input: Pick<TaskGateEntity, "headSha" | "requiredChecks" | "checks">): Promise<TaskGateEntity>;
+  record(context: RequestContext, taskId: string, input: Pick<TaskGateEntity, "headSha" | "requiredChecks" | "checks"> & { requiredArtifactTypes?: TaskGateEntity["requiredArtifactTypes"] }): Promise<TaskGateEntity>;
   approve(context: RequestContext, taskId: string, headSha: string): Promise<TaskGateEntity>;
   merge(context: RequestContext, taskId: string, headSha: string): Promise<TaskGateEntity>;
 }

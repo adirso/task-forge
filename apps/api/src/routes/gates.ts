@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { agentArtifactTypeSchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { TaskGateApplicationService } from "../application/gate-service.js";
@@ -7,7 +8,7 @@ import { TaskGateApplicationService } from "../application/gate-service.js";
 const service = new TaskGateApplicationService(createUnitOfWork(db));
 const context = (request: { authUser: { id: string; kind: "HUMAN" | "AGENT"; role: "ADMIN" | "MEMBER"; name: string; tokenScopes: string[] | null } }) => ({ actor: { userId: request.authUser.id, kind: request.authUser.kind, role: request.authUser.role, name: request.authUser.name, tokenScopes: request.authUser.tokenScopes as import("../application/context.js").TokenScope[] | null } });
 const sha = z.string().regex(/^[0-9a-f]{7,64}$/i);
-const evidence = z.object({ headSha: sha, requiredChecks: z.array(z.string().trim().min(1).max(160)).max(100), checks: z.array(z.object({ name: z.string().trim().min(1).max(160), status: z.enum(["PASS", "FAIL", "PENDING"]), headSha: sha, detailsUrl: z.string().url().nullable().optional() })).max(200) });
+const evidence = z.object({ headSha: sha, requiredChecks: z.array(z.string().trim().min(1).max(160)).max(100), requiredArtifactTypes: z.array(agentArtifactTypeSchema).max(9).optional(), checks: z.array(z.object({ name: z.string().trim().min(1).max(160), status: z.enum(["PASS", "FAIL", "PENDING"]), headSha: sha, detailsUrl: z.string().url().nullable().optional() })).max(200) });
 const head = z.object({ headSha: sha });
 
 export async function gateRoutes(app: FastifyInstance) {

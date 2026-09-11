@@ -149,6 +149,38 @@ export interface AgentUsageBreakdown extends AgentUsageTotals { key: string; }
 export interface AgentUsageReport { total: AgentUsageTotals; byRun: AgentUsageBreakdown[]; byTask: AgentUsageBreakdown[]; byPhase: AgentUsageBreakdown[]; byProject: AgentUsageBreakdown[]; byProvider: AgentUsageBreakdown[]; byModel: AgentUsageBreakdown[]; }
 export interface AgentBudget { id: string; projectId: string; scope: AgentBudgetScope; scopeId: string; action: AgentBudgetAction; limits: AgentBudgetLimits; createdAt: string; updatedAt: string; }
 
+export const agentArtifactTypeSchema = z.enum([
+  "CHANGED_FILES", "COMMIT", "TEST_RESULT", "COVERAGE", "SCREENSHOT", "TOOL_OUTCOME", "PROMPT", "MODEL", "EXECUTION_ENVIRONMENT",
+]);
+const artifactSha = z.string().regex(/^[0-9a-f]{7,64}$/i);
+const artifactPath = z.string().trim().min(1).max(2048).refine((value) => !value.startsWith("/") && !value.split("/").includes(".."), "Artifact file paths must be repository-relative");
+const artifactCommon = {
+  name: z.string().trim().min(1).max(180),
+  headSha: artifactSha,
+  mediaType: z.string().trim().min(1).max(160),
+  data: z.string().min(1).max(7_000_000),
+  payloadSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+};
+export const agentArtifactCreateSchema = z.discriminatedUnion("type", [
+  z.object({ ...artifactCommon, type: z.literal("CHANGED_FILES"), metadata: z.object({ files: z.array(artifactPath).min(1).max(1_000) }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("COMMIT"), metadata: z.object({ sha: artifactSha, message: z.string().trim().max(500).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("TEST_RESULT"), metadata: z.object({ command: z.string().trim().min(1).max(1_000), status: z.enum(["PASS", "FAIL"]), durationMs: z.number().int().nonnegative().max(86_400_000).optional(), summary: z.string().trim().max(2_000).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("COVERAGE"), metadata: z.object({ format: z.enum(["SUMMARY", "LCOV", "COBERTURA"]), lines: z.number().min(0).max(100).optional(), branches: z.number().min(0).max(100).optional(), functions: z.number().min(0).max(100).optional(), statements: z.number().min(0).max(100).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("SCREENSHOT"), metadata: z.object({ width: z.number().int().positive().max(20_000).optional(), height: z.number().int().positive().max(20_000).optional(), description: z.string().trim().max(1_000).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("TOOL_OUTCOME"), metadata: z.object({ tool: z.string().trim().min(1).max(160), status: z.enum(["PASS", "FAIL"]), summary: z.string().trim().max(2_000).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("PROMPT"), metadata: z.object({ version: z.string().trim().min(1).max(120) }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("MODEL"), metadata: z.object({ provider: z.string().trim().min(1).max(64), model: z.string().trim().min(1).max(120), version: z.string().trim().max(120).optional() }).strict() }),
+  z.object({ ...artifactCommon, type: z.literal("EXECUTION_ENVIRONMENT"), metadata: z.object({ fingerprint: z.string().regex(/^[0-9a-f]{64}$/i), platform: z.string().trim().min(1).max(64).optional(), architecture: z.string().trim().min(1).max(64).optional(), runtime: z.string().trim().max(120).optional() }).strict() }),
+]);
+export type AgentArtifactType = z.infer<typeof agentArtifactTypeSchema>;
+export type AgentArtifactCreate = z.infer<typeof agentArtifactCreateSchema>;
+export type AgentArtifactMetadata = AgentArtifactCreate["metadata"];
+export interface AgentArtifact {
+  id: string; runId: string; taskId: string; projectId: string; headSha: string; type: AgentArtifactType;
+  name: string; mediaType: string; size: number; contentHash: string; metadata: AgentArtifactMetadata;
+  createdById: string; createdAt: string; downloadUrl: string;
+}
+
 export const agentPlanStatusSchema = z.enum(["PROPOSED", "APPROVED", "REJECTED"]);
 export const agentPlanItemSchema = z.object({
   key: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, "Item keys may contain letters, numbers, underscores, and hyphens"),
@@ -441,6 +473,7 @@ export const TOKEN_SCOPES = [
   "task:gate:evidence",
   "task:gate:approve",
   "task:plan",
+  "task:artifact",
 ] as const;
 export type TokenScope = typeof TOKEN_SCOPES[number];
 
