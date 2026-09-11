@@ -159,7 +159,7 @@ test("gate repository persists SHA-bound evidence and conditional approvals", as
     transaction(callback) { return callback; },
   };
   const gate = createRepositories(database).gates;
-  await gate.save({ taskId: "task-1", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PASS", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }], implementationRunId: null, implementationAgentId: null, approvals: [], approvedHeadSha: null, approvedById: null, approvedAt: null, mergedHeadSha: null, mergedById: null, mergedAt: null, updatedAt: "2026-08-24T12:00:00.000Z" });
+  await gate.save({ taskId: "task-1", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", requiredChecks: ["Quality"], requiredArtifactTypes: [], checks: [{ name: "Quality", status: "PASS", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }], implementationRunId: null, implementationAgentId: null, approvals: [], approvedHeadSha: null, approvedById: null, approvedAt: null, mergedHeadSha: null, mergedById: null, mergedAt: null, updatedAt: "2026-08-24T12:00:00.000Z" });
   await gate.approve("task-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "codex-1", { requiredReviewerCount: 1, excludedReviewerId: "implementer-1", allowedReviewerIds: ["codex-1"] }, "2026-08-24T12:00:00.000Z");
   await gate.merge("task-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner-1", "2026-08-24T12:00:00.000Z");
   assert.ok(queries.some((sql) => sql.includes("head_sha = ?")));

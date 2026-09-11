@@ -264,6 +264,12 @@ test.describe("workspace browser smoke", () => {
       { id: "log-701", taskId: "task", runId: "00000000-0000-4000-8000-000000000701", provider: "codex", stream: "stdout", category: "output", sequence: 3, eventId: null, content: "Waiting for permission to continue", createdAt: new Date(now - 10000).toISOString() },
       { id: "log-702", taskId: "task", runId: "00000000-0000-4000-8000-000000000702", provider: "codex", stream: "stderr", category: "output", sequence: 2, eventId: null, content: "Last stalled output", createdAt: new Date(now - 180000).toISOString() },
     ], page: { limit: 100, hasMore: false, nextCursor: null } }) }));
+    await page.route("**/api/tasks/*/artifacts*", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ artifacts: [{
+      id: "artifact-701", runId: "00000000-0000-4000-8000-000000000701", taskId: "task", projectId: "project",
+      headSha: "abcdef1234567890abcdef1234567890abcdef12", type: "TEST_RESULT", name: "API integration tests", mediaType: "application/json", size: 128,
+      contentHash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", metadata: { command: "npm test", status: "PASS" },
+      createdById: "agent", createdAt: new Date(now - 5000).toISOString(), downloadUrl: "/api/artifacts/artifact-701/content",
+    }] }) }));
     await page.getByRole("button", { name: /Browser observability task/ }).click();
     await page.getByRole("tab", { name: /Agents/ }).click();
     await expect(page.getByText("Agent runs")).toBeVisible();
@@ -272,6 +278,9 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByText("Failed", { exact: true })).toBeVisible();
     await expect(page.getByText("Completed", { exact: true })).toBeVisible();
     await expect(page.getByText("Needs input", { exact: true })).toBeVisible();
+    await expect(page.locator(".task-agent-artifacts").getByText("Evidence & provenance")).toBeVisible();
+    await expect(page.getByText("API integration tests", { exact: true })).toBeVisible();
+    await expect(page.getByText(/abcdef123456.*sha256:1234567890ab/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Pause" }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Retry" }).first()).toBeVisible();
     await expect(page.getByLabel("Reassign IMPLEMENTATION run").first()).toBeVisible();

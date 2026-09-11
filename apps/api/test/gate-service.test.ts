@@ -6,15 +6,15 @@ import type { RepositorySet } from "../src/application/repositories.js";
 const task = { id: "task-1", projectId: "project-1", creatorId: "owner-1", status: "IN_REVIEW", pullRequestState: "OPEN" } as never;
 const project = { id: "project-1", ownerId: "owner-1", availableStatuses: ["IN_REVIEW", "READY_FOR_REVIEW"], reviewPolicy: { requireIndependentReview: false, requiredReviewerCount: 1, allowedReviewerAgentIds: [] as string[] } };
 function setup(reviewPolicy = project.reviewPolicy) {
-  let gate: any = null; const findings: any[] = [];
+  let gate: any = null; const findings: any[] = []; const artifacts: any[] = [];
   const implementationRun = { id: "run-1", executedById: "implementer-1" };
-  const set = { projects: { findById: async () => ({ ...project, reviewPolicy }) }, memberships: { isMember: async () => true }, users: { findById: async (id: string) => ({ id, kind: "AGENT" }) }, tasks: { findById: async () => task, update: async (_id: string, input: unknown) => ({ ...task, ...input }) }, handoffs: { findPublishedByTaskHead: async () => ({ runId: "run-1" }) }, runs: { findById: async () => implementationRun }, findings: { listForTask: async () => findings }, activity: { record: async () => undefined }, gates: {
+  const set = { projects: { findById: async () => ({ ...project, reviewPolicy }) }, memberships: { isMember: async () => true }, users: { findById: async (id: string) => ({ id, kind: "AGENT" }) }, tasks: { findById: async () => task, update: async (_id: string, input: unknown) => ({ ...task, ...input }) }, handoffs: { findPublishedByTaskHead: async () => ({ runId: "run-1" }) }, runs: { findById: async () => implementationRun }, findings: { listForTask: async () => findings }, artifacts: { listForTask: async (_taskId: string, headSha?: string) => artifacts.filter((artifact) => !headSha || artifact.headSha === headSha) }, activity: { record: async () => undefined }, gates: {
     findByTask: async () => gate,
     save: async (input: any) => { gate = input; return input; },
     approve: async (_id: string, headSha: string, actorId: string, approvalPolicy: { requiredReviewerCount: number; excludedReviewerId: string | null; allowedReviewerIds: string[] }, now: string) => { if (!gate || gate.headSha !== headSha) return null; const approvals = gate.approvals.some((item: any) => item.reviewerId === actorId) ? gate.approvals : [...gate.approvals, { reviewerId: actorId, approvedAt: now }]; const eligible = approvals.filter((item: any) => (!approvalPolicy.excludedReviewerId || item.reviewerId !== approvalPolicy.excludedReviewerId) && (!approvalPolicy.allowedReviewerIds.length || approvalPolicy.allowedReviewerIds.includes(item.reviewerId))); gate = { ...gate, approvals, approvedHeadSha: eligible.length >= approvalPolicy.requiredReviewerCount ? headSha : null, approvedById: eligible.length >= approvalPolicy.requiredReviewerCount ? actorId : null, approvedAt: eligible.length >= approvalPolicy.requiredReviewerCount ? now : null }; return gate; },
     merge: async (_id: string, headSha: string, actorId: string, now: string) => { if (!gate || gate.headSha !== headSha || gate.approvedHeadSha !== headSha) return null; gate = { ...gate, mergedHeadSha: headSha, mergedById: actorId, mergedAt: now }; return gate; },
   } } as unknown as RepositorySet;
-  return { set, findings, service: new TaskGateApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T12:00:00.000Z") };
+  return { set, findings, artifacts, service: new TaskGateApplicationService({ run: async (work) => work(set) }, () => "2026-08-24T12:00:00.000Z") };
 }
 
 const human = { actor: { userId: "owner-1", kind: "HUMAN" as const, role: "ADMIN" as const, name: "Owner", tokenScopes: null } };
@@ -45,6 +45,16 @@ test("gate evidence requires configured checks and every check to pass before ap
   await assert.rejects(() => service.approve(codex, task.id, head), /not passing/);
   await service.record(human, task.id, { headSha: head, requiredChecks: ["Quality"], checks: [{ name: "Quality", status: "PENDING", headSha: head }] });
   await assert.rejects(() => service.approve(codex, task.id, head), /not passing/);
+});
+
+test("gate approval requires configured artifact types for the current head", async () => {
+  const { service, artifacts } = setup(); const head = "abababababababababababababababababababab";
+  await service.record(human, task.id, { headSha: head, requiredChecks: ["Quality"], requiredArtifactTypes: ["TEST_RESULT", "COMMIT"], checks: [{ name: "Quality", status: "PASS", headSha: head }] });
+  artifacts.push({ type: "TEST_RESULT", headSha: head });
+  await assert.rejects(() => service.approve(codex, task.id, head), /COMMIT/);
+  artifacts.push({ type: "COMMIT", headSha: head });
+  const approved = await service.approve(codex, task.id, head);
+  assert.equal(approved.approvedHeadSha, head);
 });
 
 test("ordinary project members cannot fabricate gate evidence", async () => {

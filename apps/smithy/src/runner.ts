@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import type { ProviderConfig, ProviderLabel } from "./config.js";
 import { ApiClient } from "./api.js";
@@ -40,6 +41,8 @@ const LEGACY_AGENT_WORKFLOW: AgentWorkflow = {
 
 const noopWorktree: WorktreeFactory = async (repo) => repo;
 const readGit = promisify(execFile);
+const SMITHY_PROMPT_VERSION = "smithy-task-v1";
+const artifactData = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64");
 
 type ProviderUsage = { inputTokens: number; outputTokens: number; costMicros: number; toolCalls: number };
 export function parseProviderUsage(output: string): ProviderUsage {
@@ -194,7 +197,7 @@ export class SmithyRunner {
       "- Run completion is separate from task status: Smithy records the run result, but a successful run does not authorize or perform a task transition.",
     ];
     const configured = workflow ?? LEGACY_AGENT_WORKFLOW;
-    if (kind === "IMPLEMENTATION") lines.push(transition(configured.implementationStart, "implementation start"), "- First make the implementation-start status transition, then edit and test the task.", "- Before requesting review, commit all changes, push the existing task branch, and create or update the pull request with the git/GitHub credentials available to you. Capture the exact pushed commit SHA and PR URL/title/state; never claim publication from a local branch alone.", `- Persist verified handoff evidence with PUT /api/runs/${runId}/handoff: include branch, pushed commit headSha, branchPublished=true, and pull-request URL/title/state. Retry idempotently if the callback fails; do not request review until it is accepted.`, `- If git, GitHub CLI, credentials, push, or PR creation fails, redact the diagnostic, record it in the agent log and task update, and leave the task in progress for recovery.`, transition(configured.reviewHandoff, "implementation handoff for review"));
+    if (kind === "IMPLEMENTATION") lines.push(transition(configured.implementationStart, "implementation start"), "- First make the implementation-start status transition, then edit and test the task.", `- Record changed-file, commit, test, coverage, screenshot, and tool evidence as applicable with POST /api/runs/${runId}/artifacts. Artifacts must use the final head SHA and base64 content; duplicate uploads are idempotent.`, "- Before requesting review, commit all changes, push the existing task branch, and create or update the pull request with the git/GitHub credentials available to you. Capture the exact pushed commit SHA and PR URL/title/state; never claim publication from a local branch alone.", `- Persist verified handoff evidence with PUT /api/runs/${runId}/handoff: include branch, pushed commit headSha, branchPublished=true, and pull-request URL/title/state. Retry idempotently if the callback fails; do not request review until it is accepted.`, `- If git, GitHub CLI, credentials, push, or PR creation fails, redact the diagnostic, record it in the agent log and task update, and leave the task in progress for recovery.`, transition(configured.reviewHandoff, "implementation handoff for review"));
     else if (kind === "FIX") lines.push(task.branch ? `- Fix needed mode: remain on the existing branch ${task.branch}; do not create or switch branches.` : "- Fix needed mode requires a configured existing task branch; stop before editing and ask the operator to set it. Never invent a branch.", `- Read the latest review findings from ${findings}, resolve and test each finding, then commit the fixes, push this same branch, and create or update the existing pull request. Capture the exact new head SHA and PR metadata.`, `- Persist the verified fix handoff with PUT /api/runs/${runId}/handoff using branchPublished=true, the pushed headSha, and pull-request URL/title/state; retry idempotently and request re-review only after it is accepted.`, "- If git/GitHub credentials, push, or PR publication fails, redact and record the actionable error and leave the task in fix progress for recovery.", transition(configured.fixStart, "fix start"), transition(configured.reReview, "fix handoff for re-review"));
     else if (kind === "RE_REVIEW") lines.push(`- Re-review mode: this task was previously reviewed. Read the latest findings from ${findings}, compare the current head against each finding and the Definition of done, and report remaining issues.`, `- Verify the task's canonical branch, pushed head SHA, and pull-request URL/state before reviewing; report missing or inconsistent publication evidence instead of assuming it is valid.`, transition(configured.reReview, "re-review start"), transition(configured.approved, "clean re-review approval"), transition(configured.fixNeeded, "remaining-finding fix request"), "- Do not assume approval or merge; report findings and evidence for the human/operator decision.");
     else lines.push(transition(configured.reviewStart, "review start"), `- Verify the task's canonical branch, pushed head SHA, and pull-request URL/state before reviewing; report missing or inconsistent publication evidence instead of assuming it is valid.`, `- After review, record structured findings and evidence. If clean, PATCH the task to ${configured.approved}; if changes are required, dispose findings as ${configured.fixNeeded}. Do not implement or merge changes in review mode.`);
@@ -362,6 +365,16 @@ export class SmithyRunner {
       // PR fields are sourced from the canonical task context and never guessed.
       let headSha: string | null = null;
       try { headSha = (await readGit("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim() || null; } catch { /* provider may use a non-git checkout */ }
+      if (headSha) {
+        const environment = { platform: process.platform, architecture: process.arch, runtime: process.version, sandboxMode: this.sandboxPolicy.mode, sandboxBackend: this.sandboxPolicy.backend };
+        const environmentFingerprint = createHash("sha256").update(JSON.stringify(environment)).digest("hex");
+        const provenance = [
+          { type: "PROMPT", name: "Smithy prompt version", metadata: { version: SMITHY_PROMPT_VERSION }, value: { version: SMITHY_PROMPT_VERSION } },
+          { type: "MODEL", name: "Provider model", metadata: { provider: job.provider, model: config.model ?? "unspecified" }, value: { provider: job.provider, model: config.model ?? "unspecified" } },
+          { type: "EXECUTION_ENVIRONMENT", name: "Execution environment", metadata: { fingerprint: environmentFingerprint, platform: process.platform, architecture: process.arch, runtime: process.version }, value: environment },
+        ];
+        for (const artifact of provenance) await api.request(`/api/runs/${runId}/artifacts`, { method: "POST", body: JSON.stringify({ type: artifact.type, name: artifact.name, headSha, mediaType: "application/json", data: artifactData(artifact.value), metadata: artifact.metadata }) });
+      }
       // A local branch is not proof that it was pushed. Only an explicit
       // provider callback may mark branchPublished/PUBLISHED.
       const existingHandoff = await api.request(`/api/runs/${runId}/handoff`).catch(() => ({})) as { handoff?: { status?: string } };

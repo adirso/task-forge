@@ -1,5 +1,5 @@
-import type { AgentBudgetLimits, AgentBudgetScope, AgentUsageReport, AgentUsageTotals, AgentCapabilityProfile } from "@taskforge/contracts";
-import type { ActivityEntity, AgentBudgetEntity, AgentContextPackEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentUsageEventEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { AgentArtifactType, AgentBudgetLimits, AgentBudgetScope, AgentUsageReport, AgentUsageTotals, AgentCapabilityProfile } from "@taskforge/contracts";
+import type { ActivityEntity, AgentArtifactEntity, AgentBudgetEntity, AgentContextPackEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentUsageEventEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -170,6 +170,15 @@ export interface AgentBudgetRepository {
   save(input: AgentBudgetEntity): Promise<AgentBudgetEntity>;
   delete(projectId: string, scope: AgentBudgetScope, scopeId: string): Promise<boolean>;
 }
+export interface AgentArtifactRepository {
+  lockRun(runId: string): Promise<void>;
+  countForRun(runId: string): Promise<number>;
+  findDuplicate(runId: string, type: AgentArtifactType, headSha: string, contentHash: string): Promise<AgentArtifactEntity | null>;
+  findById(id: string): Promise<AgentArtifactEntity | null>;
+  listForRun(runId: string): Promise<AgentArtifactEntity[]>;
+  listForTask(taskId: string, headSha?: string): Promise<AgentArtifactEntity[]>;
+  create(input: AgentArtifactEntity): Promise<AgentArtifactEntity>;
+}
 export interface AgentHandoffRepository { findByRun(runId: string): Promise<AgentHandoffEntity | null>; findPublishedByTaskHead(taskId: string, headSha: string): Promise<AgentHandoffEntity | null>; save(input: AgentHandoffEntity): Promise<AgentHandoffEntity>; }
 export interface AgentPlanRepository {
   lockTask(taskId: string): Promise<void>;
@@ -231,6 +240,7 @@ export interface RepositorySet {
   deliveryMonitor: DeliveryMonitorRepository;
   agentUsage: AgentUsageRepository;
   agentBudgets: AgentBudgetRepository;
+  artifacts: AgentArtifactRepository;
 }
 
 export interface UnitOfWork {

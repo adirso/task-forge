@@ -51,7 +51,7 @@ async function runCredentialMayAccess(request: FastifyRequest, credential: NonNu
   if (taskMatch) {
     if (decodeURIComponent(taskMatch[1]!) !== credential.taskId) return false;
     const suffix = taskMatch[2] ?? "";
-    if (method === "GET") return ["", "/updates", "/agent-logs", "/findings", "/attachments", "/runs", "/plans"].includes(suffix);
+    if (method === "GET") return ["", "/updates", "/agent-logs", "/findings", "/attachments", "/runs", "/plans", "/artifacts"].includes(suffix);
     if (method === "PATCH") return suffix === "";
     if (method === "POST") return ["/updates", "/agent-logs", "/findings", "/plans"].includes(suffix);
     return false;
@@ -61,9 +61,9 @@ async function runCredentialMayAccess(request: FastifyRequest, credential: NonNu
   if (runMatch) {
     if (decodeURIComponent(runMatch[1]!) !== credential.runId) return false;
     const suffix = runMatch[2] ?? "";
-    return (method === "GET" && ["/handoff", "/context-pack", "/context-packs", "/usage"].includes(suffix))
+    return (method === "GET" && ["/handoff", "/context-pack", "/context-packs", "/usage", "/artifacts"].includes(suffix))
       || (method === "PUT" && suffix === "/handoff")
-      || (method === "POST" && ["/handoff/validate", "/interventions", "/context-pack/refresh", "/usage"].includes(suffix));
+      || (method === "POST" && ["/handoff/validate", "/interventions", "/context-pack/refresh", "/usage", "/artifacts"].includes(suffix));
   }
 
   const findingMatch = pathname.match(/^\/api\/findings\/([^/]+)\/disposition$/);
@@ -76,6 +76,12 @@ async function runCredentialMayAccess(request: FastifyRequest, credential: NonNu
   if (attachmentMatch && method === "GET") {
     const attachment = await db.prepare("SELECT task_id FROM task_attachments WHERE id = ?").get(decodeURIComponent(attachmentMatch[1]!)) as { task_id: string } | undefined;
     return attachment?.task_id === credential.taskId;
+  }
+
+  const artifactMatch = pathname.match(/^\/api\/artifacts\/([^/]+)\/content$/);
+  if (artifactMatch && method === "GET") {
+    const artifact = await db.prepare("SELECT run_id, task_id FROM agent_artifacts WHERE id = ?").get(decodeURIComponent(artifactMatch[1]!)) as { run_id: string; task_id: string } | undefined;
+    return artifact?.run_id === credential.runId && artifact.task_id === credential.taskId;
   }
 
   return false;

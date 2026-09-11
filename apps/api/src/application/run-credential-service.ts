@@ -11,6 +11,7 @@ const RUN_CREDENTIAL_SCOPES: TokenScope[] = [
   "task:update:notes",
   "task:update:branch",
   "task:plan",
+  "task:artifact",
 ];
 
 type TokenAdapter = {

@@ -748,6 +748,21 @@ export const migrations: readonly Migration[] = [
       }
     },
   },
+  {
+    version: "0032_agent_artifacts",
+    async up(executor, dialect) {
+      await executor.run(dialect === "mysql"
+        ? "ALTER TABLE task_gate_evidence ADD COLUMN required_artifact_types JSON NULL"
+        : "ALTER TABLE task_gate_evidence ADD COLUMN required_artifact_types TEXT NOT NULL DEFAULT '[]'", []);
+      await executor.run(dialect === "mysql"
+        ? "CREATE TABLE agent_artifacts (id CHAR(36) PRIMARY KEY, run_id CHAR(36) NOT NULL, task_id CHAR(36) NOT NULL, project_id CHAR(36) NOT NULL, head_sha CHAR(64) NOT NULL, artifact_type VARCHAR(32) NOT NULL, name VARCHAR(180) NOT NULL, media_type VARCHAR(160) NOT NULL, file_size BIGINT NOT NULL, content_hash CHAR(64) NOT NULL, metadata_json JSON NOT NULL, content MEDIUMBLOB NOT NULL, created_by_id CHAR(36) NOT NULL, created_at VARCHAR(30) NOT NULL, UNIQUE KEY uq_agent_artifact_content (run_id, artifact_type, head_sha, content_hash), INDEX idx_agent_artifacts_task_head (task_id, head_sha, artifact_type), INDEX idx_agent_artifacts_run (run_id, created_at), FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE, FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (created_by_id) REFERENCES users(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        : "CREATE TABLE agent_artifacts (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, head_sha TEXT NOT NULL, artifact_type TEXT NOT NULL CHECK (artifact_type IN ('CHANGED_FILES','COMMIT','TEST_RESULT','COVERAGE','SCREENSHOT','TOOL_OUTCOME','PROMPT','MODEL','EXECUTION_ENVIRONMENT')), name TEXT NOT NULL, media_type TEXT NOT NULL, file_size INTEGER NOT NULL, content_hash TEXT NOT NULL, metadata_json TEXT NOT NULL, content BLOB NOT NULL, created_by_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE (run_id, artifact_type, head_sha, content_hash))", []);
+      if (dialect === "sqlite") {
+        await executor.run("CREATE INDEX idx_agent_artifacts_task_head ON agent_artifacts(task_id, head_sha, artifact_type)", []);
+        await executor.run("CREATE INDEX idx_agent_artifacts_run ON agent_artifacts(run_id, created_at)", []);
+      }
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {
