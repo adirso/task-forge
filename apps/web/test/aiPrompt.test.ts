@@ -80,13 +80,36 @@ test("selects prompts by project mapping rather than status names", () => {
   }
 });
 
-test("falls back to implementation for missing workflows and disabled mappings", () => {
+test("uses default status mappings when the workflow is missing", () => {
+  const expected: Partial<Record<Task["status"], AIPromptMode>> = {
+    READY_FOR_REVIEW: "REVIEW", IN_REVIEW: "REVIEW",
+    FIX_NEEDED: "FIX", FIX_IN_PROGRESS: "FIX", RE_REVIEW: "RE_REVIEW",
+  };
   for (const agentWorkflow of [undefined, null]) {
     for (const status of TASK_STATUSES) {
-      assert.equal(selectAIPromptMode({ ...project, availableStatuses: [...TASK_STATUSES], agentWorkflow }, { ...task, status }), "IMPLEMENT");
+      assert.equal(selectAIPromptMode({ ...project, availableStatuses: [...TASK_STATUSES], agentWorkflow }, { ...task, status }), expected[status] ?? "IMPLEMENT", status);
     }
   }
-  assert.equal(selectAIPromptMode({ ...project, availableStatuses: ["TODO"], agentWorkflow: DEFAULT_AGENT_WORKFLOW }, { ...task, status: "IN_REVIEW" }), "IMPLEMENT");
+});
+
+test("falls back to implementation for disabled explicit and default mappings", () => {
+  for (const agentWorkflow of [DEFAULT_AGENT_WORKFLOW, undefined, null]) {
+    for (const status of ["READY_FOR_REVIEW", "IN_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW"]) {
+      assert.equal(selectAIPromptMode({ ...project, availableStatuses: ["TODO"], agentWorkflow }, { ...task, status }), "IMPLEMENT", status);
+    }
+  }
+});
+
+test("prefers implementation when implementation roles overlap review or fix roles", () => {
+  for (const role of ["implementationQueue", "implementationStart"] as const) {
+    for (const otherRole of ["reviewHandoff", "reviewStart", "fixNeeded", "fixStart", "reReview"] as const) {
+      const status = DEFAULT_AGENT_WORKFLOW[role];
+      const configured: Project = { ...project, availableStatuses: [...TASK_STATUSES], agentWorkflow: {
+        ...DEFAULT_AGENT_WORKFLOW, [otherRole]: status,
+      } };
+      assert.equal(selectAIPromptMode(configured, { ...task, status }), "IMPLEMENT", `${role} overlaps ${otherRole}`);
+    }
+  }
 });
 
 test("exposes the three supported provider choices", () => {

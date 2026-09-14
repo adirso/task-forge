@@ -1,11 +1,12 @@
-import { TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES, phaseBranchName, type Project, type Task } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES, phaseBranchName, type Project, type Task } from "@taskforge/contracts";
 
 export type AIProvider = "claude-code" | "codex" | "cursor";
 export type AIPromptMode = "IMPLEMENT" | "REVIEW" | "FIX" | "RE_REVIEW";
 
 export function selectAIPromptMode(project: Project, task: Task): AIPromptMode {
-  const workflow = project.agentWorkflow;
-  if (!workflow || !project.availableStatuses.includes(task.status)) return "IMPLEMENT";
+  const workflow = project.agentWorkflow ?? DEFAULT_AGENT_WORKFLOW;
+  if (!project.availableStatuses.includes(task.status)) return "IMPLEMENT";
+  if (task.status === workflow.implementationQueue || task.status === workflow.implementationStart) return "IMPLEMENT";
   if (task.status === workflow.reReview) return "RE_REVIEW";
   if (task.status === workflow.fixNeeded || task.status === workflow.fixStart) return "FIX";
   if (task.status === workflow.reviewHandoff || task.status === workflow.reviewStart) return "REVIEW";
