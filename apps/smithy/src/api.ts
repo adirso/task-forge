@@ -7,7 +7,7 @@ export class ApiClient {
     let lastError: unknown;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        const response = await this.fetchImpl(`${this.baseUrl}${path}`, { ...init, headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json", ...(init.headers ?? {}) } });
+        const response = await this.fetchImpl(`${this.baseUrl}${path}`, { ...init, headers: { Authorization: `Bearer ${this.token}`, ...(init.body != null ? { "Content-Type": "application/json" } : {}), ...(init.headers ?? {}) } });
         const text = await response.text();
         if (!response.ok) throw new Error(`TaskForge API returned HTTP ${response.status}: ${redact(text).slice(0, 300)}`);
         return text ? JSON.parse(text) as Record<string, unknown> : {};
