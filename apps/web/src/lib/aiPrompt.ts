@@ -3,6 +3,15 @@ import { TASK_CLAIM_TARGET_STATUS, TASK_COMPLETION_STATUS, TASK_REVIEW_STATUSES,
 export type AIProvider = "claude-code" | "codex" | "cursor";
 export type AIPromptMode = "IMPLEMENT" | "REVIEW" | "FIX" | "RE_REVIEW";
 
+export function selectAIPromptMode(project: Project, task: Task): AIPromptMode {
+  const workflow = project.agentWorkflow;
+  if (!workflow || !project.availableStatuses.includes(task.status)) return "IMPLEMENT";
+  if (task.status === workflow.reReview) return "RE_REVIEW";
+  if (task.status === workflow.fixNeeded || task.status === workflow.fixStart) return "FIX";
+  if (task.status === workflow.reviewHandoff || task.status === workflow.reviewStart) return "REVIEW";
+  return "IMPLEMENT";
+}
+
 export const aiProviders: Array<{ id: AIProvider; name: string; badge: string; description: string; handoff: string }> = [
   { id: "claude-code", name: "Claude Code", badge: "C", description: "Terminal-first autonomous coding workflow", handoff: "Paste this prompt into Claude Code from the repository directory." },
   { id: "codex", name: "Codex", badge: "O", description: "Workspace-aware implementation and verification", handoff: "Paste this prompt into a Codex session opened on the repository." },

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Project, Task } from "@taskforge/contracts";
-import { aiProviders, buildAIPrompt, buildTaskContextUrl, suggestedTaskBranch, type AIProvider } from "../src/lib/aiPrompt.js";
+import { DEFAULT_AGENT_WORKFLOW, TASK_STATUSES, type Project, type Task } from "@taskforge/contracts";
+import { aiProviders, buildAIPrompt, buildTaskContextUrl, selectAIPromptMode, suggestedTaskBranch, type AIProvider, type AIPromptMode } from "../src/lib/aiPrompt.js";
 
 const project: Project = {
   id: "project-id",
@@ -53,6 +53,41 @@ const providerSignals: Record<AIProvider, string> = {
   codex: "Work through Codex in the shared repository workspace.",
   cursor: "Work through Cursor Agent with the repository opened as the active workspace.",
 };
+
+test("selects review, fix, and re-review prompts for configured workflow statuses", () => {
+  const configured: Project = { ...project, availableStatuses: [...TASK_STATUSES], agentWorkflow: DEFAULT_AGENT_WORKFLOW };
+  const expected: Partial<Record<Task["status"], AIPromptMode>> = {
+    READY_FOR_REVIEW: "REVIEW", IN_REVIEW: "REVIEW",
+    FIX_NEEDED: "FIX", FIX_IN_PROGRESS: "FIX", RE_REVIEW: "RE_REVIEW",
+  };
+  for (const status of TASK_STATUSES) {
+    assert.equal(selectAIPromptMode(configured, { ...task, status }), expected[status] ?? "IMPLEMENT", status);
+  }
+});
+
+test("selects prompts by project mapping rather than status names", () => {
+  const configured: Project = { ...project, availableStatuses: [...TASK_STATUSES], agentWorkflow: {
+    ...DEFAULT_AGENT_WORKFLOW, reviewHandoff: "REFINING", reviewStart: "PENDING_DECISION",
+    fixNeeded: "FAILED", fixStart: "BACKLOG", reReview: "APPROVED",
+  } };
+  for (const [status, mode] of Object.entries({ REFINING: "REVIEW", PENDING_DECISION: "REVIEW", FAILED: "FIX", BACKLOG: "FIX", APPROVED: "RE_REVIEW", READY_FOR_REVIEW: "IMPLEMENT", FIX_NEEDED: "IMPLEMENT", RE_REVIEW: "IMPLEMENT" })) {
+    const currentTask = { ...task, status };
+    const selected = selectAIPromptMode(configured, currentTask);
+    assert.equal(selected, mode, status);
+    const prompt = buildAIPrompt({ provider: "codex", mode: selected, project: configured, task: currentTask, phaseNumber: null, contextUrl: "https://taskforge.example", apiBaseUrl: "https://taskforge.example/api" });
+    const heading = { IMPLEMENT: "Implementation", REVIEW: "Review", FIX: "Fix needed", RE_REVIEW: "Re-review" }[selected];
+    assert.ok(prompt.includes(`${heading} mode:`), status);
+  }
+});
+
+test("falls back to implementation for missing workflows and disabled mappings", () => {
+  for (const agentWorkflow of [undefined, null]) {
+    for (const status of TASK_STATUSES) {
+      assert.equal(selectAIPromptMode({ ...project, availableStatuses: [...TASK_STATUSES], agentWorkflow }, { ...task, status }), "IMPLEMENT");
+    }
+  }
+  assert.equal(selectAIPromptMode({ ...project, availableStatuses: ["TODO"], agentWorkflow: DEFAULT_AGENT_WORKFLOW }, { ...task, status: "IN_REVIEW" }), "IMPLEMENT");
+});
 
 test("exposes the three supported provider choices", () => {
   assert.deepEqual(aiProviders.map((provider) => provider.id), ["claude-code", "codex", "cursor"]);
