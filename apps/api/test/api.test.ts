@@ -5,6 +5,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import bcrypt from "bcryptjs";
+import { ApiClient } from "../../smithy/src/api.js";
+import { SmithyRunner } from "../../smithy/src/runner.js";
+import { MemoryJobStore } from "../../smithy/src/store.js";
+import { sign } from "../../smithy/src/security.js";
+import { HEADLESS_PROVIDER_COMMANDS } from "../../smithy/src/config.js";
 
 const testDir = mkdtempSync(path.join(tmpdir(), "taskforge-test-"));
 const mysqlTestUrl = process.env.TEST_DATABASE_URL;
@@ -1301,6 +1306,50 @@ test("structured run interventions are authorized, idempotent, audited, and fenc
   assert.ok(metadata.some((entry) => entry.intervention === "CANCEL"));
   assert.doesNotMatch(JSON.stringify(metadata), /eu-west|do-not-store|tfr_/);
   await db.prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?").run(projectId, agentId);
+});
+
+test("Smithy Codex startup obtains a bodyless run credential through the real API parser", async () => {
+  const key = `SC${randomUUID().slice(0, 5)}`;
+  const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key, name: "Smithy startup" } });
+  assert.equal(createdProject.statusCode, 201, createdProject.body);
+  const id = createdProject.json().project.id;
+  const membership = await app.inject({ method: "POST", url: `/api/projects/${id}/members`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { userId: agentId, role: "MEMBER" } });
+  assert.equal(membership.statusCode, 204, membership.body);
+  const createdTask = await app.inject({ method: "POST", url: `/api/projects/${id}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Codex startup", status: "TODO", assigneeId: agentId } });
+  assert.equal(createdTask.statusCode, 201, createdTask.body);
+  const task = createdTask.json().task;
+  const requests: Array<{ method: string; path: string; status: number; error?: string }> = [];
+  const fetchApi: typeof fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    const response = await app.inject({
+      method: (init.method ?? "GET") as "GET" | "POST" | "PUT",
+      url: url.pathname + url.search,
+      headers: Object.fromEntries(new Headers(init.headers)),
+      ...(init.body == null ? {} : { payload: String(init.body) }),
+    });
+    requests.push({ method: init.method ?? "GET", path: url.pathname, status: response.statusCode, ...(response.statusCode >= 400 ? { error: response.json().error } : {}) });
+    return new Response(response.body, { status: response.statusCode });
+  };
+  const provider = { cmd: HEADLESS_PROVIDER_COMMANDS.codex!, repo: testDir, webhookSecret: randomUUID(), apiToken: createJwt({ id: agentId, kind: "AGENT", role: "MEMBER" }) };
+  const store = new MemoryJobStore();
+  let executions = 0;
+  const runner = new SmithyRunner({ codex: provider }, () => new ApiClient("http://taskforge.test", provider.apiToken, fetchApi, async () => {}), async (command, _prompt, _cwd, _timeout, _onOutput, _signal, env) => {
+    assert.equal(command, HEADLESS_PROVIDER_COMMANDS.codex);
+    assert.ok(env?.TASKFORGE_TOKEN?.startsWith("tfr_"), "provider receives a scoped run credential");
+    executions += 1;
+    return { code: 0, stdout: "", stderr: "" };
+  }, Date.now, store);
+  const event = { id: randomUUID(), event: "task.assigned", task: { id: task.id, number: task.number, projectKey: key } };
+  const body = JSON.stringify(event);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const accepted = await runner.handle("codex", { "x-taskforge-signature": `t=${timestamp},v1=${sign(provider.webhookSecret, timestamp, body)}` }, body);
+  assert.equal(accepted.status, 202, accepted.body);
+  const job = store.accept(event.id, "codex", task.id, body).job;
+  for (let attempt = 0; attempt < 500 && ["PENDING", "RUNNING"].includes(job.status); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(job.status, "SUCCEEDED", JSON.stringify(requests));
+  assert.equal(executions, 1);
+  assert.ok(requests.some((request) => request.method === "POST" && request.path.endsWith("/credential") && request.status === 200));
+  assert.ok(requests.every((request) => request.status < 400), JSON.stringify(requests));
 });
 
 test("Smithy agents receive revocable credentials bound to one run, task, project, and attempt", async () => {
