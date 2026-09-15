@@ -1711,7 +1711,8 @@ test("copy automations validates destination references, preserves independent r
   const assigneeRule = await rule("Source assignee", { actions: [{ field: "assigneeId", valueType: "user", value: agentId }] });
   const actorRule = await rule("Source actor", { actorType: "USER", actorId: agentId });
   const phaseAction = await rule("Phase action", { actions: [{ field: "phaseId", valueType: "static", value: sourcePhase }] });
-  const payload = { destinationProjectId: destination, automationIds: [good.id, phaseRule.id, assigneeRule.id, actorRule.id, phaseAction.id] };
+  const serviceAssignee = await rule("Service assignee", { actions: [{ field: "assigneeId", valueType: "service", value: "agent-api" }] });
+  const payload = { destinationProjectId: destination, automationIds: [good.id, phaseRule.id, assigneeRule.id, actorRule.id, phaseAction.id, serviceAssignee.id] };
   const copy = (src: string, body: typeof payload, auth = memberHeaders) => app.inject({ method: "POST", url: `/api/projects/${src}/automations/copy`, headers: auth, payload: body });
   assert.equal((await app.inject({ method: "POST", url: `/api/projects/${source}/automations/copy`, payload })).statusCode, 401);
   assert.equal((await copy(source, { ...payload, destinationProjectId: foreign })).statusCode, 403);
@@ -1725,7 +1726,7 @@ test("copy automations validates destination references, preserves independent r
   const response = await copy(source, payload);
   assert.equal(response.statusCode, 200, response.body);
   const { copied, failures } = response.json();
-  assert.equal(copied.length, 1);
+  assert.equal(copied.length, 2);
   assert.equal(failures.length, 4);
   assert.match(failures[0].reason, /phase.*destination/);
   assert.match(failures[1].reason, /user.*destination/);
@@ -1737,10 +1738,13 @@ test("copy automations validates destination references, preserves independent r
   assert.equal(clone.enabled, false);
   assert.deepEqual(clone.conditions, good.conditions);
   assert.deepEqual(clone.actions, good.actions);
+  const serviceClone = copied.find((item: { sourceId: string }) => item.sourceId === serviceAssignee.id)?.automation;
+  assert.ok(serviceClone);
+  assert.deepEqual(serviceClone.actions, serviceAssignee.actions);
   await app.inject({ method: "PATCH", url: `/api/automations/${good.id}`, headers, payload: { name: "Source edited", actions: [{ field: "status", valueType: "static", value: "TODO" }] } });
   await app.inject({ method: "DELETE", url: `/api/automations/${good.id}`, headers });
   const saved = await app.inject({ method: "GET", url: `/api/projects/${destination}/automations`, headers });
-  assert.deepEqual(saved.json().automations, [clone]);
+  assert.deepEqual(saved.json().automations, [clone, serviceClone]);
   // A status used only as the previous transition value is still incompatible.
   await db.prepare("UPDATE projects SET available_statuses = ? WHERE id = ?").run(JSON.stringify(["DONE"]), destination);
   const statusRule = await rule("Previous status", { conditions: [{ field: "status", operator: "changed_from_to", fromValue: "TODO", value: "DONE" }] });

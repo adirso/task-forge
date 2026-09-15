@@ -49,7 +49,7 @@ export class AutomationApplicationService {
       if (condition.operator === "changed_from_to" || condition.operator === "changed_to") references.push({ field: condition.field, value: condition.fromValue });
     }
     for (const action of rule.actions) {
-      if (action.valueType === "null") continue;
+      if (action.valueType === "null" || action.valueType === "service") continue;
       if (action.valueType === "actor") {
         if (action.field !== "assigneeId") throw new ValidationError(`Triggering user cannot be used for ${action.field} in the destination project`);
         continue;
