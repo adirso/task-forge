@@ -1744,7 +1744,10 @@ test("copy automations validates destination references, preserves independent r
   await app.inject({ method: "PATCH", url: `/api/automations/${good.id}`, headers, payload: { name: "Source edited", actions: [{ field: "status", valueType: "static", value: "TODO" }] } });
   await app.inject({ method: "DELETE", url: `/api/automations/${good.id}`, headers });
   const saved = await app.inject({ method: "GET", url: `/api/projects/${destination}/automations`, headers });
-  assert.deepEqual(saved.json().automations, [clone, serviceClone]);
+  const savedAutomations = saved.json().automations;
+  assert.deepEqual(savedAutomations.map((item: { id: string }) => item.id).sort(), [clone.id, serviceClone.id].sort());
+  assert.deepEqual(savedAutomations.find((item: { id: string }) => item.id === clone.id), clone);
+  assert.deepEqual(savedAutomations.find((item: { id: string }) => item.id === serviceClone.id), serviceClone);
   // A status used only as the previous transition value is still incompatible.
   await db.prepare("UPDATE projects SET available_statuses = ? WHERE id = ?").run(JSON.stringify(["DONE"]), destination);
   const statusRule = await rule("Previous status", { conditions: [{ field: "status", operator: "changed_from_to", fromValue: "TODO", value: "DONE" }] });
