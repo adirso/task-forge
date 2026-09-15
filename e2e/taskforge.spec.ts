@@ -410,3 +410,27 @@ test.describe("mobile workspace smoke", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });
+
+
+test("workspace browser smoke: create a project from a source", async ({ page }, testInfo) => {
+  await signIn(page);
+  const sourceName = await createProject(page, "Source for project copy", "BRSRC");
+  await page.getByRole("button", { name: "View project members" }).click();
+  await page.getByLabel("Add a person or agent").selectOption({ label: "Maya Chen · Human" });
+  await page.getByRole("button", { name: "Add member" }).click();
+  await expect(page.getByRole("dialog", { name: "Members & agents" }).getByText("Maya Chen", { exact: true })).toBeVisible();
+  await page.getByRole("dialog", { name: "Members & agents" }).getByText("Close", { exact: true }).click();
+  await page.getByRole("button", { name: "Create project", exact: true }).click();
+  await page.getByLabel("Based on project").selectOption({ label: `${sourceName} (BRSRC)` });
+  await page.getByLabel("Project name").fill(sourceName);
+  await page.getByLabel("Key", { exact: true }).fill("BRCPY");
+  await page.getByRole("dialog").getByRole("button", { name: "Create project", exact: true }).click();
+  await expect(page.getByRole("dialog").getByText("Project name is already in use", { exact: true })).toBeVisible();
+  await page.getByLabel("Project name").fill("Browser copied project");
+  await page.screenshot({ path: testInfo.outputPath("project-copy-form.png") });
+  await page.getByRole("dialog").getByRole("button", { name: "Create project", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Browser copied project" })).toBeVisible();
+  await expect(page.getByText("Project created with members, automations, and workflow settings copied", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "View project members" }).click();
+  await expect(page.getByRole("dialog", { name: "Members & agents" }).getByText("Maya Chen", { exact: true })).toBeVisible();
+});

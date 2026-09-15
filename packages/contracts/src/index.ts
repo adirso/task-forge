@@ -355,6 +355,7 @@ export const loginSchema = z.object({
 });
 
 export const projectCreateSchema = z.object({
+  sourceProjectId: z.string().uuid().optional(),
   key: z.string().trim().min(2).max(8).regex(/^[A-Za-z][A-Za-z0-9]*$/).transform((value) => value.toUpperCase()),
   name: z.string().trim().min(2).max(120),
   description: z.string().trim().max(2000).default(""),
@@ -363,7 +364,7 @@ export const projectCreateSchema = z.object({
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default("#6554C0"),
 });
 
-export const projectUpdateSchema = projectCreateSchema.omit({ key: true }).partial().extend({
+export const projectUpdateSchema = projectCreateSchema.omit({ key: true, sourceProjectId: true }).partial().extend({
   availableStatuses: projectAvailableStatusesSchema.optional(),
   defaultStatus: taskStatusSchema.optional(),
   agentWorkflow: agentWorkflowSchema.nullable().optional(),

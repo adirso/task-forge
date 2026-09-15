@@ -3,9 +3,10 @@ import { X } from "lucide-react";
 import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, TASK_STATUSES, type AgentWorkflow, type DependencyResolutionStatus, type Project, type ProjectReviewPolicy, type TaskStatus } from "@taskforge/contracts";
 import { statusMeta } from "../lib/ui";
 
-type ProjectFormInput = { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus; agentWorkflow?: AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[]; mergeTarget?: "main" | "phase"; dependencyResolutionStatuses?: DependencyResolutionStatus[]; reviewPolicy?: ProjectReviewPolicy };
+type ProjectFormInput = { sourceProjectId?: string; key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus; agentWorkflow?: AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[]; mergeTarget?: "main" | "phase"; dependencyResolutionStatuses?: DependencyResolutionStatus[]; reviewPolicy?: ProjectReviewPolicy };
 
-export function ProjectModal({ project, projects = [], onClose, onSave, onEnableWorkflow }: { project?: Project | null; projects?: Project[]; onClose: () => void; onSave: (project: ProjectFormInput) => Promise<void>; onEnableWorkflow?: () => Promise<void> }) {
+export function ProjectModal({ project, projects = [], sourceProjects = projects, onClose, onSave, onEnableWorkflow }: { project?: Project | null; projects?: Project[]; sourceProjects?: Project[]; onClose: () => void; onSave: (project: ProjectFormInput) => Promise<void>; onEnableWorkflow?: () => Promise<void> }) {
+  const [sourceProjectId, setSourceProjectId] = useState("");
   const [name, setName] = useState(project?.name ?? "");
   const [key, setKey] = useState(project?.key ?? "");
   const [keyEdited, setKeyEdited] = useState(false);
@@ -36,7 +37,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    try { await onSave({ name, key, description, repoUrl: repoUrl || null, localRepoPath: localRepoPath.trim() || null, color, ...(project ? { availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget, dependencyResolutionStatuses, reviewPolicy } : {}) }); onClose(); }
+    try { await onSave({ name, key, description, repoUrl: repoUrl || null, localRepoPath: localRepoPath.trim() || null, color, ...(project ? { availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget, dependencyResolutionStatuses, reviewPolicy } : sourceProjectId ? { sourceProjectId } : {}) }); onClose(); }
     catch (err) { setError(err instanceof Error ? err.message : `Could not ${project ? "update" : "create"} project`); }
     finally { setSaving(false); }
   }
@@ -55,6 +56,7 @@ export function ProjectModal({ project, projects = [], onClose, onSave, onEnable
           <p>{project ? "Update the project details shown to your team." : "Use a short key to create readable task IDs, such as WEB-42."}</p>
           <div className={`project-modal-grid${project ? " has-side" : ""}`}>
             <div className="project-modal-main">
+              {!project && <label>Based on project<select value={sourceProjectId} onChange={(event) => setSourceProjectId(event.target.value)}><option value="">Start from scratch</option>{sourceProjects.map((source) => <option key={source.id} value={source.id}>{source.name} ({source.key})</option>)}</select><small>Copy members, roles, automations, and workflow settings. The source owner remains owner. Tasks and history are not copied. Requires source owner or administrator access.</small></label>}
               <div className="project-form-row"><label>Project name<input autoFocus value={name} onChange={(e) => { const nextName = e.target.value; setName(nextName); if (!keyEdited && !project) setKey(suggestedKey(nextName)); }} placeholder="Website launch" required /></label><label>Key<input value={key} onChange={(e) => { setKeyEdited(true); setKey(e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase()); }} placeholder="WEB" minLength={2} maxLength={8} required disabled={Boolean(project)} /></label></div>
               <label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="What is this project trying to achieve?" /></label>
               <label>Repository URL <span className="optional">Optional</span><input type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/your-org/repo" /></label>

@@ -2,7 +2,7 @@ import type { AgentCapabilityProfile, AgentOpsEntry, AgentRoutingRequest, Dashbo
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { ActivityEntity, AgentHandoffEntity, AgentLogEntity, ApiTokenEntity, AttachmentEntity, FindingDisposition, FindingSeverity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
-export type ProjectCreateInput = Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses" | "reviewPolicy">;
+export type ProjectCreateInput = { sourceProjectId?: string } & Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses" | "reviewPolicy">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
 export type TaskCreateInput = TaskInputFields & { tags?: string[]; dependencyIds?: string[] };
 export type TaskUpdateInput = Partial<TaskInputFields> & { tags?: string[]; dependencyIds?: string[]; runId?: string | null };
