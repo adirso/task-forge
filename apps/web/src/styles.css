@@ -894,3 +894,31 @@ html[data-text-size="large"] body { zoom: 1.08; }
 .run-controls .button { min-height: 28px; padding: 5px 8px; font-size: 9px; }
 .run-controls label { display: grid; gap: 2px; color: #6b778c; font-size: 8px; }
 .run-controls select { min-height: 28px; max-width: 150px; border: 1px solid #dfe1e6; border-radius: 5px; background: white; font-size: 9px; }
+
+/* Project modules share the home dashboard canvas and widget controls. */
+.project-dashboard-modular .dashboard-page { min-height: 650px; }
+.project-dashboard-modular .dashboard-canvas { min-height: 600px; }
+.project-dashboard-modular .widget-body { overflow: auto; }
+.project-chart { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.project-chart li > div:first-child { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.project-chart li span { overflow-wrap: anywhere; }
+.project-chart-track { height: 8px; background: #ebecf0; border-radius: 4px; margin-top: 6px; overflow: hidden; }
+.project-chart-track > span { display: block; height: 100%; background: #6554c0; border-radius: inherit; }
+.project-monitor-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; }
+.project-monitor-list li { display: grid; gap: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.project-monitor-list progress { width: 100%; accent-color: #6554c0; }
+.project-attention-group h4 { text-transform: capitalize; margin: 16px 0 8px; }
+.project-attention-group ul { padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
+.project-attention-group li { margin-bottom: 8px; }
+@media (max-width: 700px) {
+  .project-dashboard-modular { padding: 16px 8px; }
+  .project-dashboard-modular .project-dashboard-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .project-dashboard-modular .project-dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .project-dashboard-modular .project-dashboard-metrics article { padding: 12px; }
+  .project-dashboard-modular .dashboard-fab-area { right: 12px; bottom: 12px; }
+  .project-dashboard-modular .widget-picker { max-width: calc(100vw - 24px); }
+}
+
+.dashboard-mobile-list { display: grid; gap: 12px; padding: 14px 12px 120px; }
+.dashboard-mobile-item { min-height: 220px; }
+.project-dashboard-modular .widget-body > p, .project-attention-group p { color: #6b778c; font-size: 12px; line-height: 1.5; }

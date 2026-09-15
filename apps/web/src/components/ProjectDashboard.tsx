@@ -1,31 +1,69 @@
-import type { DeliveryMonitorHealth, Phase, Project, Task } from "@taskforge/contracts";
-import { BarChart3, CheckCircle2, Clock3, XCircle } from "lucide-react";
-import { statusMeta } from "../lib/ui";
-import { api } from "../lib/api";
+import type { Project } from "@taskforge/contracts";
+import { BarChart3 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { api } from "../lib/api";
+import { statusMeta } from "../lib/ui";
+import { useWidgetQuery } from "../lib/widgetQuery";
+import { defaultProjectLayout, loadProjectLayout, PROJECT_MODULES, PROJECT_MODULE_SIZE, projectMetrics, saveProjectLayout, type ProjectModule } from "../lib/projectDashboard";
+import { ModularDashboard } from "./ModularDashboard";
+import { WidgetError } from "./WidgetShell";
 
+const catalog = Object.fromEntries(Object.entries(PROJECT_MODULES).map(([type, module]) => [type, { ...module, ...PROJECT_MODULE_SIZE, icon: <BarChart3 /> }])) as Record<ProjectModule, typeof PROJECT_MODULES[ProjectModule] & typeof PROJECT_MODULE_SIZE & { icon: React.ReactNode }>;
+const statusLabel = (status: string) => statusMeta[status as keyof typeof statusMeta]?.label ?? status;
 function duration(seconds: number) {
   const minutes = Math.max(0, Math.round(seconds / 60));
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-export function ProjectDashboard({ project, tasks, phases }: { project: Project; tasks: Task[]; phases: Phase[] }) {
-  const [monitor, setMonitor] = useState<DeliveryMonitorHealth | null>(null);
-  const [activeLeases, setActiveLeases] = useState<Array<{ runId: string; ownerId: string; expiresAt: string }>>([]);
-  useEffect(() => { let active = true; void api.deliveryMonitorHealth().then((result) => { if (active) { setMonitor(result.monitor); setActiveLeases(result.activeLeases); } }).catch(() => { if (active) { setMonitor(null); setActiveLeases([]); } }); return () => { active = false; }; }, []);
-  const done = tasks.filter((task) => task.status === "DONE").length;
-  const cancelled = tasks.filter((task) => task.status === "CANCELLED").length;
-  const nonDone = tasks.length - done - cancelled;
-  const nonDonePhases = phases.filter((phase) => (phase.nonDoneTaskCount ?? 0) > 0).length;
-  const durations = new Map<string, number>();
-  for (const task of tasks) for (const [status, seconds] of Object.entries(task.statusDurations ?? {})) durations.set(status, (durations.get(status) ?? 0) + seconds);
-  const statuses = [...durations.keys()].sort((a, b) => (durations.get(b) ?? 0) - (durations.get(a) ?? 0));
-  return <div className="project-dashboard">
-    <div className="project-dashboard-heading"><div><span className="modal-kicker">Project overview</span><h2>{project.name} dashboard</h2><p>Delivery health, workflow progress, and time spent across this project.</p></div><BarChart3 /></div>
-    <div className="project-dashboard-metrics"><article><Clock3 /><strong>{nonDone}</strong><span>Non-done tasks</span></article><article><CheckCircle2 /><strong>{done}</strong><span>Completed tasks</span></article><article><XCircle /><strong>{cancelled}</strong><span>Cancelled tasks</span></article><article><BarChart3 /><strong>{nonDonePhases}</strong><span>Non-done phases</span></article></div>
-    <div className="project-dashboard-grid"><section className="project-dashboard-card"><h3>Time by status</h3><p>Aggregate tracked time from task status history.</p>{statuses.length ? <div className="project-dashboard-status-list">{statuses.map((status) => <div key={status}><span>{statusMeta[status as keyof typeof statusMeta]?.label ?? status}</span><strong>{duration(durations.get(status) ?? 0)}</strong></div>)}</div> : <div className="project-dashboard-empty">No duration data yet.</div>}</section><section className="project-dashboard-card"><h3>Phase health</h3><p>Cancelled tasks are excluded from non-done counts.</p><div className="project-dashboard-status-list">{phases.map((phase) => <div key={phase.id}><span>Phase {phase.number}</span><strong>{phase.nonDoneTaskCount ?? 0} open · {phase.cancelledTaskCount ?? 0} cancelled</strong></div>)}</div></section><section className="project-dashboard-card" aria-label="Delivery Monitor health"><h3>Delivery Monitor</h3><p>GitHub synchronization and retry checkpoints.</p>{monitor ? <div className="project-dashboard-status-list"><div><span>State</span><strong>{monitor.status}</strong></div><div><span>Last sweep</span><strong>{monitor.lastSweepAt ? new Date(monitor.lastSweepAt).toLocaleString() : "Not yet run"}</strong></div><div><span>Processed checkpoints (total)</span><strong>{monitor.processedCount}</strong></div><div><span>Active leases</span><strong>{monitor.activeLeaseCount}</strong></div>{activeLeases.map((lease) => <div key={lease.runId}><span>Lease · {lease.ownerId}</span><strong>until {new Date(lease.expiresAt).toLocaleString()}</strong></div>)}{monitor.nextRetryAt && <div><span>Next retry</span><strong>{new Date(monitor.nextRetryAt).toLocaleString()}</strong></div>}{monitor.failures.length > 0 && <div><span>Failed checkpoints</span><strong>{monitor.failures.length}</strong></div>}{monitor.failures.map((failure) => <div key={`${failure.runId}-${failure.taskId}`}><span>{failure.taskId.slice(0, 8)} · {failure.state ?? "unknown"}</span><strong>{failure.errorCategory ?? "Unknown error"}{failure.nextRetryAt ? ` · retry ${new Date(failure.nextRetryAt).toLocaleString()}` : ""}</strong></div>)}</div> : <div className="project-dashboard-empty">Monitor health unavailable.</div>}</section></div>
+export function ProjectBars({ rows, empty, format = String }: { rows: Array<{ label: string; value: number }>; empty: string; format?: (value: number) => string }) {
+  const max = Math.max(0, ...rows.map((row) => row.value));
+  if (!max) return <p className="widget-empty">{empty}</p>;
+  return <ul className="project-chart" aria-label="Chart values">{rows.map((row, index) => <li key={`${row.label}-${index}`}>
+    <div><span>{row.label}</span><strong>{format(row.value)}</strong></div>
+    <div className="project-chart-track" aria-hidden="true"><span style={{ width: `${row.value / max * 100}%` }} /></div>
+  </li>)}</ul>;
+}
+
+function DeliveryWidget({ taskIds }: { taskIds: Set<string> }) {
+  const query = useWidgetQuery(api.deliveryMonitorHealth);
+  if (query.loading) return <p role="status">Loading delivery checkpoints…</p>;
+  if (query.error || !query.data) return <WidgetError message="Could not load delivery checkpoints." onRetry={query.reload} />;
+  const failures = query.data.monitor.failures.filter((failure) => taskIds.has(failure.taskId));
+  return <><p>Failed checkpoints for this project. Service state: {query.data.monitor.status} (global).</p>
+    {failures.length ? <ul className="project-monitor-list">{failures.map((failure) => <li key={`${failure.runId}-${failure.taskId}`}><strong>Task {failure.taskId.slice(0, 8)}</strong><span>{failure.errorCategory ?? "Unknown error"}</span>{failure.nextRetryAt && <span>Retry: {new Date(failure.nextRetryAt).toLocaleString()}</span>}</li>)}</ul> : <p className="widget-empty">No failed delivery checkpoints for this project.</p>}
+  </>;
+}
+
+type Metrics = ReturnType<typeof projectMetrics>;
+export function ProjectModuleContent({ type, metrics, projectKey }: { type: ProjectModule; metrics: Metrics; projectKey: string }) {
+  switch (type) {
+    case "workflow": return <ProjectBars rows={metrics.workflow.map((row) => ({ ...row, label: statusLabel(row.label) }))} empty="No tasks in this project yet." />;
+    case "priority": return <ProjectBars rows={metrics.priority} empty="No open tasks in this project." />;
+    case "workload": return <ProjectBars rows={metrics.workload} empty="No open tasks in this project." />;
+    case "durations": return <><p>Aggregate tracked time from task status history.</p><ProjectBars rows={metrics.durations.map((row) => ({ ...row, label: statusLabel(row.label) }))} format={duration} empty="No duration data yet." /></>;
+    case "phases": return metrics.phases.length ? <ul className="project-monitor-list">{metrics.phases.map((phase) => <li key={phase.id}><strong>Phase {phase.number}{phase.isActive ? " · Active" : ""}</strong><span>{phase.goal}</span><progress aria-label={`Phase ${phase.number} completed tasks`} max={phase.total || 1} value={phase.done} /><span>{phase.done} completed · {phase.open} open · {phase.cancelled} cancelled</span></li>)}</ul> : <p className="widget-empty">No phases in this project yet.</p>;
+    case "attention": return <><p>Open work only. Stale means in progress without an update for 4+ hours. A task can appear in more than one group.</p>{Object.entries(metrics.attention).map(([label, tasks]) => <section className="project-attention-group" key={label}><h4>{label} · {tasks.length}</h4>{tasks.length ? <ul>{tasks.map((task) => <li key={task.id}><strong>{projectKey}-{task.number}</strong> {task.title}</li>)}</ul> : <p>No {label} tasks.</p>}</section>)}</>;
+    case "delivery": return <DeliveryWidget taskIds={new Set(metrics.tasks.map((task) => task.id))} />;
+  }
+}
+
+function ProjectDashboardData({ project }: { project: Project }) {
+  const query = useWidgetQuery(async () => {
+    const [taskData, phaseData] = await Promise.all([api.tasks(project.id), api.phases(project.id)]);
+    return { tasks: taskData.tasks, phases: phaseData.phases };
+  });
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60_000); return () => window.clearInterval(timer); }, []);
+  const metrics = query.data ? projectMetrics(project.id, query.data.tasks, query.data.phases, now) : null;
+  return <div className="project-dashboard project-dashboard-modular">
+    <div className="project-dashboard-heading"><div><span className="modal-kicker">Project overview · {project.key}</span><h2>{project.name} dashboard</h2><p>All tasks in this project, across phases. Open counts exclude completed and cancelled tasks.</p></div><button type="button" className="button button-secondary" disabled={query.loading} onClick={query.reload}>Refresh project data</button></div>
+    {metrics && <div className="project-dashboard-metrics">{[["Open tasks", metrics.open.length], ["Completed tasks", metrics.done], ["Cancelled tasks", metrics.cancelled], ["Open phases", metrics.phases.filter((phase) => phase.open > 0).length]].map(([label, value]) => <article key={label}><BarChart3 /><strong>{value}</strong><span>{label}</span></article>)}</div>}
+    <ModularDashboard catalog={catalog} load={() => loadProjectLayout(project.id)} save={(layout) => saveProjectLayout(project.id, layout)} defaults={defaultProjectLayout}
+      render={(type) => query.loading ? <p role="status">Loading project metrics…</p> : query.error || !metrics ? <WidgetError message="Could not load project metrics." onRetry={query.reload} /> : <ProjectModuleContent type={type} metrics={metrics} projectKey={project.key} />} />
   </div>;
+}
+
+export function ProjectDashboard({ project }: { project: Project }) {
+  // Remount queries and layout together so late responses cannot cross project boundaries.
+  return <ProjectDashboardData key={project.id} project={project} />;
 }

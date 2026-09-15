@@ -5,7 +5,8 @@ import { WIDGET_LABELS } from "../lib/dashboard";
 import { WidgetRefreshContext } from "../lib/widgetQuery";
 
 interface Props {
-  type: WidgetType;
+  type?: WidgetType;
+  title?: string;
   icon: React.ReactNode;
   children: React.ReactNode;
   onClose: () => void;
@@ -20,7 +21,8 @@ export function WidgetError({ message, onRetry }: { message: string; onRetry: ()
   );
 }
 
-export function WidgetShell({ type, icon, children, onClose }: Props) {
+export function WidgetShell({ type, title, icon, children, onClose }: Props) {
+  const label = title ?? (type ? WIDGET_LABELS[type] : "Widget");
   const reloadRef = useRef<(() => void) | null>(null);
   const [canRefresh, setCanRefresh] = useState(false);
 
@@ -34,12 +36,12 @@ export function WidgetShell({ type, icon, children, onClose }: Props) {
       <div className="widget-card">
         <header className="widget-drag-handle">
           <span className="widget-header-icon">{icon}</span>
-          <span className="widget-header-title">{WIDGET_LABELS[type]}</span>
+          <span className="widget-header-title">{label}</span>
           {canRefresh && (
             <button
               type="button"
               className="widget-refresh"
-              aria-label={`Refresh ${WIDGET_LABELS[type]} widget`}
+              aria-label={`Refresh ${label} widget`}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => reloadRef.current?.()}
             >
@@ -49,7 +51,7 @@ export function WidgetShell({ type, icon, children, onClose }: Props) {
           <button
             type="button"
             className="widget-close"
-            aria-label={`Close ${WIDGET_LABELS[type]} widget`}
+            aria-label={`Close ${label} widget`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={onClose}
           >

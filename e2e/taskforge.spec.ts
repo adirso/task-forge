@@ -324,7 +324,7 @@ test.describe("workspace browser smoke", () => {
     expect(forceAttempts).toBe(2);
   });
 
-  test("shows Delivery Monitor health and checkpoint details on the dashboard", async ({ page }) => {
+  test("scopes delivery checkpoint failures to project tasks", async ({ page }) => {
     await page.route("**/api/delivery-monitor/health", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       monitor: { status: "stale", lastSweepAt: "2026-08-28T06:00:00.000Z", activeLeaseCount: 1, processedCount: 7, nextRetryAt: "2026-08-28T06:10:00.000Z", failures: [{ runId: "00000000-0000-4000-8000-000000000801", taskId: "00000000-0000-4000-8000-000000000802", pullRequestUrl: "https://github.com/example/repo/pull/8", retryCount: 2, nextRetryAt: "2026-08-28T06:10:00.000Z", lastObservedAt: "2026-08-28T06:00:00.000Z", state: "OPEN", errorCategory: "RATE_LIMIT" }] },
       activeLeases: [{ runId: "00000000-0000-4000-8000-000000000801", ownerId: "monitor-1", acquiredAt: "2026-08-28T05:59:00.000Z", expiresAt: "2026-08-28T06:02:00.000Z" }],
@@ -332,13 +332,12 @@ test.describe("workspace browser smoke", () => {
     await signIn(page);
     await page.getByRole("button", { name: /TaskForge.*Drag to reorder/ }).click();
     await page.getByRole("button", { name: "Dashboard", exact: true }).click();
-    const card = page.getByRole("region", { name: "Delivery Monitor health" });
+    const card = page.locator(".widget-card").filter({ hasText: "Delivery checkpoints" });
     await expect(card).toBeVisible();
-    await expect(card.getByText("stale", { exact: true })).toBeVisible();
-    await expect(card.getByText("Processed checkpoints (total)", { exact: true })).toBeVisible();
-    await expect(card.getByText("7", { exact: true })).toBeVisible();
-    await expect(card.getByText("monitor-1", { exact: false })).toBeVisible();
-    await expect(card.getByText("RATE_LIMIT", { exact: false })).toBeVisible();
+    await expect(card.getByText(/Service state: stale \(global\)/)).toBeVisible();
+    await expect(card.getByText("No failed delivery checkpoints for this project.")).toBeVisible();
+    await expect(card.getByText("RATE_LIMIT")).toHaveCount(0);
+    await expect(card.getByText("monitor-1")).toHaveCount(0);
   });
 
   test("reviews immutable agent plans before creating their task graph", async ({ page }) => {
