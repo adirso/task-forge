@@ -27,7 +27,7 @@ export class ProjectApplicationService implements ProjectService {
       const source = sourceProjectId ? await projectAccess(r, context, sourceProjectId) : null;
       if (source && context.actor.role !== "ADMIN" && source.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can copy a project");
       if (await r.projects.findByKey(input.key)) throw new ConflictError(`Project key ${input.key} is already in use`);
-      if ((await r.projects.listAccessible(context.actor.userId, true)).some((project) => project.name.trim().toLowerCase() === input.name.trim().toLowerCase())) throw new ConflictError("Project name is already in use");
+      if ((await r.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN")).some((project) => project.name.trim().toLowerCase() === input.name.trim().toLowerCase())) throw new ConflictError("Project name is already in use");
       const now = this.now();
       const project: ProjectEntity = { ...details, sortOrder: await r.projects.allocateSortOrder(), availableStatuses: [...TASK_STATUSES], defaultStatus: "TODO", agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW }, hiddenEmptyStatuses: [...TASK_STATUSES], mergeTarget: "main", dependencyResolutionStatuses: [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES], reviewPolicy: { ...DEFAULT_PROJECT_REVIEW_POLICY, allowedReviewerAgentIds: [] }, id: this.newId(), ownerId: source?.ownerId ?? context.actor.userId, createdAt: now, updatedAt: now };
       if (source) {

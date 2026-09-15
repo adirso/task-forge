@@ -507,6 +507,18 @@ test("duplicate project keys return a conflict instead of an internal error", as
   assert.equal(duplicate.json().error, "Project key API is already in use");
 });
 
+test("project name uniqueness is scoped to projects visible to the caller", async () => {
+  const name = `Hidden project ${randomUUID()}`;
+  const hidden = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `H${Date.now() % 1000000}`, name, description: "", color: "#6554C0" } });
+  assert.equal(hidden.statusCode, 201, hidden.body);
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  const memberToken = memberLogin.json().token as string;
+  const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${memberToken}` }, payload: { key: `M${Date.now() % 1000000}`, name, description: "", color: "#6554C0" } });
+  assert.equal(created.statusCode, 201, created.body);
+  assert.equal((await app.inject({ method: "DELETE", url: `/api/projects/${hidden.json().project.id}`, headers: { authorization: `Bearer ${jwtToken}` } })).statusCode, 204);
+  assert.equal((await app.inject({ method: "DELETE", url: `/api/projects/${created.json().project.id}`, headers: { authorization: `Bearer ${memberToken}` } })).statusCode, 204);
+});
+
 test("project ordering persists and new projects prepend", async () => {
   const second = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "ORD", name: "Ordered project", description: "", color: "#123456" } });
   assert.equal(second.statusCode, 201);
