@@ -390,7 +390,7 @@ export default function App() {
             </div>
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
-          {view === "automations" && <AutomationManager project={currentProject} users={allUsers} phases={phases} />}
+          {view === "automations" && <AutomationManager key={currentProject?.id} project={currentProject} users={allUsers} phases={phases} />}
           {view === "dashboard" && <ProjectDashboard project={currentProject} tasks={tasks} phases={phases} />}
           <section className={`content-area${view === "automations" ? " automations-hidden" : ""}${view === "dashboard" ? " dashboard-hidden" : ""}`}>
             {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AutomationCreate, AutomationUpdate } from "@taskforge/contracts";
+import type { AutomationCopy, AutomationCopyResult, AutomationCreate, AutomationUpdate } from "@taskforge/contracts";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { AutomationEntity, TaskEntity } from "./models.js";
@@ -11,6 +11,62 @@ export class AutomationApplicationService {
   async create(context: ProjectContext, input: AutomationCreate) { return this.unitOfWork.run(async (r) => { const project = await this.authorize(r, context, context.projectId); this.validate(input, project.availableStatuses); const now = this.now(); return r.automations.create({ ...input, id: randomUUID(), projectId: context.projectId, enabled: input.enabled ?? true, trigger: input.trigger ?? "TASK_UPDATED", actorType: input.actorType ?? "ANY", actorId: input.actorId ?? null, service: input.service ?? null, conditions: input.conditions ?? [], createdAt: now, updatedAt: now } as AutomationEntity); }); }
   async update(context: RequestContext, id: string, input: AutomationUpdate) { return this.unitOfWork.run(async (r) => { const current = await r.automations.findById(id); if (!current) throw new NotFoundError("Automation"); const project = await this.authorize(r, context, current.projectId); this.validate({ ...current, ...input }, project.availableStatuses); return r.automations.update(id, input); }); }
   async delete(context: RequestContext, id: string) { return this.unitOfWork.run(async (r) => { const current = await r.automations.findById(id); if (!current) throw new NotFoundError("Automation"); await this.authorize(r, context, current.projectId); await r.automations.delete(id); }); }
+  async copy(context: ProjectContext, input: AutomationCopy): Promise<AutomationCopyResult> {
+    return this.unitOfWork.run(async (r) => {
+      await this.authorize(r, context, context.projectId);
+      const destination = await this.authorize(r, context, input.destinationProjectId);
+      if (destination.id === context.projectId) throw new ValidationError("Choose a different destination project");
+      const rules = await r.automations.listForProject(context.projectId);
+      // Resolve the entire selection within the authorized source before writing anything.
+      const selected = input.automationIds.map((id) => {
+        const rule = rules.find((item) => item.id === id);
+        if (!rule) throw new NotFoundError("Selected automation in source project");
+        return rule;
+      });
+      const result: AutomationCopyResult = { copied: [], failures: [] };
+      for (const rule of selected) {
+        try {
+          this.validate(rule, destination.availableStatuses);
+          await this.validateCopyReferences(r, rule, destination.id);
+        } catch (error) {
+          if (!(error instanceof ValidationError)) throw error;
+          result.failures.push({ sourceId: rule.id, name: rule.name, reason: error.message });
+          continue;
+        }
+        const now = this.now();
+        const automation = await r.automations.create({ ...structuredClone(rule), id: randomUUID(), projectId: destination.id, createdAt: now, updatedAt: now });
+        result.copied.push({ sourceId: rule.id, automation });
+      }
+      return result;
+    });
+  }
+  private async validateCopyReferences(r: RepositorySet, rule: AutomationEntity, projectId: string) {
+    const references: Array<{ field: string; value: string | null | undefined }> = [];
+    if (rule.actorType === "USER") references.push({ field: "assigneeId", value: rule.actorId });
+    for (const condition of rule.conditions) {
+      if (condition.operator === "is_empty" || condition.operator === "is_not_empty") continue;
+      references.push({ field: condition.field, value: condition.value });
+      if (condition.operator === "changed_from_to" || condition.operator === "changed_to") references.push({ field: condition.field, value: condition.fromValue });
+    }
+    for (const action of rule.actions) {
+      if (action.valueType === "null") continue;
+      if (action.valueType === "actor") {
+        if (action.field !== "assigneeId") throw new ValidationError(`Triggering user cannot be used for ${action.field} in the destination project`);
+        continue;
+      }
+      references.push({ field: action.field, value: action.value });
+    }
+    for (const reference of references) {
+      if (!reference.value) continue;
+      if (reference.field === "phaseId") {
+        const phase = await r.phases.findById(reference.value);
+        if (!phase || phase.projectId !== projectId) throw new ValidationError("A referenced phase is not in the destination project. Remove or replace phase references before copying.");
+      }
+      if (reference.field === "assigneeId" && !(await r.memberships.isMember(projectId, reference.value))) {
+        throw new ValidationError("A referenced user is not a member of the destination project. Add the user or change the reference before copying.");
+      }
+    }
+  }
   private async authorize(r: RepositorySet, context: RequestContext, projectId: string) { const project = await r.projects.findById(projectId); if (!project) throw new NotFoundError("Project"); if (context.actor.role !== "ADMIN" && context.actor.userId !== project.ownerId) throw new ForbiddenError("Only project owners can manage automations"); return project; }
   private validate(input: Partial<AutomationCreate>, availableStatuses: TaskEntity["status"][]) { if (!input.actions?.length) throw new ValidationError("Automation must have at least one action"); if (input.actorType === "USER" && !input.actorId) throw new ValidationError("A user actor is required"); if (input.actorType === "SERVICE" && !input.service) throw new ValidationError("A service actor is required"); const invalidTransition = (input.conditions ?? []).find((condition) => condition.operator === "changed_from_to" && !condition.fromValue); if (invalidTransition) throw new ValidationError("A changed_from_to condition requires a previous value"); const configured = [...(input.conditions ?? []), ...(input.actions ?? [])].flatMap((item) => item.field === "status" ? [item.value, "fromValue" in item ? item.fromValue : null] : []).filter((status): status is string => Boolean(status)); const unavailable = configured.find((status) => !availableStatuses.includes(status as TaskEntity["status"])); if (unavailable) throw new ValidationError(`Status ${unavailable} is not available in this project`); }
 }

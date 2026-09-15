@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentArtifact, type AgentCapabilityProfile, type AgentOpsEntry, type AgentPlan, type AgentPlanDecision, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentArtifact, type AgentCapabilityProfile, type AgentOpsEntry, type AgentPlan, type AgentPlanDecision, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCopy, type AutomationCopyResult, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
   id: string; taskId: string; projectId: string; requestedById: string; executedById: string | null; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
@@ -472,6 +472,7 @@ export const api = {
   removeProjectMember: (projectId: string, userId: string) => request<void>(`/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
   phases: (projectId: string) => request<{ phases: Phase[] }>(`/projects/${projectId}/phases`),
   automations: (projectId: string) => request<{ automations: Automation[] }>(`/projects/${projectId}/automations`),
+  copyAutomations: (projectId: string, input: AutomationCopy) => request<AutomationCopyResult>(`/projects/${projectId}/automations/copy`, { method: "POST", body: input }),
   createAutomation: (projectId: string, input: AutomationCreate) => request<{ automation: Automation }>(`/projects/${projectId}/automations`, { method: "POST", body: input }),
   updateAutomation: (id: string, input: AutomationUpdate) => request<{ automation: Automation }>(`/automations/${id}`, { method: "PATCH", body: input }),
   deleteAutomation: (id: string) => request<void>(`/automations/${id}`, { method: "DELETE" }),
