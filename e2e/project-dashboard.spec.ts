@@ -83,7 +83,7 @@ test("workspace browser smoke: home and project layouts remain independent", asy
   await expect(page.getByRole("button", { name: "Close Workflow distribution widget" })).toHaveCount(0);
   await page.getByRole("button", { name: "Create project", exact: true }).click();
   await page.getByLabel("Project name").fill("Dashboard isolation");
-  await page.getByLabel("Key", { exact: true }).fill("DSH");
+  await page.getByLabel("Key", { exact: true }).fill(`D${Date.now() % 1000000}`);
   await page.getByRole("button", { name: "Create project", exact: true }).last().click();
   await page.getByRole("button", { name: "Dashboard", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Dashboard isolation dashboard" })).toBeVisible();

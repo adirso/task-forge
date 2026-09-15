@@ -4,17 +4,12 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { statusMeta } from "../lib/ui";
 import { useWidgetQuery } from "../lib/widgetQuery";
-import { defaultProjectLayout, loadProjectLayout, PROJECT_MODULES, PROJECT_MODULE_SIZE, projectMetrics, saveProjectLayout, type ProjectModule } from "../lib/projectDashboard";
+import { defaultProjectLayout, formatDuration, loadProjectLayout, PROJECT_MODULES, PROJECT_MODULE_SIZE, projectMetrics, saveProjectLayout, type ProjectModule } from "../lib/projectDashboard";
 import { ModularDashboard } from "./ModularDashboard";
 import { WidgetError } from "./WidgetShell";
 
 const catalog = Object.fromEntries(Object.entries(PROJECT_MODULES).map(([type, module]) => [type, { ...module, ...PROJECT_MODULE_SIZE, icon: <BarChart3 /> }])) as Record<ProjectModule, typeof PROJECT_MODULES[ProjectModule] & typeof PROJECT_MODULE_SIZE & { icon: React.ReactNode }>;
 const statusLabel = (status: string) => statusMeta[status as keyof typeof statusMeta]?.label ?? status;
-function duration(seconds: number) {
-  const minutes = Math.max(0, Math.round(seconds / 60));
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
 export function ProjectBars({ rows, empty, format = String }: { rows: Array<{ label: string; value: number }>; empty: string; format?: (value: number) => string }) {
   const max = Math.max(0, ...rows.map((row) => row.value));
   if (!max) return <p className="widget-empty">{empty}</p>;
@@ -40,7 +35,7 @@ export function ProjectModuleContent({ type, metrics, projectKey }: { type: Proj
     case "workflow": return <ProjectBars rows={metrics.workflow.map((row) => ({ ...row, label: statusLabel(row.label) }))} empty="No tasks in this project yet." />;
     case "priority": return <ProjectBars rows={metrics.priority} empty="No open tasks in this project." />;
     case "workload": return <ProjectBars rows={metrics.workload} empty="No open tasks in this project." />;
-    case "durations": return <><p>Aggregate tracked time from task status history.</p><ProjectBars rows={metrics.durations.map((row) => ({ ...row, label: statusLabel(row.label) }))} format={duration} empty="No duration data yet." /></>;
+    case "durations": return <><p>Aggregate tracked time from task status history.</p><ProjectBars rows={metrics.durations.map((row) => ({ ...row, label: statusLabel(row.label) }))} format={formatDuration} empty="No duration data yet." /></>;
     case "phases": return metrics.phases.length ? <ul className="project-monitor-list">{metrics.phases.map((phase) => <li key={phase.id}><strong>Phase {phase.number}{phase.isActive ? " · Active" : ""}</strong><span>{phase.goal}</span><progress aria-label={`Phase ${phase.number} completed tasks`} max={phase.total || 1} value={phase.done} /><span>{phase.done} completed · {phase.open} open · {phase.cancelled} cancelled</span></li>)}</ul> : <p className="widget-empty">No phases in this project yet.</p>;
     case "attention": return <><p>Open work only. Stale means in progress without an update for 4+ hours. A task can appear in more than one group.</p>{Object.entries(metrics.attention).map(([label, tasks]) => <section className="project-attention-group" key={label}><h4>{label} · {tasks.length}</h4>{tasks.length ? <ul>{tasks.map((task) => <li key={task.id}><strong>{projectKey}-{task.number}</strong> {task.title}</li>)}</ul> : <p>No {label} tasks.</p>}</section>)}</>;
     case "delivery": return <DeliveryWidget taskIds={new Set(metrics.tasks.map((task) => task.id))} />;

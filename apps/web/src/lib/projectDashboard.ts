@@ -45,6 +45,13 @@ export function saveProjectLayout(projectId: string, layout: ProjectLayout) {
 }
 
 export const isOpenTask = (task: Task) => task.status !== "DONE" && task.status !== "CANCELLED";
+export function formatDuration(seconds: number) {
+  const minutes = Math.max(0, Math.round(seconds / 60));
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`.replace(/ 0m$/, "");
+}
+function endOfLocalDate(date: string) {
+  return new Date(`${date}T23:59:59.999`).getTime();
+}
 function counts(tasks: Task[], key: (task: Task) => string) {
   const result = new Map<string, number>();
   for (const task of tasks) result.set(key(task), (result.get(key(task)) ?? 0) + 1);
@@ -66,7 +73,7 @@ export function projectMetrics(projectId: string, allTasks: Task[], allPhases: P
     workload: counts(open, (task) => task.assigneeId ?? "unassigned").map(({ label, value }) => ({ label: label === "unassigned" ? "Unassigned" : tasks.find((task) => task.assigneeId === label)?.assignee?.name ?? "Unknown assignee", value })),
     durations: [...durations].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value),
     attention: {
-      overdue: open.filter((task) => task.dueDate && Date.parse(task.dueDate) < now),
+      overdue: open.filter((task) => task.dueDate && endOfLocalDate(task.dueDate) < now),
       blocked: open.filter((task) => task.blockedReason || task.dependencies.some((dependency) => dependency.isBlocking)),
       failed: open.filter((task) => task.status === "FAILED"),
       stale: open.filter((task) => task.status === "IN_PROGRESS" && now - Date.parse(task.updatedAt) >= 4 * 60 * 60 * 1000),

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Task, Phase } from "@taskforge/contracts";
-import { defaultProjectLayout, loadProjectLayout, normalizeProjectLayout, projectMetrics, saveProjectLayout } from "../src/lib/projectDashboard.js";
+import { defaultProjectLayout, formatDuration, loadProjectLayout, normalizeProjectLayout, projectMetrics, saveProjectLayout } from "../src/lib/projectDashboard.js";
 
 const now = Date.parse("2026-09-15T12:00:00Z");
 const task = (overrides: Partial<Task>): Task => ({ id: "task", projectId: "p1", status: "TODO", priority: "MEDIUM", assigneeId: null, dependencies: [], statusDurations: {}, updatedAt: new Date(now).toISOString(), ...overrides } as Task);
@@ -36,6 +36,16 @@ test("attention respects blocking dependencies, invalid dates, and the stale thr
   assert.deepEqual(metrics.attention.failed.map((item) => item.id), ["failed"]);
   assert.equal(metrics.attention.overdue.length, 0);
   assert.equal(metrics.attention.stale.length, 0);
+});
+
+test("does not mark a task overdue before the end of its due date", () => {
+  const metrics = projectMetrics("p1", [task({ id: "today", dueDate: "2026-09-15" }), task({ id: "yesterday", dueDate: "2026-09-14" })], [], now);
+  assert.deepEqual(metrics.attention.overdue.map((item) => item.id), ["yesterday"]);
+});
+
+test("formats whole-hour durations without a zero-minute suffix", () => {
+  assert.equal(formatDuration(7_200), "2h");
+  assert.equal(formatDuration(7_230), "2h 1m");
 });
 
 test("phase counts derive from scoped tasks even when summary counts are absent", () => {
