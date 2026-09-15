@@ -505,6 +505,15 @@ export const automationValueTypeSchema = z.enum(["static", "actor", "user", "ser
 export const automationActionSchema = z.object({ field: automationFieldSchema, valueType: automationValueTypeSchema, value: z.string().nullable().default(null) });
 export const automationCreateSchema = z.object({ name: z.string().trim().min(2).max(120), enabled: z.boolean().default(true), trigger: z.enum(["TASK_CREATED", "TASK_UPDATED"]).default("TASK_UPDATED"), actorType: z.enum(["ANY", "USER", "SERVICE"]).default("ANY"), actorId: z.string().uuid().nullable().optional(), service: z.string().trim().max(80).nullable().optional(), conditions: z.array(automationConditionSchema).max(10).default([]), actions: z.array(automationActionSchema).min(1).max(10) });
 export const automationUpdateSchema = automationCreateSchema.partial();
+export const automationCopySchema = z.object({
+  destinationProjectId: z.string().uuid(),
+  automationIds: z.array(z.string().uuid()).min(1).max(100).refine((ids) => new Set(ids).size === ids.length, "Select each automation only once"),
+});
+export type AutomationCopy = z.infer<typeof automationCopySchema>;
+export interface AutomationCopyResult {
+  copied: Array<{ sourceId: string; automation: Automation }>;
+  failures: Array<{ sourceId: string; name: string; reason: string }>;
+}
 
 export type UserKind = z.infer<typeof userKindSchema>;
 export type UserRole = z.infer<typeof userRoleSchema>;
