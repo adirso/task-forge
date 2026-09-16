@@ -831,6 +831,7 @@ export interface DashboardSummaryProject {
   nonDoneTaskCount: number;
   cancelledTaskCount: number;
   nonDonePhaseCount: number;
+  trackedTimeSeconds: number;
   agentUsage: AgentUsageTotals;
 }
 

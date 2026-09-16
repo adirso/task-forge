@@ -226,6 +226,11 @@ export interface TaskStatusCountEntity {
   count: number;
 }
 
+export interface ProjectTrackedTimeEntity {
+  projectId: string;
+  seconds: number;
+}
+
 export interface ProjectPhaseMetricEntity {
   projectId: string;
   nonDonePhaseCount: number;

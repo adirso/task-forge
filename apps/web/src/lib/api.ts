@@ -210,6 +210,7 @@ function mockDashboardSummary(): DashboardSummary {
       nonDoneTaskCount: mockTasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).length,
       cancelledTaskCount: byStatus("CANCELLED").length,
       nonDonePhaseCount: mockPhases.filter((phase) => mockTasks.some((task) => task.phaseId === phase.id && !["DONE", "CANCELLED"].includes(task.status))).length,
+      trackedTimeSeconds: mockTasks.reduce((sum, task) => sum + Object.values(task.statusDurations ?? {}).reduce((taskSum, seconds) => taskSum + seconds, 0), 0),
       agentUsage: { inputTokens: 18240, outputTokens: 6110, totalTokens: 24350, costMicros: 384000, toolCalls: 47, runtimeMs: 926000, retries: 1, forcedCycles: 0, runCount: 4, eventCount: 5 },
     }],
     myTasks: mockTasks.filter((task) => task.assigneeId === MOCK_USER.id).map(toSummaryTask),

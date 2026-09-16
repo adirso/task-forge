@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultLayout, findNextSlot, loadLayout, normalizeLayout, resetLayout } from "../src/lib/dashboard.js";
+import { defaultLayout, findNextSlot, formatTrackedTime, loadLayout, normalizeLayout, resetLayout } from "../src/lib/dashboard.js";
 
 function installMemoryStorage() {
   const store = new Map<string, string>();
@@ -58,7 +58,7 @@ test("migrates old pixel layouts to the default grid layout", () => {
     ],
   });
   assert.equal(layout.version, 2);
-  assert.deepEqual(layout.widgets.map((widget) => widget.type), ["project_status", "my_tasks", "stuck_tasks", "activity"]);
+  assert.deepEqual(layout.widgets.map((widget) => widget.type), ["project_status", "project_time", "my_tasks", "stuck_tasks", "activity"]);
   assert.ok((layout.widgets[0]?.x ?? 99) < 12);
 });
 
@@ -72,13 +72,19 @@ test("keeps a valid grid layout", () => {
 
 test("default layout includes stuck tasks and activity for everyone", () => {
   const types = defaultLayout(false).widgets.map((widget) => widget.type);
-  assert.deepEqual(types, ["project_status", "my_tasks", "stuck_tasks", "activity"]);
+  assert.deepEqual(types, ["project_status", "project_time", "my_tasks", "stuck_tasks", "activity"]);
   assert.equal(types.includes("agent_ops"), false);
+});
+
+test("formats tracked project time with readable duration units", () => {
+  assert.equal(formatTrackedTime(0), "0m");
+  assert.equal(formatTrackedTime(90 * 60), "1h 30m");
+  assert.equal(formatTrackedTime(26 * 60 * 60), "1d 2h");
 });
 
 test("default layout adds agent ops for admins", () => {
   const types = defaultLayout(true).widgets.map((widget) => widget.type);
-  assert.deepEqual(types, ["project_status", "my_tasks", "stuck_tasks", "activity", "agent_ops"]);
+  assert.deepEqual(types, ["project_status", "project_time", "my_tasks", "stuck_tasks", "activity", "agent_ops"]);
 });
 
 test("does not overwrite a saved custom layout", () => {
