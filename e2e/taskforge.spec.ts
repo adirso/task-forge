@@ -206,14 +206,14 @@ test.describe("workspace browser smoke", () => {
     expect(adminToken).toBeTruthy();
     const suffix = String(Date.now());
     const agentResponse = await request.post("/api/users/agents", { headers: { authorization: `Bearer ${adminToken}` }, data: { name: `Routing agent ${suffix}` } });
-    expect(agentResponse.ok()).toBeTruthy();
+    expect(agentResponse.ok(), `create agent failed: ${agentResponse.status()} ${await agentResponse.text()}`).toBeTruthy();
     const agent = (await agentResponse.json()).user;
     await page.reload();
     await expect(page.getByRole("button", { name: "Create project", exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "Settings" }).first().click();
     await page.getByRole("button", { name: "Agents" }).click();
-    await page.getByRole("button", { name: new RegExp(`Routing agent ${suffix}`) }).click();
+    await page.getByRole("option", { name: new RegExp(`Routing agent ${suffix}`) }).click();
     await expect(page.getByRole("heading", { name: "Identity", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Access", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Routing", exact: true })).toBeVisible();
@@ -235,7 +235,7 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
 
     const projectResponse = await request.post("/api/projects", { headers: { authorization: `Bearer ${adminToken}` }, data: { key: `A${Date.now() % 1000000}`, name: `Routing workspace ${suffix}`, description: "Browser routing coverage", repoUrl: "https://github.com/example/browser-routing", color: "#6554C0" } });
-    expect(projectResponse.ok()).toBeTruthy();
+    expect(projectResponse.ok(), `create project failed: ${projectResponse.status()} ${await projectResponse.text()}`).toBeTruthy();
     const project = (await projectResponse.json()).project;
     expect((await request.post(`/api/projects/${project.id}/members`, { headers: { authorization: `Bearer ${adminToken}` }, data: { userId: agent.id, role: "MEMBER" } })).ok()).toBeTruthy();
     const taskResponse = await request.post(`/api/projects/${project.id}/tasks`, { headers: { authorization: `Bearer ${adminToken}` }, data: { title: "Browser auto-route task", type: "FEATURE" } });

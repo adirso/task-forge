@@ -99,7 +99,10 @@ test("claim repository rechecks source and dependency eligibility in the atomic 
         return {
           async get(...params) {
             queries.push({ operation: "get", sql, params });
+            if (sql.startsWith("SELECT id FROM projects WHERE id = ?")) return { id: "project-1" };
             if (sql.startsWith("SELECT t.id, t.status FROM tasks")) return { id: "task-49", status: "TODO" };
+            if (sql.startsWith("SELECT id FROM tasks WHERE id = ?")) return { id: "task-49" };
+            if (sql.startsWith("SELECT id, status, assignee_id FROM tasks WHERE id = ?")) return { id: "task-49", status: "TODO", assignee_id: null };
             if (sql.startsWith("SELECT * FROM tasks")) return { id: "task-49", project_id: "project-1", number: 49, title: "Ready work", description: "", definition_of_done: "", status: "IN_PROGRESS", priority: "HIGH", type: "BUG", assignee_id: null, creator_id: "owner-1", parent_id: null, branch: null, due_date: null, estimate_points: null, phase_id: null, pull_request_url: null, pull_request_title: null, pull_request_state: null, position: 0, created_at: "2026-08-22T00:00:00.000Z", updated_at: "2026-08-22T01:00:00.000Z" };
             return undefined;
           },
@@ -124,7 +127,11 @@ test("claim repository rechecks source and dependency eligibility in the atomic 
     assert.match(update?.sql ?? "", /NOT EXISTS .*dependency\.status NOT IN \(\?, \?\)/);
     assert.deepEqual(update?.params.slice(0, 2), ["agent-1", "IN_PROGRESS"]);
     assert.deepEqual(update?.params.slice(-2), ["DONE", "CANCELLED"]);
-    if (dialect === "mysql") assert.match(update?.sql ?? "", /id IN \(SELECT claimable\.id FROM \(SELECT eligible\.id.*GROUP BY eligible\.id/);
+    if (dialect === "mysql") {
+      assert.ok(queries.some(({ sql }) => sql.includes("FROM projects WHERE id = ? FOR UPDATE")));
+      assert.ok(queries.some(({ sql }) => sql.includes("FROM tasks WHERE id = ? FOR UPDATE")));
+      assert.match(update?.sql ?? "", /id IN \(SELECT claimable\.id FROM \(SELECT eligible\.id.*GROUP BY eligible\.id/);
+    }
   }
 });
 
