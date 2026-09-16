@@ -18,6 +18,7 @@ import {
 import { WidgetShell } from "./WidgetShell";
 import { ProjectStatusWidget } from "./widgets/ProjectStatusWidget";
 import { ProjectProgressWidget } from "./widgets/ProjectProgressWidget";
+import { ProjectTimeWidget } from "./widgets/ProjectTimeWidget";
 import { MyTasksWidget } from "./widgets/MyTasksWidget";
 import { StuckTasksWidget } from "./widgets/StuckTasksWidget";
 import { ActivityWidget } from "./widgets/ActivityWidget";
@@ -45,6 +46,7 @@ import "react-resizable/css/styles.css";
 const WIDGET_ICONS: Record<WidgetType, React.ReactNode> = {
   project_status: <BarChart2 />,
   project_progress: <TrendingUp />,
+  project_time: <TrendingUp />,
   my_tasks: <CheckSquare />,
   stuck_tasks: <AlertTriangle />,
   activity: <Activity />,
@@ -54,6 +56,7 @@ const WIDGET_ICONS: Record<WidgetType, React.ReactNode> = {
 const ALL_TYPES: WidgetType[] = [
   "project_status",
   "project_progress",
+  "project_time",
   "my_tasks",
   "stuck_tasks",
   "activity",
@@ -73,6 +76,7 @@ function renderWidgetContent(type: WidgetType, currentUser: User) {
   switch (type) {
     case "project_status": return <ProjectStatusWidget />;
     case "project_progress": return <ProjectProgressWidget />;
+    case "project_time": return <ProjectTimeWidget />;
     case "my_tasks": return <MyTasksWidget />;
     case "stuck_tasks": return <StuckTasksWidget />;
     case "activity": return <ActivityWidget />;

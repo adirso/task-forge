@@ -45,6 +45,7 @@ test("dashboard service authorizes projects and assembles reporting responses", 
     reporting: {
       countTasksByProject: async (projectIds: string[]) => { assert.deepEqual(projectIds, ["project-a", "project-b"]); return [{ projectId: "project-a", status: "TODO", count: 2 }]; },
       countNonDonePhasesByProject: async () => [{ projectId: "project-a", nonDonePhaseCount: 1 }],
+      trackedTimeByProject: async () => [{ projectId: "project-a", seconds: 3600 }],
       listMyOpenTasks: async () => [{ id: "mine", number: 2, title: "Mine", projectId: "project-a", projectKey: "A", projectName: "Alpha", status: "TODO", assigneeId: "admin-1", assigneeName: "Admin", updatedAt: "2026-08-22T10:00:00.000Z" }],
       listStuckTasks: async (_projectIds: string[], updatedBefore: string) => { assert.equal(updatedBefore, "2026-08-22T08:00:00.000Z"); return [{ id: "stuck", number: 3, title: "Stuck", projectId: "project-b", projectKey: "B", projectName: "Beta", status: "IN_PROGRESS", assigneeId: "agent-1", assigneeName: "Agent", updatedAt: "2026-08-22T07:00:00.000Z" }]; },
     },
@@ -56,6 +57,7 @@ test("dashboard service authorizes projects and assembles reporting responses", 
   assert.equal(summary.projects[0]?.nonDoneTaskCount, 2);
   assert.equal(summary.projects[0]?.cancelledTaskCount, 0);
   assert.equal(summary.projects[0]?.nonDonePhaseCount, 1);
+  assert.equal(summary.projects[0]?.trackedTimeSeconds, 3600);
   assert.equal(summary.myTasks[0]?.id, "mine");
   assert.equal(summary.stuckTasks[0]?.id, "stuck");
 });

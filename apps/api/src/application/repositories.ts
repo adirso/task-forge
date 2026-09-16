@@ -1,5 +1,5 @@
 import type { AgentArtifactType, AgentBudgetLimits, AgentBudgetScope, AgentUsageReport, AgentUsageTotals, AgentCapabilityProfile } from "@taskforge/contracts";
-import type { ActivityEntity, AgentArtifactEntity, AgentBudgetEntity, AgentContextPackEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentUsageEventEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
+import type { ActivityEntity, AgentArtifactEntity, AgentBudgetEntity, AgentContextPackEntity, AgentCycleGrantEntity, AgentCycleStateEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentRunInterventionEntity, AgentUsageEventEntity, AgentWebhookConfiguration, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, ProjectPhaseMetricEntity, ProjectTrackedTimeEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "./models.js";
 import type { TaskFilters } from "./services.js";
 
 export interface UserRepository {
@@ -207,6 +207,7 @@ export interface TaskFindingRepository {
 export interface ReportingRepository {
   countTasksByProject(projectIds: string[]): Promise<TaskStatusCountEntity[]>;
   countNonDonePhasesByProject(projectIds: string[]): Promise<ProjectPhaseMetricEntity[]>;
+  trackedTimeByProject(projectIds: string[], now: string): Promise<ProjectTrackedTimeEntity[]>;
   listMyOpenTasks(assigneeId: string, limit: number): Promise<ReportingTaskEntity[]>;
   listStuckTasks(projectIds: string[], updatedBefore: string, limit: number): Promise<ReportingTaskEntity[]>;
   listAgentInProgressTasks(agentIds: string[]): Promise<ReportingTaskEntity[]>;

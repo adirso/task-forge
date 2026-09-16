@@ -5,9 +5,19 @@ export const GRID_ROW_HEIGHT = 72;
 export const GRID_MARGIN: [number, number] = [16, 16];
 export const GRID_PADDING: [number, number] = [20, 20];
 
+export function formatTrackedTime(seconds: number): string {
+  const minutes = Math.floor(Math.max(0, seconds) / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  return `${minutes}m`;
+}
+
 export type WidgetType =
   | "project_status"
   | "project_progress"
+  | "project_time"
   | "my_tasks"
   | "stuck_tasks"
   | "activity"
@@ -30,13 +40,14 @@ export interface DashboardLayout {
 export const DEFAULT_WIDGET_SIZE: Record<WidgetType, { w: number; h: number; minW: number; minH: number }> = {
   project_status: { w: 6, h: 4, minW: 3, minH: 2 },
   project_progress: { w: 6, h: 4, minW: 3, minH: 2 },
+  project_time: { w: 6, h: 4, minW: 3, minH: 2 },
   my_tasks: { w: 6, h: 5, minW: 3, minH: 3 },
   stuck_tasks: { w: 6, h: 4, minW: 3, minH: 3 },
   activity: { w: 4, h: 5, minW: 3, minH: 3 },
   agent_ops: { w: 8, h: 4, minW: 4, minH: 3 },
 };
 
-const DEFAULT_TYPES: WidgetType[] = ["project_status", "my_tasks", "stuck_tasks", "activity"];
+const DEFAULT_TYPES: WidgetType[] = ["project_status", "project_time", "my_tasks", "stuck_tasks", "activity"];
 
 export function defaultLayout(isAdmin = false): DashboardLayout {
   const types: WidgetType[] = isAdmin ? [...DEFAULT_TYPES, "agent_ops"] : DEFAULT_TYPES;
@@ -51,6 +62,7 @@ export function defaultLayout(isAdmin = false): DashboardLayout {
 const WIDGET_TYPES = new Set<WidgetType>([
   "project_status",
   "project_progress",
+  "project_time",
   "my_tasks",
   "stuck_tasks",
   "activity",
@@ -147,6 +159,7 @@ export function makeWidgetId(): string {
 export const WIDGET_LABELS: Record<WidgetType, string> = {
   project_status: "Project status",
   project_progress: "Project progress",
+  project_time: "Project time",
   my_tasks: "My tasks",
   stuck_tasks: "Stuck tasks",
   activity: "Recent activity",
@@ -156,6 +169,7 @@ export const WIDGET_LABELS: Record<WidgetType, string> = {
 export const WIDGET_DESCRIPTIONS: Record<WidgetType, string> = {
   project_status: "TODO / IN_PROGRESS / DONE counts per project",
   project_progress: "Completion percentage bars per project",
+  project_time: "All tracked time by project",
   my_tasks: "Open tasks assigned to you across all projects",
   stuck_tasks: "IN_PROGRESS tasks not updated in 4+ hours",
   activity: "Latest events across all your projects",
