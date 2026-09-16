@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, TASK_STATUSES, agentWorkflowSchema, phaseBranchName, projectReviewPolicySchema, type AgentCapabilityProfile } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, TASK_STATUSES, automationCreateSchema, projectUpdateSchema, agentWorkflowSchema, phaseBranchName, projectReviewPolicySchema, type AgentCapabilityProfile } from "@taskforge/contracts";
+import { AutomationApplicationService } from "./automation-service.js";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { PhaseEntity, ProjectEntity, UserEntity } from "./models.js";
@@ -20,7 +21,60 @@ export class ProjectApplicationService implements ProjectService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now: () => string = () => new Date().toISOString(), private readonly newId: () => string = randomUUID) {}
   async list(context: RequestContext) { return this.unitOfWork.run((repositories) => repositories.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN")); }
   async get(context: ProjectContext) { return this.unitOfWork.run(async (repositories) => { const project = await projectAccess(repositories, context, context.projectId); const members = await repositories.memberships.list(context.projectId); return { ...project, members: members.map((member) => ({ ...member, projectRole: member.id === project.ownerId ? "OWNER" as const : "MEMBER" as const })) }; }); }
-  async create(context: RequestContext, input: ProjectCreateInput) { return this.unitOfWork.run(async (repositories) => { if (await repositories.projects.findByKey(input.key)) throw new ConflictError(`Project key ${input.key} is already in use`); const now = this.now(); const project: ProjectEntity = { ...input, sortOrder: await repositories.projects.allocateSortOrder(), availableStatuses: [...TASK_STATUSES], defaultStatus: "TODO", agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW }, hiddenEmptyStatuses: [...TASK_STATUSES], mergeTarget: "main", dependencyResolutionStatuses: [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES], reviewPolicy: { ...DEFAULT_PROJECT_REVIEW_POLICY, allowedReviewerAgentIds: [] }, id: this.newId(), ownerId: context.actor.userId, createdAt: now, updatedAt: now }; await repositories.projects.create(project); await repositories.memberships.add(project.id, context.actor.userId, "OWNER"); await repositories.phases.create({ id: this.newId(), projectId: project.id, number: 1, goal: "Plan and deliver the first project milestone.", isActive: true, createdAt: now, updatedAt: now }); return project; }); }
+  async create(context: RequestContext, input: ProjectCreateInput) {
+    return this.unitOfWork.run(async (r) => {
+      const { sourceProjectId, ...details } = input;
+      const source = sourceProjectId ? await projectAccess(r, context, sourceProjectId) : null;
+      if (source && context.actor.role !== "ADMIN" && source.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can copy a project");
+      if (await r.projects.findByKey(input.key)) throw new ConflictError(`Project key ${input.key} is already in use`);
+      if ((await r.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN")).some((project) => project.name.trim().toLowerCase() === input.name.trim().toLowerCase())) throw new ConflictError("Project name is already in use");
+      const now = this.now();
+      const project: ProjectEntity = { ...details, sortOrder: await r.projects.allocateSortOrder(), availableStatuses: [...TASK_STATUSES], defaultStatus: "TODO", agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW }, hiddenEmptyStatuses: [...TASK_STATUSES], mergeTarget: "main", dependencyResolutionStatuses: [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES], reviewPolicy: { ...DEFAULT_PROJECT_REVIEW_POLICY, allowedReviewerAgentIds: [] }, id: this.newId(), ownerId: source?.ownerId ?? context.actor.userId, createdAt: now, updatedAt: now };
+      if (source) {
+        Object.assign(project, structuredClone({ availableStatuses: source.availableStatuses, defaultStatus: source.defaultStatus, agentWorkflow: source.agentWorkflow, hiddenEmptyStatuses: source.hiddenEmptyStatuses, mergeTarget: source.mergeTarget, dependencyResolutionStatuses: source.dependencyResolutionStatuses, reviewPolicy: source.reviewPolicy }));
+        const parsed = projectUpdateSchema.safeParse(project);
+        if (!parsed.success || !project.availableStatuses.includes(project.defaultStatus) || project.hiddenEmptyStatuses.some((status) => !project.availableStatuses.includes(status)) || (project.agentWorkflow && Object.values(project.agentWorkflow).some((status) => !project.availableStatuses.includes(status)))) throw new ValidationError("Source project has invalid status configuration; fix it before copying");
+      }
+      await r.projects.create(project);
+      const members = source ? await r.memberships.list(source.id) : [];
+      const memberIds = new Set(members.map((member) => member.id));
+      memberIds.add(project.ownerId);
+      memberIds.add(context.actor.userId);
+      for (const userId of memberIds) await r.memberships.add(project.id, userId, userId === project.ownerId ? "OWNER" : "MEMBER");
+      for (const id of project.reviewPolicy.allowedReviewerAgentIds) {
+        if (!memberIds.has(id) || (await r.users.findById(id))?.kind !== "AGENT") throw new ValidationError("Source project has an invalid allowed reviewer");
+      }
+      const phaseId = this.newId();
+      await r.phases.create({ id: phaseId, projectId: project.id, number: 1, goal: "Plan and deliver the first project milestone.", isActive: true, createdAt: now, updatedAt: now });
+      if (source) {
+        const activePhase = await r.phases.findActive(source.id);
+        for (const original of await r.automations.listForProject(source.id)) {
+          const parsed = automationCreateSchema.safeParse(original);
+          if (!parsed.success) throw new ValidationError(`Automation "${original.name}" has invalid configuration`);
+          const rule = parsed.data;
+          if (rule.actorType === "USER" && (!rule.actorId || !memberIds.has(rule.actorId))) throw new ValidationError(`Automation "${rule.name}" references an actor outside the copied members`);
+          for (const item of [...rule.conditions, ...rule.actions]) {
+            if ("valueType" in item && item.field === "phaseId" && !["static", "null"].includes(item.valueType)) throw new ValidationError(`Automation "${rule.name}" must use a fixed phase or clear the phase`);
+            if ("valueType" in item && ["actor", "null"].includes(item.valueType)) continue;
+            for (const key of ["value", "fromValue"] as const) {
+              if (!(key in item)) continue;
+              const reference = key === "value" ? item.value : "fromValue" in item ? item.fromValue : null;
+              if (!reference) continue;
+              if (item.field === "assigneeId" && !("valueType" in item && ["actor", "null"].includes(item.valueType)) && !memberIds.has(reference)) throw new ValidationError(`Automation "${rule.name}" references an assignee outside the copied members`);
+              if (item.field === "phaseId") {
+                if (reference !== activePhase?.id) throw new ValidationError(`Automation "${rule.name}" references a non-active phase; update it before copying`);
+                if (key === "value") item.value = phaseId;
+                else if ("fromValue" in item) item.fromValue = phaseId;
+              }
+            }
+          }
+          // Reuse validation and persistence within this transaction, without nesting transactions.
+          await new AutomationApplicationService({ run: (work) => work(r) }, this.now).create({ ...context, projectId: project.id }, rule);
+        }
+      }
+      return project;
+    });
+  }
   async update(context: ProjectContext, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses" | "reviewPolicy">>) { return this.unitOfWork.run(async (repositories) => {
     const project = await projectAccess(repositories, context, context.projectId);
     let changes = input;

@@ -922,3 +922,9 @@ html[data-text-size="large"] body { zoom: 1.08; }
 .dashboard-mobile-list { display: grid; gap: 12px; padding: 14px 12px 120px; }
 .dashboard-mobile-item { min-height: 220px; }
 .project-dashboard-modular .widget-body > p, .project-attention-group p { color: #6b778c; font-size: 12px; line-height: 1.5; }
+.automation-copy { display: grid; gap: 12px; padding: 16px 0; border-bottom: 1px solid #ebecf0; }
+.automation-copy h4, .automation-copy p { margin: 0; }
+.automation-copy p, .automation-copy li { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.automation-copy label { display: grid; gap: 6px; font-size: 12px; }
+.automation-copy select { width: 100%; min-width: 0; padding: 8px; }
+.automation-list-item > input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }

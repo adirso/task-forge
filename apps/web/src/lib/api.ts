@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentArtifact, type AgentCapabilityProfile, type AgentOpsEntry, type AgentPlan, type AgentPlanDecision, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentArtifact, type AgentCapabilityProfile, type AgentOpsEntry, type AgentPlan, type AgentPlanDecision, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCopy, type AutomationCopyResult, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
   id: string; taskId: string; projectId: string; requestedById: string; executedById: string | null; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
@@ -472,6 +472,7 @@ export const api = {
   removeProjectMember: (projectId: string, userId: string) => request<void>(`/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
   phases: (projectId: string) => request<{ phases: Phase[] }>(`/projects/${projectId}/phases`),
   automations: (projectId: string) => request<{ automations: Automation[] }>(`/projects/${projectId}/automations`),
+  copyAutomations: (projectId: string, input: AutomationCopy) => request<AutomationCopyResult>(`/projects/${projectId}/automations/copy`, { method: "POST", body: input }),
   createAutomation: (projectId: string, input: AutomationCreate) => request<{ automation: Automation }>(`/projects/${projectId}/automations`, { method: "POST", body: input }),
   updateAutomation: (id: string, input: AutomationUpdate) => request<{ automation: Automation }>(`/automations/${id}`, { method: "PATCH", body: input }),
   deleteAutomation: (id: string) => request<void>(`/automations/${id}`, { method: "DELETE" }),
@@ -480,7 +481,7 @@ export const api = {
   deletePhase: (id: string, input?: { taskAction?: "move" | "delete"; targetPhaseId?: string }) => request<void>(`/phases/${id}`, { method: "DELETE", body: input ?? {} }),
   ensurePhaseBranch: (projectId: string, phaseId: string) => request<{ branch: { phaseId: string; branchName: string } }>(`/projects/${projectId}/phases/${phaseId}/branch`, { method: "POST" }),
   mergePhaseToMain: (projectId: string, phaseId: string) => request<{ merge: { phaseId: string; branchName: string; target: "main" } }>(`/projects/${projectId}/phases/${phaseId}/merge-to-main`, { method: "POST" }),
-  createProject: (input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) =>
+  createProject: (input: { sourceProjectId?: string; key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) =>
     request<{ project: Project }>("/projects", { method: "POST", body: input }),
   updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"]; mergeTarget?: Project["mergeTarget"]; dependencyResolutionStatuses?: Project["dependencyResolutionStatuses"]; reviewPolicy?: Project["reviewPolicy"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),

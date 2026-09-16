@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Automation, AutomationAction, AutomationCondition, AutomationCreate, Phase, Project, TaskStatus, User } from "@taskforge/contracts";
+import type { Automation, AutomationCopyResult, AutomationAction, AutomationCondition, AutomationCreate, Phase, Project, TaskStatus, User } from "@taskforge/contracts";
 import { Check, Plus, Save, Trash2, Zap } from "lucide-react";
 import { api } from "../lib/api";
 import { statusMeta, taskTypeMeta } from "../lib/ui";
@@ -25,6 +25,30 @@ const choices: Partial<Record<AutomationCondition["field"], Array<{ value: strin
 
 export function AutomationManager({ project, users, phases = [] }: { project: Project | null; users: User[]; phases?: Phase[] }) {
   const [rules, setRules] = useState<Automation[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [destinations, setDestinations] = useState<Project[]>([]);
+  const [destinationId, setDestinationId] = useState("");
+  const [copying, setCopying] = useState(false);
+  const [copyResult, setCopyResult] = useState<{ destination: string; result: AutomationCopyResult } | null>(null);
+  const [copyError, setCopyError] = useState("");
+  useEffect(() => {
+    let active = true;
+    setSelected([]); setDestinationId(""); setCopyResult(null); setCopyError(""); setDestinations([]);
+    Promise.all([api.projects(), api.me()]).then(([{ projects }, { user }]) => {
+      if (active) setDestinations(projects.filter((item) => item.id !== project?.id && (user.role === "ADMIN" || item.ownerId === user.id)));
+    }).catch(() => { if (active) setCopyError("Could not load destination projects. Reload to try again."); });
+    return () => { active = false; };
+  }, [project?.id]);
+  async function copySelected() {
+    if (!project || !destinationId || !selected.length || copying) return;
+    setCopying(true); setCopyError(""); setCopyResult(null);
+    try {
+      const result = await api.copyAutomations(project.id, { destinationProjectId: destinationId, automationIds: selected });
+      setCopyResult({ destination: destinations.find((item) => item.id === destinationId)?.name ?? "destination project", result });
+      setSelected(result.failures.map((item) => item.sourceId));
+    } catch (err) { setCopyError(err instanceof Error ? err.message : "Could not copy automations"); }
+    finally { setCopying(false); }
+  }
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState(""); const [enabled, setEnabled] = useState(true); const [trigger, setTrigger] = useState<AutomationCreate["trigger"]>("TASK_UPDATED"); const [actorType, setActorType] = useState<AutomationCreate["actorType"]>("ANY"); const [actorId, setActorId] = useState<string | null>(null); const [service, setService] = useState<string | null>(null);
   const [conditions, setConditions] = useState<AutomationCondition[]>([blankCondition()]); const [actions, setActions] = useState<AutomationAction[]>([blankAction(project?.defaultStatus)]); const [error, setError] = useState(""); const [saved, setSaved] = useState(false);
@@ -32,7 +56,7 @@ export function AutomationManager({ project, users, phases = [] }: { project: Pr
   function reset() { setEditing(null); setName(""); setEnabled(true); setTrigger("TASK_UPDATED"); setActorType("ANY"); setActorId(null); setService(null); setConditions([blankCondition()]); setActions([blankAction(project?.defaultStatus)]); }
   function edit(rule: Automation) { setEditing(rule.id); setName(rule.name); setEnabled(rule.enabled); setTrigger(rule.trigger); setActorType(rule.actorType); setActorId(rule.actorId); setService(rule.service); setConditions(rule.conditions); setActions(rule.actions); window.scrollTo({ top: 0, behavior: "smooth" }); }
   async function save() { if (!project) return; setError(""); try { const input = { name, enabled, trigger, actorType, actorId, service, conditions, actions } as AutomationCreate; const result = editing ? await api.updateAutomation(editing, input) : await api.createAutomation(project.id, input); setRules((items) => editing ? items.map((item) => item.id === result.automation.id ? result.automation : item) : [result.automation, ...items]); reset(); setSaved(true); window.setTimeout(() => setSaved(false), 2500); } catch (err) { setError(err instanceof Error ? err.message : "Could not save automation"); } }
-  async function remove(id: string) { if (!window.confirm("Delete this automation?")) return; await api.deleteAutomation(id); setRules((items) => items.filter((item) => item.id !== id)); if (editing === id) reset(); }
+  async function remove(id: string) { if (!window.confirm("Delete this automation?")) return; await api.deleteAutomation(id); setRules((items) => items.filter((item) => item.id !== id)); setSelected((items) => items.filter((item) => item !== id)); if (editing === id) reset(); }
   const updateCondition = (index: number, patch: Partial<AutomationCondition>) => setConditions((items) => items.map((item, i) => i === index ? { ...item, ...patch } : item));
   const updateAction = (index: number, patch: Partial<AutomationAction>) => setActions((items) => items.map((item, i) => i === index ? { ...item, ...patch } : item));
   function valueControl(field: AutomationCondition["field"], value: string | null, onChange: (value: string) => void, placeholder = "Value") {
@@ -72,6 +96,14 @@ export function AutomationManager({ project, users, phases = [] }: { project: Pr
       <button className="automation-add" onClick={() => setConditions((items) => [...items, blankCondition()])}><Plus /> Add condition</button>
       <div className="automation-section-title"><span>Actions</span><small>Apply these changes</small></div>{actions.map((action, index) => <div className="automation-rule-row" key={index}><select value={action.field} onChange={(e) => updateAction(index, { field: e.target.value as AutomationAction["field"], value: "" })}>{fields.map((field) => <option key={field.value} value={field.value}>{field.label}</option>)}</select><select value={action.valueType} onChange={(e) => { const valueType = e.target.value as AutomationAction["valueType"]; updateAction(index, { valueType, value: valueType === "actor" || valueType === "null" ? null : action.value }); }}>{[<option key="static" value="static">Set a value</option>, <option key="actor" value="actor">Changer (triggering user)</option>, <option key="user" value="user">Specific user</option>, <option key="service" value="service">Service value</option>, <option key="null" value="null">Clear the field</option>]}</select>{action.valueType === "static" && valueControl(action.field, action.value, (value) => updateAction(index, { value }))}{action.valueType === "user" && <select value={action.value ?? ""} onChange={(e) => updateAction(index, { value: e.target.value })}><option value="">Choose user</option>{users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select>}{action.valueType === "service" && <select value={action.value ?? ""} onChange={(e) => updateAction(index, { value: e.target.value })}><option value="">Choose service</option>{services.map((service) => <option key={service} value={service}>{service}</option>)}</select>}<button className="automation-remove" onClick={() => setActions((items) => items.filter((_, i) => i !== index))} aria-label="Remove action"><Trash2 /></button></div>)}<button className="automation-add" onClick={() => setActions((items) => [...items, blankAction(project.defaultStatus)])}><Plus /> Add action</button>
       <div className="automation-builder-footer"><label className="automation-enabled"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enabled</label><span /><button className="button button-primary" disabled={!name.trim() || !actions.length} onClick={() => void save()}><Save /> {editing ? "Update rule" : "Create rule"}</button>{editing && <button className="button button-secondary" onClick={reset}>Cancel</button>}</div>
-    </section><aside className="automation-card automation-list-card"><div className="automation-card-heading"><div><span className="eyebrow">Configured rules</span><h3>{rules.length ? `${rules.length} automation${rules.length === 1 ? "" : "s"}` : "No automations yet"}</h3></div></div>{rules.length ? <div className="automation-list">{rules.map((rule) => <article className="automation-list-item" key={rule.id}><span className={`automation-status${rule.enabled ? " on" : ""}`} /><div><strong>{rule.name}</strong><small>{rule.enabled ? "Active" : "Paused"} · {rule.trigger === "TASK_CREATED" ? "On task creation" : "On task update"}</small></div><button className="automation-edit" onClick={() => edit(rule)}>Edit</button><button className="automation-remove" onClick={() => void remove(rule.id)} aria-label={`Delete ${rule.name}`}><Trash2 /></button></article>)}</div> : <div className="automation-empty"><Zap /><strong>Automate the routine work</strong><span>Start with a condition and an action. Rules run whenever a task changes.</span></div>}</aside></div>
+    </section><aside className="automation-card automation-list-card"><div className="automation-card-heading"><div><span className="eyebrow">Configured rules</span><h3>{rules.length ? `${rules.length} automation${rules.length === 1 ? "" : "s"}` : "No automations yet"}</h3></div></div>{rules.length > 0 && <div className="automation-copy">
+      <h4>Copy to another project</h4>
+      <p>Select rules below. Copies retain their enabled state and run independently. Incompatible rules are skipped.</p>
+      <label>Destination project<select value={destinationId} disabled={copying} onChange={(event) => { setDestinationId(event.target.value); setCopyResult(null); }}><option value="">Choose a project</option>{destinations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      {!destinations.length && !copyError && <p>No other projects you can manage are available.</p>}
+      <button className="button button-secondary" disabled={copying || !destinationId || !selected.length} onClick={() => void copySelected()}>{copying ? "Copying…" : `Copy selected (${selected.length})`}</button>
+      {copyError && <p role="alert">{copyError}</p>}
+      {copyResult && <div role="status"><p>Copied {copyResult.result.copied.length} automation(s) to {copyResult.destination}. {copyResult.result.failures.length} failed.</p>{copyResult.result.copied.length > 0 && <ul>{copyResult.result.copied.map((item) => <li key={item.sourceId}>{item.automation.name}: copied</li>)}</ul>}{copyResult.result.failures.length > 0 && <ul>{copyResult.result.failures.map((item) => <li key={item.sourceId}>{item.name}: {item.reason}</li>)}</ul>}</div>}
+    </div>}{rules.length ? <div className="automation-list">{rules.map((rule) => <article className="automation-list-item" key={rule.id}><input type="checkbox" aria-label={`Select ${rule.name} for copying`} disabled={copying} checked={selected.includes(rule.id)} onChange={(event) => setSelected((items) => event.target.checked ? [...items, rule.id] : items.filter((id) => id !== rule.id))} /><span className={`automation-status${rule.enabled ? " on" : ""}`} /><div><strong>{rule.name}</strong><small>{rule.enabled ? "Active" : "Paused"} · {rule.trigger === "TASK_CREATED" ? "On task creation" : "On task update"}</small></div><button className="automation-edit" onClick={() => edit(rule)}>Edit</button><button className="automation-remove" onClick={() => void remove(rule.id)} aria-label={`Delete ${rule.name}`}><Trash2 /></button></article>)}</div> : <div className="automation-empty"><Zap /><strong>Automate the routine work</strong><span>Start with a condition and an action. Rules run whenever a task changes.</span></div>}</aside></div>
   </div>;
 }

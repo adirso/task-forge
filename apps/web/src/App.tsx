@@ -225,8 +225,8 @@ export default function App() {
     if (currentProject) setPhases((await api.phases(currentProject.id)).phases);
     setSelectedTask(null); flash("Task deleted");
   }
-  async function createProject(input: { key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) {
-    const { project } = await api.createProject(input); setProjects((items) => [project, ...items]); setShowSettings(false); await loadProject(project.id); flash("Project created");
+  async function createProject(input: { sourceProjectId?: string; key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) {
+    const { project } = await api.createProject(input); setProjects((items) => [project, ...items]); setShowSettings(false); await loadProject(project.id); flash(input.sourceProjectId ? "Project created with members, automations, and workflow settings copied" : "Project created");
   }
   async function updateProject(input: { name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses: TaskStatus[]; defaultStatus: TaskStatus; agentWorkflow?: import("@taskforge/contracts").AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[]; mergeTarget?: "main" | "phase"; dependencyResolutionStatuses?: import("@taskforge/contracts").DependencyResolutionStatus[]; reviewPolicy?: import("@taskforge/contracts").ProjectReviewPolicy }) {
     if (!currentProject) return;
@@ -390,7 +390,7 @@ export default function App() {
             </div>
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
-          {view === "automations" && <AutomationManager project={currentProject} users={allUsers} phases={phases} />}
+          {view === "automations" && <AutomationManager key={currentProject?.id} project={currentProject} users={allUsers} phases={phases} />}
           {view === "dashboard" && <ProjectDashboard project={currentProject} />}
           <section className={`content-area${view === "automations" ? " automations-hidden" : ""}${view === "dashboard" ? " dashboard-hidden" : ""}`}>
             {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {
@@ -405,7 +405,7 @@ export default function App() {
       </main>
       {phaseMergeDraft && currentProject && <PhaseMergeModal {...phaseMergeDraft} targetBranch="main" onClose={() => setPhaseMergeDraft(null)} onAuthorize={async () => { await api.mergePhaseToMain(currentProject.id, activePhase!.id); flash("Phase merge authorized; GitHub compare opened"); setPhaseMergeDraft(null); }} />}
       {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? currentProject.defaultStatus} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} availableTags={tags} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} onRouted={(routed) => { setTasks((items) => items.map((item) => item.id === routed.id ? routed : item)); setSelectedTask(routed); }} onPlanApplied={refreshTasksAfterPlan} />}
-      {showProjectModal && <ProjectModal projects={projects} onClose={() => setShowProjectModal(false)} onSave={createProject} />}
+      {showProjectModal && <ProjectModal projects={projects} sourceProjects={projects.filter((project) => user.role === "ADMIN" || project.ownerId === user.id)} onClose={() => setShowProjectModal(false)} onSave={createProject} />}
       {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onEnableWorkflow={enableAgentWorkflow} onSave={async ({ name, description, repoUrl, localRepoPath, color, availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget, dependencyResolutionStatuses, reviewPolicy }) => updateProject({ name, description, repoUrl, localRepoPath, color, availableStatuses: availableStatuses!, defaultStatus: defaultStatus!, agentWorkflow, hiddenEmptyStatuses, mergeTarget, dependencyResolutionStatuses, reviewPolicy })} />}
       {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
       {showMembersModal && currentProject && <ProjectMembersModal project={currentProject} users={allUsers} currentUser={user} onClose={() => setShowMembersModal(false)} onChanged={applyProjectMembers} />}
