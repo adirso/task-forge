@@ -36,11 +36,15 @@ export async function userRoutes(app: FastifyInstance) {
     if (isSensitive(request) && request.authUser) {
       const key = `sensitive:${request.ip}:${request.authUser.id}`;
       if (rateLimited(reply, app.securityRateLimiter.check(key))) return;
-      app.securityRateLimiter.failure(key);
     }
   });
   app.addHook("onResponse", async (request, reply) => {
     if (isSensitive(request)) {
+      const key = request.authUser ? `sensitive:${request.ip}:${request.authUser.id}` : null;
+      if (key && reply.statusCode !== 429) {
+        if (reply.statusCode >= 400) app.securityRateLimiter.failure(key);
+        else app.securityRateLimiter.success(key);
+      }
       await recordSecurityAudit({ action: "credential_endpoint", outcome: reply.statusCode === 429 ? "throttled" : reply.statusCode < 400 ? "success" : "failure", ip: request.ip, userId: request.authUser?.id ?? null });
     }
   });

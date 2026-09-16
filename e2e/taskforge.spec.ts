@@ -166,6 +166,39 @@ test.describe("workspace browser smoke", () => {
     await call("DELETE", `/api/projects/${project.id}`, adminToken!);
   });
 
+  test("agents settings groups identity, access, routing, and danger for admins and blocks members", async ({ page, request }) => {
+    await signIn(page, member);
+    await page.getByRole("button", { name: "Settings" }).first().click();
+    await page.getByRole("button", { name: "Agents" }).click();
+    await expect(page.getByText("Administrator access required")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create agent" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Log out" }).click();
+    await page.getByRole("button", { name: "Log out", exact: true }).last().click();
+    await signIn(page);
+    const adminToken = await page.evaluate(() => localStorage.getItem("taskforge_token"));
+    expect(adminToken).toBeTruthy();
+    const suffix = String(Date.now());
+    const agentResponse = await request.post("/api/users/agents", {
+      headers: { authorization: `Bearer ${adminToken}` },
+      data: { name: `Settings agent ${suffix}` },
+    });
+    expect(agentResponse.ok()).toBeTruthy();
+    await page.reload();
+    await page.getByRole("button", { name: "Settings" }).first().click();
+    await page.getByRole("button", { name: "Agents" }).click();
+    await page.getByRole("option", { name: new RegExp(`Settings agent ${suffix}`) }).click();
+    const detail = page.getByLabel(new RegExp(`Settings agent ${suffix} settings`));
+    await expect(detail.getByRole("heading", { name: "Identity" })).toBeVisible();
+    await expect(detail.getByRole("heading", { name: "Access" })).toBeVisible();
+    await expect(detail.getByRole("heading", { name: "Routing" })).toBeVisible();
+    await expect(detail.getByRole("heading", { name: "Danger zone" })).toBeVisible();
+    await expect(detail.getByLabel("Dispatch webhook URL")).toBeVisible();
+    await expect(detail.getByLabel("Issue API token")).toBeVisible();
+    await expect(detail.getByLabel("Routing capabilities")).toBeVisible();
+    await expect(detail.getByRole("button", { name: new RegExp(`Delete Settings agent ${suffix}`) })).toBeVisible();
+  });
+
   test("operators edit capability profiles and auto-route work", async ({ page, request }) => {
     test.setTimeout(60_000);
     await signIn(page);
@@ -173,15 +206,19 @@ test.describe("workspace browser smoke", () => {
     expect(adminToken).toBeTruthy();
     const suffix = String(Date.now());
     const agentResponse = await request.post("/api/users/agents", { headers: { authorization: `Bearer ${adminToken}` }, data: { name: `Routing agent ${suffix}` } });
-    expect(agentResponse.ok()).toBeTruthy();
+    expect(agentResponse.ok(), `create agent failed: ${agentResponse.status()} ${await agentResponse.text()}`).toBeTruthy();
     const agent = (await agentResponse.json()).user;
     await page.reload();
     await expect(page.getByRole("button", { name: "Create project", exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "Settings" }).first().click();
     await page.getByRole("button", { name: "Agents" }).click();
-    await page.getByRole("button", { name: new RegExp(`Routing agent ${suffix}`) }).click();
-    await expect(page.getByText("Routing capabilities", { exact: true })).toBeVisible();
+    await page.getByRole("option", { name: new RegExp(`Routing agent ${suffix}`) }).click();
+    await expect(page.getByRole("heading", { name: "Identity", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Access", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Routing", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Danger zone", exact: true })).toBeVisible();
+    await expect(page.getByLabel("Routing capabilities")).toBeVisible();
     await page.getByLabel("Provider").fill("fake-github");
     await page.getByLabel("Model").fill("deterministic-v1");
     await page.getByLabel("Skills").fill("typescript, browser");
@@ -189,9 +226,27 @@ test.describe("workspace browser smoke", () => {
     await page.getByLabel("Health").selectOption("HEALTHY");
     await page.getByRole("button", { name: "Save capabilities" }).click();
     await expect(page.getByText("Capability profile saved")).toBeVisible();
+    await page.getByLabel("Token name").fill(`Browser token ${suffix}`);
+    await page.getByRole("button", { name: "Issue token" }).click();
+    await expect(page.getByText("Copy this token now")).toBeVisible();
+    await expect(page.getByText("Token issued")).toBeVisible();
+    await expect(page.locator("code").filter({ hasText: /^tf_/ })).toBeVisible();
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:5174" });
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async () => undefined,
+          readText: async () => "",
+        },
+      });
+    });
+    const issuedToken = page.locator(".issued-token").filter({ hasText: "Copy this token now" });
+    await issuedToken.getByRole("button", { name: "Copy", exact: true }).click();
+    await expect(issuedToken.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
 
     const projectResponse = await request.post("/api/projects", { headers: { authorization: `Bearer ${adminToken}` }, data: { key: `A${Date.now() % 1000000}`, name: `Routing workspace ${suffix}`, description: "Browser routing coverage", repoUrl: "https://github.com/example/browser-routing", color: "#6554C0" } });
-    expect(projectResponse.ok()).toBeTruthy();
+    expect(projectResponse.ok(), `create project failed: ${projectResponse.status()} ${await projectResponse.text()}`).toBeTruthy();
     const project = (await projectResponse.json()).project;
     expect((await request.post(`/api/projects/${project.id}/members`, { headers: { authorization: `Bearer ${adminToken}` }, data: { userId: agent.id, role: "MEMBER" } })).ok()).toBeTruthy();
     const taskResponse = await request.post(`/api/projects/${project.id}/tasks`, { headers: { authorization: `Bearer ${adminToken}` }, data: { title: "Browser auto-route task", type: "FEATURE" } });
@@ -324,7 +379,7 @@ test.describe("workspace browser smoke", () => {
     expect(forceAttempts).toBe(2);
   });
 
-  test("shows Delivery Monitor health and checkpoint details on the dashboard", async ({ page }) => {
+  test("scopes delivery checkpoint failures to project tasks", async ({ page }) => {
     await page.route("**/api/delivery-monitor/health", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
       monitor: { status: "stale", lastSweepAt: "2026-08-28T06:00:00.000Z", activeLeaseCount: 1, processedCount: 7, nextRetryAt: "2026-08-28T06:10:00.000Z", failures: [{ runId: "00000000-0000-4000-8000-000000000801", taskId: "00000000-0000-4000-8000-000000000802", pullRequestUrl: "https://github.com/example/repo/pull/8", retryCount: 2, nextRetryAt: "2026-08-28T06:10:00.000Z", lastObservedAt: "2026-08-28T06:00:00.000Z", state: "OPEN", errorCategory: "RATE_LIMIT" }] },
       activeLeases: [{ runId: "00000000-0000-4000-8000-000000000801", ownerId: "monitor-1", acquiredAt: "2026-08-28T05:59:00.000Z", expiresAt: "2026-08-28T06:02:00.000Z" }],
@@ -332,13 +387,12 @@ test.describe("workspace browser smoke", () => {
     await signIn(page);
     await page.getByRole("button", { name: /TaskForge.*Drag to reorder/ }).click();
     await page.getByRole("button", { name: "Dashboard", exact: true }).click();
-    const card = page.getByRole("region", { name: "Delivery Monitor health" });
+    const card = page.locator(".widget-card").filter({ hasText: "Delivery checkpoints" });
     await expect(card).toBeVisible();
-    await expect(card.getByText("stale", { exact: true })).toBeVisible();
-    await expect(card.getByText("Processed checkpoints (total)", { exact: true })).toBeVisible();
-    await expect(card.getByText("7", { exact: true })).toBeVisible();
-    await expect(card.getByText("monitor-1", { exact: false })).toBeVisible();
-    await expect(card.getByText("RATE_LIMIT", { exact: false })).toBeVisible();
+    await expect(card.getByText(/Service state: stale \(global\)/)).toBeVisible();
+    await expect(card.getByText("No failed delivery checkpoints for this project.")).toBeVisible();
+    await expect(card.getByText("RATE_LIMIT")).toHaveCount(0);
+    await expect(card.getByText("monitor-1")).toHaveCount(0);
   });
 
   test("reviews immutable agent plans before creating their task graph", async ({ page }) => {
@@ -409,4 +463,55 @@ test.describe("mobile workspace smoke", () => {
     await editDialog.getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
   });
+});
+
+
+test("workspace browser smoke: create a project from a source", async ({ page }, testInfo) => {
+  await signIn(page);
+  const sourceName = await createProject(page, "Source for project copy", "BRSRC");
+  await page.getByRole("button", { name: "View project members" }).click();
+  await page.getByLabel("Add a person or agent").selectOption({ label: "Maya Chen · Human" });
+  await page.getByRole("button", { name: "Add member" }).click();
+  await expect(page.getByRole("dialog", { name: "Members & agents" }).getByText("Maya Chen", { exact: true })).toBeVisible();
+  await page.getByRole("dialog", { name: "Members & agents" }).getByText("Close", { exact: true }).click();
+  await page.getByRole("button", { name: "Create project", exact: true }).click();
+  await page.getByLabel("Based on project").selectOption({ label: `${sourceName} (BRSRC)` });
+  await page.getByLabel("Project name").fill(sourceName);
+  await page.getByLabel("Key", { exact: true }).fill("BRCPY");
+  await page.getByRole("dialog").getByRole("button", { name: "Create project", exact: true }).click();
+  await expect(page.getByRole("dialog").getByText("Project name is already in use", { exact: true })).toBeVisible();
+  await page.getByLabel("Project name").fill("Browser copied project");
+  await page.screenshot({ path: testInfo.outputPath("project-copy-form.png") });
+  await page.getByRole("dialog").getByRole("button", { name: "Create project", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Browser copied project" })).toBeVisible();
+  await expect(page.getByText("Project created with members, automations, and workflow settings copied", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "View project members" }).click();
+  await expect(page.getByRole("dialog", { name: "Members & agents" }).getByText("Maya Chen", { exact: true })).toBeVisible();
+});
+
+test("workspace browser smoke: copy selected automations and report incompatible rules", async ({ page }, testInfo) => {
+  await signIn(page);
+  const destination = await createProject(page, "Copy destination", "COPYDST");
+  await createProject(page, "Copy source", "COPYSRC");
+  await page.getByRole("button", { name: "Automations", exact: true }).click();
+  await page.getByLabel("Rule name").fill("Portable automation");
+  const rows = page.locator(".automation-rule-row");
+  await rows.nth(0).locator("select").nth(2).selectOption("TODO");
+  await page.getByRole("button", { name: "Create rule" }).click();
+  await expect(page.getByLabel("Select Portable automation for copying")).toBeVisible();
+  await page.getByLabel("Rule name").fill("Source phase automation");
+  await rows.nth(0).locator("select").nth(0).selectOption("phaseId");
+  await rows.nth(0).locator("select").nth(2).selectOption({ index: 1 });
+  await page.getByRole("button", { name: "Create rule" }).click();
+  const copyButton = page.getByRole("button", { name: "Copy selected (0)", exact: true });
+  await expect(copyButton).toBeDisabled();
+  await page.getByLabel("Destination project").selectOption({ label: destination });
+  await page.getByLabel("Select Portable automation for copying").check();
+  await page.getByLabel("Select Source phase automation for copying").check();
+  await page.getByRole("button", { name: "Copy selected (2)", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Copied 1 automation(s) to Copy destination. 1 failed.");
+  await expect(page.getByRole("status")).toContainText("referenced phase is not in the destination project");
+  await expect(page.getByLabel("Select Portable automation for copying")).not.toBeChecked();
+  await expect(page.getByLabel("Select Source phase automation for copying")).toBeChecked();
+  await page.screenshot({ path: testInfo.outputPath("automation-copy.png"), fullPage: true });
 });

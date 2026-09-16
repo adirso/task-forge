@@ -507,16 +507,31 @@ test("duplicate project keys return a conflict instead of an internal error", as
   assert.equal(duplicate.json().error, "Project key API is already in use");
 });
 
+test("project name uniqueness is scoped to projects visible to the caller", async () => {
+  const name = `Hidden project ${randomUUID()}`;
+  const hidden = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `H${Date.now() % 1000000}`, name, description: "", color: "#6554C0" } });
+  assert.equal(hidden.statusCode, 201, hidden.body);
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  const memberToken = memberLogin.json().token as string;
+  const created = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${memberToken}` }, payload: { key: `M${Date.now() % 1000000}`, name, description: "", color: "#6554C0" } });
+  assert.equal(created.statusCode, 201, created.body);
+  assert.equal((await app.inject({ method: "DELETE", url: `/api/projects/${hidden.json().project.id}`, headers: { authorization: `Bearer ${jwtToken}` } })).statusCode, 204);
+  assert.equal((await app.inject({ method: "DELETE", url: `/api/projects/${created.json().project.id}`, headers: { authorization: `Bearer ${memberToken}` } })).statusCode, 204);
+});
+
 test("project ordering persists and new projects prepend", async () => {
   const second = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "ORD", name: "Ordered project", description: "", color: "#123456" } });
   assert.equal(second.statusCode, 201);
   const secondId = second.json().project.id as string;
-  const reorder = await app.inject({ method: "PATCH", url: "/api/projects/order", headers: { authorization: `Bearer ${jwtToken}` }, payload: { projectIds: [secondId, projectId] } });
+  const existing = await app.inject({ method: "GET", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(existing.statusCode, 200, existing.body);
+  const remainingIds = (existing.json().projects as Array<{ id: string }>).map((project) => project.id).filter((id) => id !== secondId);
+  const reorder = await app.inject({ method: "PATCH", url: "/api/projects/order", headers: { authorization: `Bearer ${jwtToken}` }, payload: { projectIds: [secondId, ...remainingIds] } });
   assert.equal(reorder.statusCode, 204, reorder.body);
   const newest = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "NEW", name: "Newest project", description: "", color: "#654321" } });
   assert.equal(newest.statusCode, 201);
   const listed = await app.inject({ method: "GET", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` } });
-  assert.deepEqual(listed.json().projects.slice(0, 3).map((project: { id: string }) => project.id), [newest.json().project.id, secondId, projectId]);
+  assert.deepEqual(listed.json().projects.slice(0, 3).map((project: { id: string }) => project.id), [newest.json().project.id, secondId, remainingIds[0]]);
 });
 
 test("task lifecycle supports assignment and status changes", async () => {
@@ -737,6 +752,7 @@ test("reporting endpoints preserve access, dashboard, and agent operations behav
   assert.ok(projectSummary.counts.total >= 4);
   assert.equal(projectSummary.cancelledTaskCount, projectSummary.counts.CANCELLED);
   assert.equal(projectSummary.nonDoneTaskCount, projectSummary.counts.total - projectSummary.counts.DONE - projectSummary.counts.CANCELLED);
+  assert.ok(projectSummary.trackedTimeSeconds >= 0);
   assert.ok(dashboard.json().myTasks.some((task: { id: string }) => task.id === myTask.json().task.id));
   assert.ok(dashboard.json().stuckTasks.some((task: { id: string }) => task.id === taskId));
 
@@ -1213,6 +1229,20 @@ test("login throttles by account and records redacted audit metadata", async () 
   assert.doesNotMatch(JSON.stringify(audit), /not-the-password/);
 });
 
+test("successful credential endpoint traffic does not trip the sensitive rate limiter", async () => {
+  const created = await app.inject({ method: "POST", url: "/api/users/agents", headers: { authorization: `Bearer ${jwtToken}`, "x-forwarded-for": "198.51.100.77" }, payload: { name: `Limiter agent ${randomUUID().slice(0, 8)}` } });
+  assert.equal(created.statusCode, 201, created.body);
+  const limiterAgentId = created.json().user.id as string;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const listed = await app.inject({ method: "GET", url: `/api/users/${limiterAgentId}/tokens`, headers: { authorization: `Bearer ${jwtToken}`, "x-forwarded-for": "198.51.100.77" } });
+    assert.equal(listed.statusCode, 200, listed.body);
+  }
+  const stillAllowed = await app.inject({ method: "POST", url: "/api/users/agents", headers: { authorization: `Bearer ${jwtToken}`, "x-forwarded-for": "198.51.100.77" }, payload: { name: `Limiter follow-up ${randomUUID().slice(0, 8)}` } });
+  assert.equal(stillAllowed.statusCode, 201, stillAllowed.body);
+  await app.inject({ method: "DELETE", url: `/api/users/${limiterAgentId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  await app.inject({ method: "DELETE", url: `/api/users/${stillAllowed.json().user.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
+});
+
 test("agent logs are paginated, ordered, redacted, and idempotent", async () => {
   const first = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/agent-logs`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { provider: "codex", stream: "stdout", category: "output", sequence: 1, eventId: "api-log-event-1", content: "first password=secret-one" } });
   assert.equal(first.statusCode, 201, first.body);
@@ -1686,4 +1716,170 @@ test("agent plans are versioned, reviewable, acyclic, and idempotently create ex
   assert.equal(audits.filter((audit) => audit.action === "agent_plan.proposed").length, 3);
   assert.equal(audits.filter((audit) => audit.action === "agent_plan.approved").length, 1);
   assert.equal(audits.filter((audit) => audit.action === "agent_plan.rejected").length, 2);
+});
+
+test("project copies preserve roles and workflow, remap automations, and leave source tasks untouched", async () => {
+  const ownerHeaders = { authorization: `Bearer ${createJwt({ id: memberId, kind: "HUMAN", role: "MEMBER" })}` };
+  const adminHeaders = { authorization: `Bearer ${jwtToken}` };
+  const sourceResponse = await app.inject({ method: "POST", url: "/api/projects", headers: ownerHeaders, payload: { key: "CPYSRC", name: "Copy source" } });
+  assert.equal(sourceResponse.statusCode, 201, sourceResponse.body);
+  const source = sourceResponse.json().project;
+  await app.inject({ method: "POST", url: `/api/projects/${source.id}/members`, headers: ownerHeaders, payload: { userId: agentId, role: "MEMBER" } });
+  const workflowResponse = await app.inject({ method: "PATCH", url: `/api/projects/${source.id}`, headers: ownerHeaders, payload: { availableStatuses: ["TODO", "IN_PROGRESS", "DONE"], defaultStatus: "IN_PROGRESS", agentWorkflow: null, hiddenEmptyStatuses: ["DONE"] } });
+  assert.equal(workflowResponse.statusCode, 200, workflowResponse.body);
+  const phases = await app.inject({ method: "GET", url: `/api/projects/${source.id}/phases`, headers: ownerHeaders });
+  const sourcePhaseId = phases.json().phases[0].id;
+  const taskResponse = await app.inject({ method: "POST", url: `/api/projects/${source.id}/tasks`, headers: ownerHeaders, payload: { title: "Keep source task", phaseId: sourcePhaseId } });
+  assert.equal(taskResponse.statusCode, 201, taskResponse.body);
+  const ruleResponse = await app.inject({ method: "POST", url: `/api/projects/${source.id}/automations`, headers: ownerHeaders, payload: { name: "Assign copied member", actorType: "USER", actorId: agentId, conditions: [{ field: "status", operator: "changed_from_to", fromValue: "TODO", value: "IN_PROGRESS" }, { field: "phaseId", operator: "equals", value: sourcePhaseId }], actions: [{ field: "assigneeId", valueType: "user", value: agentId }, { field: "phaseId", valueType: "static", value: sourcePhaseId }] } });
+  assert.equal(ruleResponse.statusCode, 201, ruleResponse.body);
+  const originalRule = ruleResponse.json().automation;
+  const sourceBefore = (await app.inject({ method: "GET", url: `/api/projects/${source.id}`, headers: ownerHeaders })).json().project;
+  for (const [headers, key, name] of [[ownerHeaders, "CPYOWN", "Owner copy"], [adminHeaders, "CPYADM", "Administrator copy"]] as const) {
+    const response = await app.inject({ method: "POST", url: "/api/projects", headers, payload: { key, name, sourceProjectId: source.id } });
+    assert.equal(response.statusCode, 201, response.body);
+    const copy = response.json().project;
+    assert.equal(copy.ownerId, memberId);
+    assert.deepEqual(copy.availableStatuses, sourceBefore.availableStatuses);
+    assert.equal(copy.defaultStatus, "IN_PROGRESS");
+    assert.equal(copy.agentWorkflow, null);
+    const members = (await app.inject({ method: "GET", url: `/api/projects/${copy.id}`, headers })).json().project.members;
+    assert.equal(members.find((m: { id: string }) => m.id === memberId).projectRole, "OWNER");
+    assert.equal(members.find((m: { id: string }) => m.id === agentId).projectRole, "MEMBER");
+    const rules = (await app.inject({ method: "GET", url: `/api/projects/${copy.id}/automations`, headers })).json().automations;
+    assert.equal(rules.length, 1);
+    assert.notEqual(rules[0].id, originalRule.id);
+    assert.equal(rules[0].projectId, copy.id);
+    assert.equal(rules[0].actions[0].value, agentId);
+    const copyPhase = (await app.inject({ method: "GET", url: `/api/projects/${copy.id}/phases`, headers })).json().phases[0];
+    assert.equal(rules[0].conditions[1].value, copyPhase.id);
+    assert.equal(rules[0].actions[1].value, copyPhase.id);
+    assert.equal(Number((await db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id = ?").get(copy.id))?.count), 0);
+    await app.inject({ method: "PATCH", url: `/api/automations/${rules[0].id}`, headers, payload: { name: "Independent edit" } });
+    assert.deepEqual((await app.inject({ method: "GET", url: `/api/projects/${source.id}/automations`, headers: ownerHeaders })).json().automations[0], originalRule);
+  }
+  assert.deepEqual((await app.inject({ method: "GET", url: `/api/projects/${source.id}`, headers: ownerHeaders })).json().project, sourceBefore);
+  assert.ok(await db.prepare("SELECT id FROM tasks WHERE id = ?").get(taskResponse.json().task.id));
+
+  const forbidden = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${createJwt({ id: agentId, kind: "AGENT", role: "MEMBER" })}` }, payload: { key: "CPYNO", name: "Forbidden copy", sourceProjectId: source.id } });
+  assert.equal(forbidden.statusCode, 403);
+  const missing = await app.inject({ method: "POST", url: "/api/projects", headers: ownerHeaders, payload: { key: "CPYMISS", name: "Missing source", sourceProjectId: randomUUID() } });
+  assert.equal(missing.statusCode, 404);
+  for (const payload of [{ key: "CPYOWN", name: "Different name" }, { key: "CPYDUP", name: "  owner COPY  " }]) {
+    const duplicate = await app.inject({ method: "POST", url: "/api/projects", headers: ownerHeaders, payload: { ...payload, sourceProjectId: source.id } });
+    assert.equal(duplicate.statusCode, 409, duplicate.body);
+  }
+  // Fail after project, memberships, phase, and the first automation have been inserted.
+  const bad = await app.inject({ method: "POST", url: `/api/projects/${source.id}/automations`, headers: ownerHeaders, payload: { name: "Invalid phase reference", actions: [{ field: "phaseId", valueType: "static", value: randomUUID() }] } });
+  assert.equal(bad.statusCode, 201);
+  await db.prepare("UPDATE automations SET created_at = ? WHERE id = ?").run("2000-01-01T00:00:00.000Z", bad.json().automation.id);
+  const tables = ["projects", "project_members", "phases", "automations", "tasks", "task_status_history"];
+  const counts = async () => Promise.all(tables.map(async (table) => Number((await db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get())?.count)));
+  const beforeFailure = await counts();
+  const failed = await app.inject({ method: "POST", url: "/api/projects", headers: ownerHeaders, payload: { key: "CPYFAIL", name: "Failed copy", sourceProjectId: source.id } });
+  assert.equal(failed.statusCode, 400, failed.body);
+  assert.match(failed.json().error, /phase/i);
+  assert.equal(await db.prepare("SELECT id FROM projects WHERE `key` = ?").get("CPYFAIL"), undefined);
+  assert.deepEqual(await counts(), beforeFailure);
+  for (const [conditions, actions, message] of [
+    [[], [{ field: "assigneeId", valueType: "user", value: randomUUID() }], /assignee/],
+    [[{ field: "status", operator: "changed_from_to", fromValue: "BACKLOG", value: "TODO" }], [{ field: "status", valueType: "static", value: "DONE" }], /BACKLOG/],
+    [[], [{ field: "phaseId", valueType: "actor", value: null }], /fixed phase/],
+  ] as const) {
+    await db.prepare("UPDATE automations SET conditions = ?, actions = ? WHERE id = ?").run(JSON.stringify(conditions), JSON.stringify(actions), bad.json().automation.id);
+    const rejected = await app.inject({ method: "POST", url: "/api/projects", headers: ownerHeaders, payload: { key: "CPYFAIL", name: "Failed copy", sourceProjectId: source.id } });
+    assert.equal(rejected.statusCode, 400, rejected.body);
+    assert.match(rejected.json().error, message);
+    assert.deepEqual(await counts(), beforeFailure);
+  }
+});
+
+
+test("project copying requires authentication and source access, and rejects invalid source workflow", async () => {
+  const ownerHeaders = { authorization: `Bearer ${createJwt({ id: memberId, kind: "HUMAN", role: "MEMBER" })}` };
+  const sourceResponse = await app.inject({ method: "POST", url: "/api/projects", headers: ownerHeaders, payload: { key: "CPYSEC", name: "Private copy source" } });
+  assert.equal(sourceResponse.statusCode, 201, sourceResponse.body);
+  const source = sourceResponse.json().project;
+  const payload = { key: "CPYSAFE", name: "Authorized copy only", sourceProjectId: source.id };
+  const anonymous = await app.inject({ method: "POST", url: "/api/projects", payload });
+  assert.equal(anonymous.statusCode, 401);
+  const outsider = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${createJwt({ id: agentId, kind: "AGENT", role: "MEMBER" })}` }, payload });
+  assert.equal(outsider.statusCode, 403);
+  await db.prepare("UPDATE projects SET available_statuses = ? WHERE id = ?").run(JSON.stringify(["TODO", "DONE"]), source.id);
+  const invalid = await app.inject({ method: "POST", url: "/api/projects", headers: ownerHeaders, payload });
+  assert.equal(invalid.statusCode, 400, invalid.body);
+  assert.match(invalid.json().error, /status configuration/);
+  assert.equal(await db.prepare("SELECT id FROM projects WHERE `key` = ?").get(payload.key), undefined);
+});
+
+test("copy automations validates destination references, preserves independent records, and checks both owners", async () => {
+  const headers = { authorization: `Bearer ${jwtToken}` };
+  const memberHeaders = { authorization: `Bearer ${createJwt({ id: memberId, kind: "HUMAN", role: "MEMBER", name: "Member" })}` };
+  async function project(key: string, auth = headers) {
+    const response = await app.inject({ method: "POST", url: "/api/projects", headers: auth, payload: { key, name: key, availableStatuses: ["TODO", "DONE"], defaultStatus: "TODO" } });
+    assert.equal(response.statusCode, 201, response.body);
+    return response.json().project.id as string;
+  }
+  const source = await project("ACRSRC", memberHeaders);
+  const destination = await project("ACRDST", memberHeaders);
+  const foreign = await project("ACROTHER");
+  const phaseResponse = await app.inject({ method: "GET", url: `/api/projects/${source}/phases`, headers });
+  const sourcePhase = phaseResponse.json().phases[0].id;
+  async function rule(name: string, extra: Record<string, unknown> = {}) {
+    const response = await app.inject({ method: "POST", url: `/api/projects/${source}/automations`, headers, payload: { name, enabled: false, actions: [{ field: "status", valueType: "static", value: "DONE" }], ...extra } });
+    assert.equal(response.statusCode, 201, response.body);
+    return response.json().automation;
+  }
+  const good = await rule("Portable rule", { conditions: [{ field: "status", operator: "changed_from_to", fromValue: "TODO", value: "DONE" }] });
+  const phaseRule = await rule("Source phase", { conditions: [{ field: "phaseId", operator: "changed_from_to", fromValue: sourcePhase, value: null }] });
+  const assigneeRule = await rule("Source assignee", { actions: [{ field: "assigneeId", valueType: "user", value: agentId }] });
+  const actorRule = await rule("Source actor", { actorType: "USER", actorId: agentId });
+  const phaseAction = await rule("Phase action", { actions: [{ field: "phaseId", valueType: "static", value: sourcePhase }] });
+  const serviceAssignee = await rule("Service assignee", { actions: [{ field: "assigneeId", valueType: "service", value: "agent-api" }] });
+  const payload = { destinationProjectId: destination, automationIds: [good.id, phaseRule.id, assigneeRule.id, actorRule.id, phaseAction.id, serviceAssignee.id] };
+  const copy = (src: string, body: typeof payload, auth = memberHeaders) => app.inject({ method: "POST", url: `/api/projects/${src}/automations/copy`, headers: auth, payload: body });
+  assert.equal((await app.inject({ method: "POST", url: `/api/projects/${source}/automations/copy`, payload })).statusCode, 401);
+  assert.equal((await copy(source, { ...payload, destinationProjectId: foreign })).statusCode, 403);
+  assert.equal((await copy(foreign, payload)).statusCode, 403);
+  assert.equal((await copy(source, { ...payload, automationIds: [good.id, randomUUID()] })).statusCode, 404);
+  assert.equal((await copy(source, { ...payload, automationIds: [] })).statusCode, 400);
+  assert.equal((await copy(source, { ...payload, automationIds: [good.id, good.id] })).statusCode, 400);
+  assert.equal((await copy(source, { ...payload, destinationProjectId: source })).statusCode, 400);
+  const before = await app.inject({ method: "GET", url: `/api/projects/${destination}/automations`, headers });
+  assert.deepEqual(before.json().automations, []);
+  const response = await copy(source, payload);
+  assert.equal(response.statusCode, 200, response.body);
+  const { copied, failures } = response.json();
+  assert.equal(copied.length, 2);
+  assert.equal(failures.length, 4);
+  assert.match(failures[0].reason, /phase.*destination/);
+  assert.match(failures[1].reason, /user.*destination/);
+  assert.match(failures[2].reason, /user.*destination/);
+  assert.match(failures[3].reason, /phase.*destination/);
+  const clone = copied[0].automation;
+  assert.notEqual(clone.id, good.id);
+  assert.equal(clone.projectId, destination);
+  assert.equal(clone.enabled, false);
+  assert.deepEqual(clone.conditions, good.conditions);
+  assert.deepEqual(clone.actions, good.actions);
+  const serviceClone = copied.find((item: { sourceId: string }) => item.sourceId === serviceAssignee.id)?.automation;
+  assert.ok(serviceClone);
+  assert.deepEqual(serviceClone.actions, serviceAssignee.actions);
+  await app.inject({ method: "PATCH", url: `/api/automations/${good.id}`, headers, payload: { name: "Source edited", actions: [{ field: "status", valueType: "static", value: "TODO" }] } });
+  await app.inject({ method: "DELETE", url: `/api/automations/${good.id}`, headers });
+  const saved = await app.inject({ method: "GET", url: `/api/projects/${destination}/automations`, headers });
+  const savedAutomations = saved.json().automations;
+  assert.deepEqual(savedAutomations.map((item: { id: string }) => item.id).sort(), [clone.id, serviceClone.id].sort());
+  assert.deepEqual(savedAutomations.find((item: { id: string }) => item.id === clone.id), clone);
+  assert.deepEqual(savedAutomations.find((item: { id: string }) => item.id === serviceClone.id), serviceClone);
+  // A status used only as the previous transition value is still incompatible.
+  await db.prepare("UPDATE projects SET available_statuses = ? WHERE id = ?").run(JSON.stringify(["DONE"]), destination);
+  const statusRule = await rule("Previous status", { conditions: [{ field: "status", operator: "changed_from_to", fromValue: "TODO", value: "DONE" }] });
+  const incompatible = await copy(source, { destinationProjectId: destination, automationIds: [statusRule.id] });
+  assert.equal(incompatible.statusCode, 200, incompatible.body);
+  assert.equal(incompatible.json().copied.length, 0);
+  assert.match(incompatible.json().failures[0].reason, /Status TODO/);
+  const adminCopy = await copy(source, { destinationProjectId: foreign, automationIds: [statusRule.id] }, headers);
+  assert.equal(adminCopy.statusCode, 200, adminCopy.body);
+  assert.equal(adminCopy.json().copied.length, 1);
 });

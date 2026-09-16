@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, DEFAULT_PROJECT_STATUSES, TASK_STATUSES, agentBudgetLimitsSchema, agentCapabilityProfileSchema, agentWorkflowSchema, dependencyResolutionStatusesSchema, projectReviewPolicySchema, type AgentArtifactMetadata, type AgentArtifactType, type AgentUsageBreakdown, type AgentUsageReport, type AgentUsageTotals, type TaskStatus } from "@taskforge/contracts";
-import type { ActivityEntity, AgentArtifactEntity, AgentBudgetEntity, AgentContextPackEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentUsageEventEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
+import type { ActivityEntity, AgentArtifactEntity, AgentBudgetEntity, AgentContextPackEntity, AgentHandoffEntity, AgentLastActiveEntity, AgentLogEntity, AgentPlanEntity, AgentRunCredentialEntity, AgentRunEntity, AgentUsageEventEntity, ApiTokenEntity, AttachmentEntity, AutomationEntity, DeliveryMonitorHealthEntity, NotificationEntity, PageRequest, PhaseEntity, ProjectEntity, ProjectTrackedTimeEntity, ReportingTaskEntity, TaskDependencyEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskStatusCountEntity, TaskTagEntity, TaskUpdateEntity, UserEntity, WebhookDeliveryEntity } from "../application/models.js";
 import type { AgentArtifactRepository, AgentBudgetRepository, AgentContextPackRepository, AgentHandoffRepository, AgentLogRepository, AgentPlanRepository, AgentRunRepository, AgentUsageRepository, ApiTokenRepository, AttachmentRepository, ActivityRepository, AutomationRepository, DeliveryMonitorRepository, MembershipRepository, NotificationRepository, PhaseRepository, ProjectRepository, ReportingRepository, RepositorySet, SearchRepository, TaskDependencyRepository, TaskFindingRepository, TaskGateRepository, TaskRepository, TaskTagRepository, TaskUpdateRepository, UserRepository, WebhookDeliveryRepository } from "../application/repositories.js";
 import type { TaskFilters } from "../application/services.js";
 import { decodeCursor, toPage } from "./pagination.js";
@@ -344,6 +344,7 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
     async hasIncompleteByPhase(phaseId) { return Boolean(await db.prepare("SELECT 1 FROM tasks WHERE phase_id = ? AND status NOT IN ('DONE','CANCELLED') LIMIT 1").get(phaseId)); },
     async claimNext(projectId, claimantId, workflow, options = {}) {
       if (!workflow.sourceStatuses.length || !workflow.dependencyResolutionStatuses.length) return null;
+      if (db.dialect === "mysql") await db.prepare("SELECT id FROM projects WHERE id = ? FOR UPDATE").get(projectId);
       const sourcePlaceholders = workflow.sourceStatuses.map(() => "?").join(", ");
       const resolutionPlaceholders = workflow.dependencyResolutionStatuses.map(() => "?").join(", ");
       const where = ["t.project_id = ?", `t.status IN (${sourcePlaceholders})`, "t.assignee_id IS NULL", `NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dependency ON dependency.id = td.depends_on_task_id WHERE td.task_id = t.id AND dependency.status NOT IN (${resolutionPlaceholders}))`];
@@ -354,6 +355,11 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       const orderExpr = "CASE t.priority WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, t.position";
       const candidate = await db.prepare(`SELECT t.id, t.status FROM tasks t WHERE ${where.join(" AND ")} ORDER BY ${orderExpr} LIMIT 1`).get(...params);
       if (!candidate) return null;
+      if (db.dialect === "mysql") {
+        await db.prepare("SELECT id FROM tasks WHERE id = ? FOR UPDATE").get(candidate.id);
+        const locked = await db.prepare("SELECT id, status, assignee_id FROM tasks WHERE id = ?").get(candidate.id);
+        if (!locked || locked.assignee_id || !workflow.sourceStatuses.includes(String(locked.status) as TaskStatus)) return null;
+      }
       const now = new Date().toISOString();
       const dependencyEligibility = `NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dependency ON dependency.id = td.depends_on_task_id WHERE td.task_id = tasks.id AND dependency.status NOT IN (${resolutionPlaceholders}))`;
       const updateSql = db.dialect === "mysql"
@@ -682,6 +688,25 @@ function createReportingRepository(db: DatabasePort): ReportingRepository {
       const placeholders = projectIds.map(() => "?").join(",");
       const rows = await db.prepare(`SELECT p.project_id, COUNT(DISTINCT p.id) AS non_done_phase_count FROM phases p JOIN tasks t ON t.phase_id = p.id WHERE p.project_id IN (${placeholders}) AND t.status NOT IN ('DONE', 'CANCELLED') GROUP BY p.project_id`).all(...projectIds);
       return rows.map((row) => ({ projectId: text(row.project_id), nonDonePhaseCount: Number(row.non_done_phase_count) }));
+    },
+    async trackedTimeByProject(projectIds, now) {
+      if (!projectIds.length) return [];
+      const placeholders = projectIds.map(() => "?").join(",");
+      const excluded = "'BACKLOG', 'TODO', 'DONE', 'CANCELLED'";
+      const [closedRows, activeRows] = await Promise.all([
+        db.prepare(`SELECT t.project_id, SUM(COALESCE(h.duration_seconds, 0)) AS total_seconds FROM task_status_history h JOIN tasks t ON t.id = h.task_id WHERE t.project_id IN (${placeholders}) AND h.exited_at IS NOT NULL AND h.status NOT IN (${excluded}) GROUP BY t.project_id`).all(...projectIds),
+        db.prepare(`SELECT t.project_id, h.entered_at FROM task_status_history h JOIN tasks t ON t.id = h.task_id WHERE t.project_id IN (${placeholders}) AND h.exited_at IS NULL AND h.status NOT IN (${excluded})`).all(...projectIds),
+      ]);
+      const totals = new Map<string, number>();
+      for (const row of closedRows) {
+        const seconds = Number(row.total_seconds ?? 0);
+        if (seconds > 0) totals.set(text(row.project_id), seconds);
+      }
+      for (const row of activeRows) {
+        const seconds = Math.max(0, (Date.parse(now) - Date.parse(date(row.entered_at))) / 1000);
+        if (seconds > 0) totals.set(text(row.project_id), (totals.get(text(row.project_id)) ?? 0) + seconds);
+      }
+      return [...totals].map(([projectId, seconds]): ProjectTrackedTimeEntity => ({ projectId, seconds: Math.floor(seconds) }));
     },
     async listMyOpenTasks(assigneeId, limit) {
       const rows = await db.prepare(`SELECT t.id, t.number, t.title, t.project_id, t.status, t.assignee_id, t.updated_at, p.\`key\` AS project_key, p.name AS project_name, u.name AS assignee_name FROM tasks t JOIN projects p ON p.id = t.project_id JOIN users u ON u.id = t.assignee_id WHERE t.assignee_id = ? AND t.status NOT IN ('DONE', 'CANCELLED', 'BACKLOG') ORDER BY t.updated_at DESC LIMIT ${queryLimit(limit)}`).all(assigneeId);

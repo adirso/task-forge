@@ -66,6 +66,8 @@ test("reporting repository owns portable reporting queries and row mapping", asy
           if (sql.includes("t.updated_at < ?")) return [{ id: "task-2", number: 8, title: "Stuck", project_id: "project-1", status: "IN_PROGRESS", assignee_id: "agent-1", updated_at: "2026-08-22T06:00:00.000Z", project_key: "TAS", project_name: "Task Forge", assignee_name: "Agent" }];
           if (sql.includes("t.assignee_id IN") && sql.includes("t.status = 'IN_PROGRESS'")) return [{ id: "task-2", number: 8, title: "Stuck", project_id: "project-1", status: "IN_PROGRESS", assignee_id: "agent-1", updated_at: "2026-08-22T06:00:00.000Z", project_key: "TAS", project_name: "Task Forge", assignee_name: "Agent" }];
           if (sql.includes("MAX(last_used_at)")) return [{ user_id: "agent-1", last_active_at: "2026-08-22T09:00:00.000Z" }];
+          if (sql.includes("SUM(COALESCE(h.duration_seconds")) return [{ project_id: "project-1", total_seconds: 3600 }, { project_id: "project-2", total_seconds: 120 }];
+          if (sql.includes("h.exited_at IS NULL")) return [{ project_id: "project-1", entered_at: "2026-08-22T11:30:00.000Z" }, { project_id: "project-2", entered_at: "2026-08-22T11:59:00.000Z" }];
           return [];
         },
       };
@@ -74,6 +76,10 @@ test("reporting repository owns portable reporting queries and row mapping", asy
   };
   const reporting = createRepositories(database).reporting;
   assert.deepEqual(await reporting.countTasksByProject(["project-1"]), [{ projectId: "project-1", status: "TODO", count: 2 }]);
+  assert.deepEqual(await reporting.trackedTimeByProject(["project-1", "project-2"], "2026-08-22T12:00:00.000Z"), [
+    { projectId: "project-1", seconds: 5400 },
+    { projectId: "project-2", seconds: 180 },
+  ]);
   assert.equal((await reporting.listMyOpenTasks("agent-1", 30))[0]?.projectKey, "TAS");
   assert.equal((await reporting.listStuckTasks(["project-1"], "2026-08-22T08:00:00.000Z", 20))[0]?.title, "Stuck");
   assert.equal((await reporting.listAgentInProgressTasks(["agent-1"]))[0]?.assigneeId, "agent-1");
@@ -81,6 +87,7 @@ test("reporting repository owns portable reporting queries and row mapping", asy
   assert.ok(queries.every(({ sql }) => !sql.includes("? = 1 OR EXISTS")), "reporting queries must receive already-authorized project IDs");
   assert.ok(queries.some(({ sql, params }) => sql.includes("LIMIT 30") && params.length === 1), "MySQL-compatible limits are normalized before interpolation");
   assert.ok(queries.some(({ sql, params }) => sql.includes("LIMIT 20") && params.at(-1) === "2026-08-22T08:00:00.000Z"), "stuck-task limits do not use prepared placeholders");
+  assert.ok(queries.some(({ sql }) => sql.includes("SUM(COALESCE(h.duration_seconds") && sql.includes("GROUP BY t.project_id")), "tracked time is aggregated in SQL");
 });
 
 test("claim repository rechecks source and dependency eligibility in the atomic update", async () => {
@@ -92,7 +99,10 @@ test("claim repository rechecks source and dependency eligibility in the atomic 
         return {
           async get(...params) {
             queries.push({ operation: "get", sql, params });
+            if (sql.startsWith("SELECT id FROM projects WHERE id = ?")) return { id: "project-1" };
             if (sql.startsWith("SELECT t.id, t.status FROM tasks")) return { id: "task-49", status: "TODO" };
+            if (sql.startsWith("SELECT id FROM tasks WHERE id = ?")) return { id: "task-49" };
+            if (sql.startsWith("SELECT id, status, assignee_id FROM tasks WHERE id = ?")) return { id: "task-49", status: "TODO", assignee_id: null };
             if (sql.startsWith("SELECT * FROM tasks")) return { id: "task-49", project_id: "project-1", number: 49, title: "Ready work", description: "", definition_of_done: "", status: "IN_PROGRESS", priority: "HIGH", type: "BUG", assignee_id: null, creator_id: "owner-1", parent_id: null, branch: null, due_date: null, estimate_points: null, phase_id: null, pull_request_url: null, pull_request_title: null, pull_request_state: null, position: 0, created_at: "2026-08-22T00:00:00.000Z", updated_at: "2026-08-22T01:00:00.000Z" };
             return undefined;
           },
@@ -117,7 +127,11 @@ test("claim repository rechecks source and dependency eligibility in the atomic 
     assert.match(update?.sql ?? "", /NOT EXISTS .*dependency\.status NOT IN \(\?, \?\)/);
     assert.deepEqual(update?.params.slice(0, 2), ["agent-1", "IN_PROGRESS"]);
     assert.deepEqual(update?.params.slice(-2), ["DONE", "CANCELLED"]);
-    if (dialect === "mysql") assert.match(update?.sql ?? "", /id IN \(SELECT claimable\.id FROM \(SELECT eligible\.id.*GROUP BY eligible\.id/);
+    if (dialect === "mysql") {
+      assert.ok(queries.some(({ sql }) => sql.includes("FROM projects WHERE id = ? FOR UPDATE")));
+      assert.ok(queries.some(({ sql }) => sql.includes("FROM tasks WHERE id = ? FOR UPDATE")));
+      assert.match(update?.sql ?? "", /id IN \(SELECT claimable\.id FROM \(SELECT eligible\.id.*GROUP BY eligible\.id/);
+    }
   }
 });
 
