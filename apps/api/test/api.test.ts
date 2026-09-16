@@ -523,12 +523,15 @@ test("project ordering persists and new projects prepend", async () => {
   const second = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "ORD", name: "Ordered project", description: "", color: "#123456" } });
   assert.equal(second.statusCode, 201);
   const secondId = second.json().project.id as string;
-  const reorder = await app.inject({ method: "PATCH", url: "/api/projects/order", headers: { authorization: `Bearer ${jwtToken}` }, payload: { projectIds: [secondId, projectId] } });
+  const existing = await app.inject({ method: "GET", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` } });
+  assert.equal(existing.statusCode, 200, existing.body);
+  const remainingIds = (existing.json().projects as Array<{ id: string }>).map((project) => project.id).filter((id) => id !== secondId);
+  const reorder = await app.inject({ method: "PATCH", url: "/api/projects/order", headers: { authorization: `Bearer ${jwtToken}` }, payload: { projectIds: [secondId, ...remainingIds] } });
   assert.equal(reorder.statusCode, 204, reorder.body);
   const newest = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: "NEW", name: "Newest project", description: "", color: "#654321" } });
   assert.equal(newest.statusCode, 201);
   const listed = await app.inject({ method: "GET", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` } });
-  assert.deepEqual(listed.json().projects.slice(0, 3).map((project: { id: string }) => project.id), [newest.json().project.id, secondId, projectId]);
+  assert.deepEqual(listed.json().projects.slice(0, 3).map((project: { id: string }) => project.id), [newest.json().project.id, secondId, remainingIds[0]]);
 });
 
 test("task lifecycle supports assignment and status changes", async () => {
@@ -1224,6 +1227,20 @@ test("login throttles by account and records redacted audit metadata", async () 
   assert.equal(audit.ip_address, "127.0.0.1");
   assert.equal(audit.account, account);
   assert.doesNotMatch(JSON.stringify(audit), /not-the-password/);
+});
+
+test("successful credential endpoint traffic does not trip the sensitive rate limiter", async () => {
+  const created = await app.inject({ method: "POST", url: "/api/users/agents", headers: { authorization: `Bearer ${jwtToken}`, "x-forwarded-for": "198.51.100.77" }, payload: { name: `Limiter agent ${randomUUID().slice(0, 8)}` } });
+  assert.equal(created.statusCode, 201, created.body);
+  const limiterAgentId = created.json().user.id as string;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const listed = await app.inject({ method: "GET", url: `/api/users/${limiterAgentId}/tokens`, headers: { authorization: `Bearer ${jwtToken}`, "x-forwarded-for": "198.51.100.77" } });
+    assert.equal(listed.statusCode, 200, listed.body);
+  }
+  const stillAllowed = await app.inject({ method: "POST", url: "/api/users/agents", headers: { authorization: `Bearer ${jwtToken}`, "x-forwarded-for": "198.51.100.77" }, payload: { name: `Limiter follow-up ${randomUUID().slice(0, 8)}` } });
+  assert.equal(stillAllowed.statusCode, 201, stillAllowed.body);
+  await app.inject({ method: "DELETE", url: `/api/users/${limiterAgentId}`, headers: { authorization: `Bearer ${jwtToken}` } });
+  await app.inject({ method: "DELETE", url: `/api/users/${stillAllowed.json().user.id}`, headers: { authorization: `Bearer ${jwtToken}` } });
 });
 
 test("agent logs are paginated, ordered, redacted, and idempotent", async () => {

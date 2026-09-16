@@ -344,6 +344,7 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
     async hasIncompleteByPhase(phaseId) { return Boolean(await db.prepare("SELECT 1 FROM tasks WHERE phase_id = ? AND status NOT IN ('DONE','CANCELLED') LIMIT 1").get(phaseId)); },
     async claimNext(projectId, claimantId, workflow, options = {}) {
       if (!workflow.sourceStatuses.length || !workflow.dependencyResolutionStatuses.length) return null;
+      if (db.dialect === "mysql") await db.prepare("SELECT id FROM projects WHERE id = ? FOR UPDATE").get(projectId);
       const sourcePlaceholders = workflow.sourceStatuses.map(() => "?").join(", ");
       const resolutionPlaceholders = workflow.dependencyResolutionStatuses.map(() => "?").join(", ");
       const where = ["t.project_id = ?", `t.status IN (${sourcePlaceholders})`, "t.assignee_id IS NULL", `NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dependency ON dependency.id = td.depends_on_task_id WHERE td.task_id = t.id AND dependency.status NOT IN (${resolutionPlaceholders}))`];
@@ -354,6 +355,11 @@ function createTaskRepository(db: DatabasePort): TaskRepository {
       const orderExpr = "CASE t.priority WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, t.position";
       const candidate = await db.prepare(`SELECT t.id, t.status FROM tasks t WHERE ${where.join(" AND ")} ORDER BY ${orderExpr} LIMIT 1`).get(...params);
       if (!candidate) return null;
+      if (db.dialect === "mysql") {
+        await db.prepare("SELECT id FROM tasks WHERE id = ? FOR UPDATE").get(candidate.id);
+        const locked = await db.prepare("SELECT id, status, assignee_id FROM tasks WHERE id = ?").get(candidate.id);
+        if (!locked || locked.assignee_id || !workflow.sourceStatuses.includes(String(locked.status) as TaskStatus)) return null;
+      }
       const now = new Date().toISOString();
       const dependencyEligibility = `NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dependency ON dependency.id = td.depends_on_task_id WHERE td.task_id = tasks.id AND dependency.status NOT IN (${resolutionPlaceholders}))`;
       const updateSql = db.dialect === "mysql"

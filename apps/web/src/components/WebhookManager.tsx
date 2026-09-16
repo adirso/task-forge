@@ -67,9 +67,9 @@ export function WebhookManager({ agent, onAgentUpdated, onSuccess, onError }: {
   }
 
   return <div className="webhook-manager">
-    <form className="webhook-form" onSubmit={saveWebhook}>
-      <label className="webhook-label"><Webhook /><span>Dispatch webhook URL</span></label>
-      <div className="webhook-row"><input type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://your-agent.example.com/webhook" /><button className="button button-secondary" disabled={saving}><Save /> {saving ? "Saving…" : "Save"}</button></div>
+    <form className="webhook-form" onSubmit={saveWebhook} aria-label="Dispatch webhook">
+      <label className="webhook-label" htmlFor={`webhook-url-${agent.id}`}><Webhook /><span>Dispatch webhook URL</span></label>
+      <div className="webhook-row"><input id={`webhook-url-${agent.id}`} type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://your-agent.example.com/webhook" /><button className="button button-secondary" disabled={saving}><Save /> {saving ? "Saving…" : "Save"}</button></div>
       <small className="webhook-hint">Events are queued durably, signed with HMAC-SHA256, and retried after timeouts, network errors, or non-2xx responses.</small>
       <div className="webhook-secret-status"><ShieldCheck /><span><strong>{agent.webhookSecretConfigured ? "Signing secret configured" : "Signing secret not configured"}</strong><small>Secrets are shown only when first created or rotated.</small></span><button type="button" className="button button-secondary" disabled={rotating} onClick={() => void rotateSecret()}><RotateCcw /> {rotating ? "Rotating…" : "Rotate secret"}</button></div>
     </form>
