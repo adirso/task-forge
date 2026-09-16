@@ -231,8 +231,19 @@ test.describe("workspace browser smoke", () => {
     await expect(page.getByText("Copy this token now")).toBeVisible();
     await expect(page.getByText("Token issued")).toBeVisible();
     await expect(page.locator("code").filter({ hasText: /^tf_/ })).toBeVisible();
-    await page.getByRole("button", { name: "Copy", exact: true }).first().click();
-    await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:5174" });
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async () => undefined,
+          readText: async () => "",
+        },
+      });
+    });
+    const issuedToken = page.locator(".issued-token").filter({ hasText: "Copy this token now" });
+    await issuedToken.getByRole("button", { name: "Copy", exact: true }).click();
+    await expect(issuedToken.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
 
     const projectResponse = await request.post("/api/projects", { headers: { authorization: `Bearer ${adminToken}` }, data: { key: `A${Date.now() % 1000000}`, name: `Routing workspace ${suffix}`, description: "Browser routing coverage", repoUrl: "https://github.com/example/browser-routing", color: "#6554C0" } });
     expect(projectResponse.ok(), `create project failed: ${projectResponse.status()} ${await projectResponse.text()}`).toBeTruthy();

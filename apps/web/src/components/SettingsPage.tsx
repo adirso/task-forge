@@ -217,9 +217,13 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
   }
 
   async function copyToken() {
-    await navigator.clipboard.writeText(issuedToken);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    try {
+      await navigator.clipboard.writeText(issuedToken);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setError("Could not copy token. Select and copy it manually.");
+    }
   }
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
