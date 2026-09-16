@@ -434,3 +434,30 @@ test("workspace browser smoke: create a project from a source", async ({ page },
   await page.getByRole("button", { name: "View project members" }).click();
   await expect(page.getByRole("dialog", { name: "Members & agents" }).getByText("Maya Chen", { exact: true })).toBeVisible();
 });
+
+test("workspace browser smoke: copy selected automations and report incompatible rules", async ({ page }, testInfo) => {
+  await signIn(page);
+  const destination = await createProject(page, "Copy destination", "COPYDST");
+  await createProject(page, "Copy source", "COPYSRC");
+  await page.getByRole("button", { name: "Automations", exact: true }).click();
+  await page.getByLabel("Rule name").fill("Portable automation");
+  const rows = page.locator(".automation-rule-row");
+  await rows.nth(0).locator("select").nth(2).selectOption("TODO");
+  await page.getByRole("button", { name: "Create rule" }).click();
+  await expect(page.getByLabel("Select Portable automation for copying")).toBeVisible();
+  await page.getByLabel("Rule name").fill("Source phase automation");
+  await rows.nth(0).locator("select").nth(0).selectOption("phaseId");
+  await rows.nth(0).locator("select").nth(2).selectOption({ index: 1 });
+  await page.getByRole("button", { name: "Create rule" }).click();
+  const copyButton = page.getByRole("button", { name: "Copy selected (0)", exact: true });
+  await expect(copyButton).toBeDisabled();
+  await page.getByLabel("Destination project").selectOption({ label: destination });
+  await page.getByLabel("Select Portable automation for copying").check();
+  await page.getByLabel("Select Source phase automation for copying").check();
+  await page.getByRole("button", { name: "Copy selected (2)", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Copied 1 automation(s) to Copy destination. 1 failed.");
+  await expect(page.getByRole("status")).toContainText("referenced phase is not in the destination project");
+  await expect(page.getByLabel("Select Portable automation for copying")).not.toBeChecked();
+  await expect(page.getByLabel("Select Source phase automation for copying")).toBeChecked();
+  await page.screenshot({ path: testInfo.outputPath("automation-copy.png"), fullPage: true });
+});

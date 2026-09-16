@@ -1793,3 +1793,75 @@ test("project copying requires authentication and source access, and rejects inv
   assert.match(invalid.json().error, /status configuration/);
   assert.equal(await db.prepare("SELECT id FROM projects WHERE `key` = ?").get(payload.key), undefined);
 });
+
+test("copy automations validates destination references, preserves independent records, and checks both owners", async () => {
+  const headers = { authorization: `Bearer ${jwtToken}` };
+  const memberHeaders = { authorization: `Bearer ${createJwt({ id: memberId, kind: "HUMAN", role: "MEMBER", name: "Member" })}` };
+  async function project(key: string, auth = headers) {
+    const response = await app.inject({ method: "POST", url: "/api/projects", headers: auth, payload: { key, name: key, availableStatuses: ["TODO", "DONE"], defaultStatus: "TODO" } });
+    assert.equal(response.statusCode, 201, response.body);
+    return response.json().project.id as string;
+  }
+  const source = await project("ACRSRC", memberHeaders);
+  const destination = await project("ACRDST", memberHeaders);
+  const foreign = await project("ACROTHER");
+  const phaseResponse = await app.inject({ method: "GET", url: `/api/projects/${source}/phases`, headers });
+  const sourcePhase = phaseResponse.json().phases[0].id;
+  async function rule(name: string, extra: Record<string, unknown> = {}) {
+    const response = await app.inject({ method: "POST", url: `/api/projects/${source}/automations`, headers, payload: { name, enabled: false, actions: [{ field: "status", valueType: "static", value: "DONE" }], ...extra } });
+    assert.equal(response.statusCode, 201, response.body);
+    return response.json().automation;
+  }
+  const good = await rule("Portable rule", { conditions: [{ field: "status", operator: "changed_from_to", fromValue: "TODO", value: "DONE" }] });
+  const phaseRule = await rule("Source phase", { conditions: [{ field: "phaseId", operator: "changed_from_to", fromValue: sourcePhase, value: null }] });
+  const assigneeRule = await rule("Source assignee", { actions: [{ field: "assigneeId", valueType: "user", value: agentId }] });
+  const actorRule = await rule("Source actor", { actorType: "USER", actorId: agentId });
+  const phaseAction = await rule("Phase action", { actions: [{ field: "phaseId", valueType: "static", value: sourcePhase }] });
+  const serviceAssignee = await rule("Service assignee", { actions: [{ field: "assigneeId", valueType: "service", value: "agent-api" }] });
+  const payload = { destinationProjectId: destination, automationIds: [good.id, phaseRule.id, assigneeRule.id, actorRule.id, phaseAction.id, serviceAssignee.id] };
+  const copy = (src: string, body: typeof payload, auth = memberHeaders) => app.inject({ method: "POST", url: `/api/projects/${src}/automations/copy`, headers: auth, payload: body });
+  assert.equal((await app.inject({ method: "POST", url: `/api/projects/${source}/automations/copy`, payload })).statusCode, 401);
+  assert.equal((await copy(source, { ...payload, destinationProjectId: foreign })).statusCode, 403);
+  assert.equal((await copy(foreign, payload)).statusCode, 403);
+  assert.equal((await copy(source, { ...payload, automationIds: [good.id, randomUUID()] })).statusCode, 404);
+  assert.equal((await copy(source, { ...payload, automationIds: [] })).statusCode, 400);
+  assert.equal((await copy(source, { ...payload, automationIds: [good.id, good.id] })).statusCode, 400);
+  assert.equal((await copy(source, { ...payload, destinationProjectId: source })).statusCode, 400);
+  const before = await app.inject({ method: "GET", url: `/api/projects/${destination}/automations`, headers });
+  assert.deepEqual(before.json().automations, []);
+  const response = await copy(source, payload);
+  assert.equal(response.statusCode, 200, response.body);
+  const { copied, failures } = response.json();
+  assert.equal(copied.length, 2);
+  assert.equal(failures.length, 4);
+  assert.match(failures[0].reason, /phase.*destination/);
+  assert.match(failures[1].reason, /user.*destination/);
+  assert.match(failures[2].reason, /user.*destination/);
+  assert.match(failures[3].reason, /phase.*destination/);
+  const clone = copied[0].automation;
+  assert.notEqual(clone.id, good.id);
+  assert.equal(clone.projectId, destination);
+  assert.equal(clone.enabled, false);
+  assert.deepEqual(clone.conditions, good.conditions);
+  assert.deepEqual(clone.actions, good.actions);
+  const serviceClone = copied.find((item: { sourceId: string }) => item.sourceId === serviceAssignee.id)?.automation;
+  assert.ok(serviceClone);
+  assert.deepEqual(serviceClone.actions, serviceAssignee.actions);
+  await app.inject({ method: "PATCH", url: `/api/automations/${good.id}`, headers, payload: { name: "Source edited", actions: [{ field: "status", valueType: "static", value: "TODO" }] } });
+  await app.inject({ method: "DELETE", url: `/api/automations/${good.id}`, headers });
+  const saved = await app.inject({ method: "GET", url: `/api/projects/${destination}/automations`, headers });
+  const savedAutomations = saved.json().automations;
+  assert.deepEqual(savedAutomations.map((item: { id: string }) => item.id).sort(), [clone.id, serviceClone.id].sort());
+  assert.deepEqual(savedAutomations.find((item: { id: string }) => item.id === clone.id), clone);
+  assert.deepEqual(savedAutomations.find((item: { id: string }) => item.id === serviceClone.id), serviceClone);
+  // A status used only as the previous transition value is still incompatible.
+  await db.prepare("UPDATE projects SET available_statuses = ? WHERE id = ?").run(JSON.stringify(["DONE"]), destination);
+  const statusRule = await rule("Previous status", { conditions: [{ field: "status", operator: "changed_from_to", fromValue: "TODO", value: "DONE" }] });
+  const incompatible = await copy(source, { destinationProjectId: destination, automationIds: [statusRule.id] });
+  assert.equal(incompatible.statusCode, 200, incompatible.body);
+  assert.equal(incompatible.json().copied.length, 0);
+  assert.match(incompatible.json().failures[0].reason, /Status TODO/);
+  const adminCopy = await copy(source, { destinationProjectId: foreign, automationIds: [statusRule.id] }, headers);
+  assert.equal(adminCopy.statusCode, 200, adminCopy.body);
+  assert.equal(adminCopy.json().copied.length, 1);
+});

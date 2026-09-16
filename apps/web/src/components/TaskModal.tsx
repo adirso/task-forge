@@ -5,7 +5,7 @@ import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
 import { api, type AgentCycleState, type AgentLog, type AgentRun } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { SendToAI } from "./SendToAI";
-import type { AIPromptMode } from "../lib/aiPrompt";
+import { selectAIPromptMode, type AIPromptMode } from "../lib/aiPrompt";
 import { TaskTagEditor } from "./TaskTags";
 import { TaskDependencyEditor } from "./TaskDependencies";
 import { formatAge, formatCountdown, getRunHealth, latestRunLog, runIsWaitingForInput, runLogs } from "../lib/runObservability";
@@ -184,7 +184,7 @@ export function TaskModal({ task, initialStatus, defaultPhaseId, project, curren
           </div>
           <div className="modal-header-actions">
             {task && <>
-              <button type="button" className="send-to-ai-button" onClick={() => setAIMode("IMPLEMENT")}><Sparkles /> Send to AI</button>
+              <button type="button" className="send-to-ai-button" onClick={() => setAIMode(selectAIPromptMode(project, task))}><Sparkles /> Send to AI</button>
               <button type="button" className="copy-task-link" onClick={() => copyTaskLink().catch(() => setError("Could not copy task link"))}>{linkCopied ? <Check /> : <Link2 />}{linkCopied ? "Copied" : "Copy link"}</button>
             </>}
             <button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X /></button>
