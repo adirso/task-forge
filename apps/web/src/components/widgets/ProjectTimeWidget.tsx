@@ -14,7 +14,7 @@ export function ProjectTimeWidget() {
   const total = projects.reduce((sum, project) => sum + project.trackedTimeSeconds, 0);
   return (
     <div className="widget-project-time">
-      <p className="wpt-period">All tracked time</p>
+      <p className="wpt-period">All workflow time · excludes Backlog, Todo, Done and Cancelled</p>
       {projects.map((project) => {
         const percentage = Math.round((project.trackedTimeSeconds / total) * 100);
         return <button key={project.id} type="button" className="wpt-row" onClick={() => openProject(project.key)}>

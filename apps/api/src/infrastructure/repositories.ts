@@ -686,14 +686,18 @@ function createReportingRepository(db: DatabasePort): ReportingRepository {
     async trackedTimeByProject(projectIds, now) {
       if (!projectIds.length) return [];
       const placeholders = projectIds.map(() => "?").join(",");
-      const rows = await db.prepare(`SELECT t.project_id, h.status, h.entered_at, h.exited_at, h.duration_seconds FROM task_status_history h JOIN tasks t ON t.id = h.task_id WHERE t.project_id IN (${placeholders})`).all(...projectIds);
-      const excluded = new Set(["BACKLOG", "TODO", "DONE", "CANCELLED"]);
+      const excluded = "'BACKLOG', 'TODO', 'DONE', 'CANCELLED'";
+      const [closedRows, activeRows] = await Promise.all([
+        db.prepare(`SELECT t.project_id, SUM(COALESCE(h.duration_seconds, 0)) AS total_seconds FROM task_status_history h JOIN tasks t ON t.id = h.task_id WHERE t.project_id IN (${placeholders}) AND h.exited_at IS NOT NULL AND h.status NOT IN (${excluded}) GROUP BY t.project_id`).all(...projectIds),
+        db.prepare(`SELECT t.project_id, h.entered_at FROM task_status_history h JOIN tasks t ON t.id = h.task_id WHERE t.project_id IN (${placeholders}) AND h.exited_at IS NULL AND h.status NOT IN (${excluded})`).all(...projectIds),
+      ]);
       const totals = new Map<string, number>();
-      for (const row of rows) {
-        if (excluded.has(text(row.status))) continue;
-        const stored = Number(row.duration_seconds ?? 0);
-        const live = row.exited_at == null ? Math.max(0, (Date.parse(now) - Date.parse(date(row.entered_at))) / 1000) : 0;
-        const seconds = stored + live;
+      for (const row of closedRows) {
+        const seconds = Number(row.total_seconds ?? 0);
+        if (seconds > 0) totals.set(text(row.project_id), seconds);
+      }
+      for (const row of activeRows) {
+        const seconds = Math.max(0, (Date.parse(now) - Date.parse(date(row.entered_at))) / 1000);
         if (seconds > 0) totals.set(text(row.project_id), (totals.get(text(row.project_id)) ?? 0) + seconds);
       }
       return [...totals].map(([projectId, seconds]): ProjectTrackedTimeEntity => ({ projectId, seconds: Math.floor(seconds) }));

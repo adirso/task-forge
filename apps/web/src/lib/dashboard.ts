@@ -169,7 +169,7 @@ export const WIDGET_LABELS: Record<WidgetType, string> = {
 export const WIDGET_DESCRIPTIONS: Record<WidgetType, string> = {
   project_status: "TODO / IN_PROGRESS / DONE counts per project",
   project_progress: "Completion percentage bars per project",
-  project_time: "All tracked time by project",
+  project_time: "All workflow time by project (excluding Backlog, Todo, Done and Cancelled)",
   my_tasks: "Open tasks assigned to you across all projects",
   stuck_tasks: "IN_PROGRESS tasks not updated in 4+ hours",
   activity: "Latest events across all your projects",
