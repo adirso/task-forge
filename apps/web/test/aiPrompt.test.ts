@@ -134,13 +134,68 @@ test("builds a complete and tailored prompt for every provider", () => {
   }
 });
 
+test("puts Change status first for implement, review, fix, and re-review modes", () => {
+  const configured: Project = { ...project, availableStatuses: [...TASK_STATUSES], agentWorkflow: DEFAULT_AGENT_WORKFLOW };
+  const input = {
+    provider: "cursor" as const,
+    project: configured,
+    task: { ...task, branch: "agent/tas-125-move-to-status" },
+    phaseNumber: 15,
+    contextUrl: "https://taskforge.example/?project=TAS&task=TAS-125",
+    apiBaseUrl: "https://api.taskforge.example/api",
+  };
+  const cases: Array<{ mode: AIPromptMode; status: string; label: string }> = [
+    { mode: "IMPLEMENT", status: "IN_PROGRESS", label: "In Progress" },
+    { mode: "REVIEW", status: "IN_REVIEW", label: "In Review" },
+    { mode: "FIX", status: "FIX_IN_PROGRESS", label: "Fix In Progress" },
+    { mode: "RE_REVIEW", status: "IN_REVIEW", label: "In Review" },
+  ];
+  for (const { mode, status, label } of cases) {
+    const prompt = buildAIPrompt({ ...input, mode });
+    const modeHeading = { IMPLEMENT: "Implementation mode:", REVIEW: "Review mode:", FIX: "Fix needed mode:", RE_REVIEW: "Re-review mode:" }[mode];
+    const modeBlock = prompt.slice(prompt.indexOf(modeHeading));
+    assert.match(modeBlock, new RegExp(`${modeHeading}\\n- Change status first:`));
+    assert.match(prompt, new RegExp(`"status":"${status}"`));
+    assert.match(prompt, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(prompt, /check project\.availableStatuses before any other work/);
+    assert.match(prompt, new RegExp(`1\\. Change status first:.*${status}`));
+  }
+});
+
+test("skips disabled Change status targets until the operator chooses an enabled status", () => {
+  const input = {
+    provider: "codex" as const,
+    project: { ...project, availableStatuses: ["TODO", "READY_FOR_REVIEW", "CANCELLED"], defaultStatus: "TODO", agentWorkflow: DEFAULT_AGENT_WORKFLOW },
+    task: { ...task, branch: "agent/tas-125-move-to-status" },
+    phaseNumber: 1,
+    contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3",
+    apiBaseUrl: "https://api.taskforge.example/api",
+  };
+  const implement = buildAIPrompt({ ...input, mode: "IMPLEMENT" });
+  assert.match(implement, /Change status first:/);
+  assert.match(implement, /IN_PROGRESS is not enabled/);
+  assert.doesNotMatch(implement, /"status":"IN_PROGRESS"/);
+
+  const review = buildAIPrompt({ ...input, mode: "REVIEW" });
+  assert.match(review, /Change status first:/);
+  assert.match(review, /No review start status is enabled/);
+  assert.doesNotMatch(review, /"status":"IN_REVIEW"/);
+
+  const fix = buildAIPrompt({ ...input, mode: "FIX" });
+  assert.match(fix, /Change status first:/);
+  assert.match(fix, /FIX_IN_PROGRESS is not enabled/);
+  assert.doesNotMatch(fix, /"status":"FIX_IN_PROGRESS"/);
+});
+
 test("builds distinct implementation and review prompts", () => {
   const input = { provider: "codex" as const, project, task, phaseNumber: 1, contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3", apiBaseUrl: "https://api.taskforge.example/api" };
   const implementation = buildAIPrompt({ ...input, mode: "IMPLEMENT" });
   const review = buildAIPrompt({ ...input, mode: "REVIEW" });
   assert.match(implementation, /Implementation mode:/);
+  assert.match(implementation, /Change status first:/);
   assert.match(implementation, /Implement the task description and every Definition of done item/);
   assert.match(review, /Review mode:/);
+  assert.match(review, /Change status first:/);
   assert.match(review, /compare it against every Definition of done item/);
   assert.match(review, /code quality, correctness, security, performance/);
   assert.match(review, /optimization opportunities|performance/);
@@ -159,10 +214,12 @@ test("documents phase branch merge targeting in implementation prompts", () => {
 });
 
 test("builds focused fix and re-review prompts from the review trail", () => {
-  const input = { provider: "codex" as const, project: { ...project, availableStatuses: ["IN_PROGRESS", "READY_FOR_REVIEW", "RE_REVIEW", "FIX_NEEDED", "DONE"] }, task: { ...task, branch: "agent/tas-77-fix" }, phaseNumber: 1, contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3", apiBaseUrl: "https://api.taskforge.example/api" };
+  const input = { provider: "codex" as const, project: { ...project, availableStatuses: ["IN_PROGRESS", "READY_FOR_REVIEW", "RE_REVIEW", "FIX_NEEDED", "FIX_IN_PROGRESS", "IN_REVIEW", "DONE"], agentWorkflow: DEFAULT_AGENT_WORKFLOW }, task: { ...task, branch: "agent/tas-77-fix" }, phaseNumber: 1, contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3", apiBaseUrl: "https://api.taskforge.example/api" };
   const fix = buildAIPrompt({ ...input, mode: "FIX" });
   const rereview = buildAIPrompt({ ...input, mode: "RE_REVIEW" });
   assert.match(fix, /Fix needed mode:/);
+  assert.match(fix, /Change status first:/);
+  assert.match(fix, /"status":"FIX_IN_PROGRESS"/);
   assert.match(fix, /existing branch agent\/tas-77-fix/);
   assert.match(fix, /GET https:\/\/api\.taskforge\.example\/api\/tasks\/task-id\/updates/);
   assert.match(fix, /GET https:\/\/api\.taskforge\.example\/api\/tasks\/task-id\/agent-logs/);
@@ -171,10 +228,12 @@ test("builds focused fix and re-review prompts from the review trail", () => {
   assert.doesNotMatch(fix, /Do not create, commit, push, merge, or modify a pull request in fix mode/);
   assert.doesNotMatch(fix, /Create or switch to the suggested branch/);
   const missingBranch = buildAIPrompt({ ...input, task: { ...task, branch: null }, mode: "FIX" });
-  assert.match(missingBranch, /requires a real task branch/);
+  assert.match(missingBranch, /Change status first only after a real task branch exists/);
   assert.match(missingBranch, /do not invent agent\/tas-3-add-send-to-ai-task-action/);
   assert.doesNotMatch(missingBranch, /Work on the existing branch agent\/tas-3-add-send-to-ai-task-action/);
   assert.match(rereview, /Re-review mode:/);
+  assert.match(rereview, /Change status first:/);
+  assert.match(rereview, /"status":"IN_REVIEW"/);
   assert.match(rereview, /task was reviewed previously/);
   assert.match(rereview, /current head SHA against every review finding/);
   assert.match(rereview, /Do not assume approval/);
@@ -206,10 +265,12 @@ test("uses only enabled project statuses in handoff transitions", () => {
     apiBaseUrl: "https://api.taskforge.example/api",
   });
   assert.match(prompt, /Enabled statuses: REFINING, TODO, READY_FOR_REVIEW, CANCELLED/);
+  assert.match(prompt, /Change status first:/);
+  assert.match(prompt, /IN_PROGRESS is not enabled/);
   assert.match(prompt, /PATCH .* with branch .* only/);
   assert.match(prompt, /Move the task to READY_FOR_REVIEW when review is required/);
   assert.match(prompt, /Before reporting completion, refresh .*\/context\?project=TAS&task=TAS-3/);
-  assert.doesNotMatch(prompt, /with status IN_PROGRESS/);
+  assert.doesNotMatch(prompt, /"status":"IN_PROGRESS"/);
   assert.doesNotMatch(prompt, /Move the task to DONE/);
 });
 
@@ -222,7 +283,8 @@ test("requires workflow discovery when no enabled review status exists", () => {
     contextUrl: "https://taskforge.example/?project=TAS&task=TAS-3",
     apiBaseUrl: "https://api.taskforge.example/api",
   });
-  assert.match(prompt, /with status IN_PROGRESS and branch/);
+  assert.match(prompt, /Change status first:/);
+  assert.match(prompt, /"status":"IN_PROGRESS"/);
   assert.match(prompt, /Before requesting review, refresh/);
   assert.match(prompt, /If no review status is enabled, keep the status unchanged/);
   assert.doesNotMatch(prompt, /Move the task to (READY_FOR_REVIEW|IN_REVIEW|DONE)/);
