@@ -87,19 +87,28 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
   const reReview = workflow?.reReview ?? "RE_REVIEW";
   const approved = workflow?.approved ?? "APPROVED";
   const readOnlyMode = mode === "REVIEW" || mode === "RE_REVIEW";
-  const startInstruction = readOnlyMode
-      ? mode === "RE_REVIEW" && enabledStatuses.has(reReview)
-      ? `- Re-review mode is read-only for code changes. Before inspecting or editing anything, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reviewStart} (IN_REVIEW workflow start) and runId when provided; confirm it is enabled. Do not PATCH ${taskEndpoint} to ${implementationStart}.`
-      : reviewStart && enabledStatuses.has(reviewStart)
-        ? `- Review mode is read-only for code changes. Before inspecting or editing anything, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${reviewStart} (IN_REVIEW workflow start) and runId when provided; confirm it is enabled. Do not PATCH ${taskEndpoint} to ${implementationStart}.`
-        : `- Review mode is read-only: do not change the task status. Refresh ${contextEndpoint}; if no review status is enabled, leave the current status unchanged and report that the operator must choose the review state.`
-    : mode === "FIX"
-      ? existingBranch
-        ? `- Fix mode must stay on the existing branch ${existingBranch}; do not create or switch branches. Before reading findings or editing anything, refresh ${contextEndpoint} and PATCH ${taskEndpoint} with status ${fixStart} (FIX_IN_PROGRESS workflow start) and runId when provided; confirm it is enabled. Then read the latest findings from ${updatesEndpoint} and ${agentLogsEndpoint}.`
-        : `- Fix mode requires a real task branch. No branch is configured, so stop before editing, do not invent ${branch}, and ask the operator to set the review branch in TaskForge.`
-      : enabledStatuses.has(implementationStart)
-      ? `- Before inspecting or editing anything, refresh ${contextEndpoint}, confirm ${implementationStart} is enabled, then PATCH ${taskEndpoint} with {"status":"${implementationStart}","branch":"${branch}","runId":"<signed-run-id>"} (PATCH with status ${implementationStart} and branch; the IN_PROGRESS workflow start; preserve the real runId when provided).`
-      : `- When starting, PATCH ${taskEndpoint} with branch ${branch} only. No dedicated work status is enabled; keep the current status until you refresh workflow context and the project owner identifies the intended enabled transition.`;
+  const changeStatusFirst = (() => {
+    const refreshAndCheck = `Change status first: refresh ${contextEndpoint} and check project.availableStatuses before any other work`;
+    if (mode === "REVIEW" || mode === "RE_REVIEW") {
+      if (reviewStart && enabledStatuses.has(reviewStart)) {
+        return `- ${refreshAndCheck}. Then PATCH ${taskEndpoint} with {"status":"${reviewStart}","runId":"<signed-run-id>"} to move the task to ${reviewStart} (In Review); preserve the real runId when provided. Do not PATCH ${taskEndpoint} to ${implementationStart}.`;
+      }
+      return `- ${refreshAndCheck}. No review start status is enabled, so leave the current status unchanged and ask the operator which enabled status to use.`;
+    }
+    if (mode === "FIX") {
+      if (!existingBranch) {
+        return `- Change status first only after a real task branch exists. No branch is configured, so stop before editing, do not invent ${branch}, and ask the operator to set the review branch in TaskForge.`;
+      }
+      if (enabledStatuses.has(fixStart)) {
+        return `- ${refreshAndCheck}. Then PATCH ${taskEndpoint} with {"status":"${fixStart}","runId":"<signed-run-id>"} to move the task to ${fixStart} (Fix In Progress); preserve the real runId when provided. Stay on the existing branch ${existingBranch}. Then read the latest findings from ${updatesEndpoint} and ${agentLogsEndpoint}.`;
+      }
+      return `- ${refreshAndCheck}. ${fixStart} is not enabled, so do not invent a status transition; keep the current status on branch ${existingBranch} and ask the project owner which enabled status to use before reading findings.`;
+    }
+    if (enabledStatuses.has(implementationStart)) {
+      return `- ${refreshAndCheck}. Then PATCH ${taskEndpoint} with {"status":"${implementationStart}","branch":"${branch}","runId":"<signed-run-id>"} to move the task to ${implementationStart} (In Progress); preserve the real runId when provided.`;
+    }
+    return `- ${refreshAndCheck}. ${implementationStart} is not enabled, so PATCH ${taskEndpoint} with branch ${branch} only and keep the current status until the project owner identifies the intended enabled transition.`;
+  })();
   const reviewInstruction = readOnlyMode
     ? `- ${mode === "RE_REVIEW" ? "Re-review" : "Review"} mode does not implement or merge changes. Record findings and evidence; if clean, move the task to ${approved}, otherwise use ${fixNeeded} for the requested fixes.`
     : mode === "FIX"
@@ -120,6 +129,7 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
   const modeInstructions = mode === "REVIEW"
     ? [
       "Review mode:",
+      changeStatusFirst,
       "- Inspect the current implementation and compare it against every Definition of done item; do not assume the task is complete because a pull request exists.",
       "- Review code quality, correctness, security, performance, maintainability, tests, migrations, responsive behavior, and optimization opportunities where relevant.",
       "- Run the relevant tests, typechecks, lint, and production build, and verify the actual pull request diff and head SHA.",
@@ -128,6 +138,7 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
     : mode === "RE_REVIEW"
       ? [
       "Re-review mode:",
+      changeStatusFirst,
       "- This task was reviewed previously. Read the latest human updates and provider findings from the task updates and agent-logs endpoints before inspecting the current head.",
       "- Compare the current implementation and current head SHA against every review finding and every Definition of done item; report which findings are cleared and which remain.",
       "- Run focused validation and report structured remaining findings with severity and evidence. Do not assume approval, merge, or silently modify the implementation.",
@@ -135,6 +146,7 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
     : mode === "FIX"
       ? [
       "Fix needed mode:",
+      changeStatusFirst,
       existingBranch
         ? `- Work on the existing branch ${existingBranch}; do not create a new branch or move the task to another branch.`
         : `- No existing task branch is configured. Stop before editing and ask the operator to set the review branch; never invent ${branch}.`,
@@ -144,6 +156,7 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
     ]
     : [
       "Implementation mode:",
+      changeStatusFirst,
       "- Implement the task description and every Definition of done item with the smallest complete change.",
       "- Preserve unrelated work, run the relevant validation commands, and report progress, blockers, and final evidence through TaskForge.",
     ];
@@ -183,7 +196,7 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
     `- Resolve canonical context with GET ${contextEndpoint}. If access returns 403, stop and ask the project owner to add your agent as a project member.`,
     "- Before every status change, use project.availableStatuses from the latest context response and never PATCH a disabled status.",
     "- If this prompt came from a signed assignment with a runId, preserve that runId on status changes and run callbacks; redact tokens, secrets, and credentials from updates, logs, and findings.",
-    startInstruction,
+    changeStatusFirst,
     phaseMergeInstruction,
     `- Post meaningful progress and blocker notes to POST ${updatesEndpoint} with a JSON body containing the body field. Human updates should summarize decisions and handoffs; provider output belongs in agent logs when available.`,
     `- For Fix needed and Re-review, use GET ${agentLogsEndpoint} alongside ${updatesEndpoint} to recover the latest findings before acting.`,
@@ -193,25 +206,28 @@ export function buildAIPrompt({ provider, mode = "IMPLEMENT", project, task, pha
     "",
     "Delivery workflow:",
     ...(readOnlyMode ? [
-      "1. Inspect the current repository status, branch, pull request diff, and exact head SHA; do not edit files.",
-      "2. Compare the implementation against every Definition of done item and identify missing, risky, or unnecessary work.",
-      "3. Run the relevant typecheck, test, lint, and production build commands available in the repository.",
-      "4. Review security, secrets, migrations, performance, maintainability, and responsive behavior where applicable.",
-      "5. Post structured findings with severity, evidence, and a disposition recommendation to TaskForge; do not commit, push, open, or merge a pull request.",
-    ] : mode === "FIX" ? [
-      "1. Inspect the current repository, existing branch, and latest review findings before editing; preserve unrelated changes.",
-      "2. Work only on the existing branch and implement the smallest fixes for every finding, including regression tests where appropriate.",
-      "3. Run the relevant typecheck, test, lint, and production build commands available in the repository.",
-      "4. Review the diff for regressions, security issues, secrets, and accidental unrelated edits; report each finding’s resolution.",
-      "5. Commit and push the fixes to the existing branch/PR when applicable, then update TaskForge with validation evidence and request re-review; do not approve, merge, or open a replacement branch.",
-    ] : [
-      "1. Inspect the repository status and relevant code before editing; preserve unrelated changes.",
-      "2. Create or switch to the suggested branch unless the task already specifies another branch.",
-      "3. Implement every observable requirement in the definition of done, including tests and responsive behavior where applicable.",
+      `1. ${changeStatusFirst.slice(2)}`,
+      "2. Inspect the current repository status, branch, pull request diff, and exact head SHA; do not edit files.",
+      "3. Compare the implementation against every Definition of done item and identify missing, risky, or unnecessary work.",
       "4. Run the relevant typecheck, test, lint, and production build commands available in the repository.",
-      "5. Review the diff for regressions, security issues, secrets, and accidental unrelated edits.",
-      "6. Commit the focused change, push it, and open a pull request when repository access allows.",
-      "7. Update TaskForge with the result, validation evidence, branch, and pull request. Clearly report any blocker instead of claiming completion.",
+      "5. Review security, secrets, migrations, performance, maintainability, and responsive behavior where applicable.",
+      "6. Post structured findings with severity, evidence, and a disposition recommendation to TaskForge; do not commit, push, open, or merge a pull request.",
+    ] : mode === "FIX" ? [
+      `1. ${changeStatusFirst.slice(2)}`,
+      "2. Inspect the current repository, existing branch, and latest review findings before editing; preserve unrelated changes.",
+      "3. Work only on the existing branch and implement the smallest fixes for every finding, including regression tests where appropriate.",
+      "4. Run the relevant typecheck, test, lint, and production build commands available in the repository.",
+      "5. Review the diff for regressions, security issues, secrets, and accidental unrelated edits; report each finding’s resolution.",
+      "6. Commit and push the fixes to the existing branch/PR when applicable, then update TaskForge with validation evidence and request re-review; do not approve, merge, or open a replacement branch.",
+    ] : [
+      `1. ${changeStatusFirst.slice(2)}`,
+      "2. Inspect the repository status and relevant code before editing; preserve unrelated changes.",
+      "3. Create or switch to the suggested branch unless the task already specifies another branch.",
+      "4. Implement every observable requirement in the definition of done, including tests and responsive behavior where applicable.",
+      "5. Run the relevant typecheck, test, lint, and production build commands available in the repository.",
+      "6. Review the diff for regressions, security issues, secrets, and accidental unrelated edits.",
+      "7. Commit the focused change, push it, and open a pull request when repository access allows.",
+      "8. Update TaskForge with the result, validation evidence, branch, and pull request. Clearly report any blocker instead of claiming completion.",
     ]),
     "",
     `Begin by opening ${contextUrl} and the configured repository, then ${readOnlyMode ? `review ${taskKey} and report findings` : mode === "FIX" ? `resolve the review findings for ${taskKey} on its existing branch` : `take ownership of ${taskKey} through completion`}.`,
