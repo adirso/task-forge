@@ -189,9 +189,13 @@ async function extractAndVerify(inputPath: string) {
   let expandedBytes = 0;
   for (const line of details.stdout.split("\n").filter(Boolean)) {
     const fields = line.trim().split(/\s+/);
-    const monthIndex = fields.findIndex((field) => months.has(field));
-    if (monthIndex < 1) throw new BackupError("Backup entry metadata is invalid");
-    const size = Number(fields[monthIndex - 1]);
+    // BSD tar prints `size Mon DD`; GNU tar prints `size YYYY-MM-DD`.
+    const sizeIndex = fields.findIndex((field, index) => {
+      const date = fields[index + 1] ?? "";
+      return /^\d+$/.test(field) && (months.has(date) || /^\d{4}-\d{2}-\d{2}$/.test(date));
+    });
+    if (sizeIndex < 1) throw new BackupError("Backup entry metadata is invalid");
+    const size = Number(fields[sizeIndex]);
     if (!Number.isSafeInteger(size) || size < 0) throw new BackupError("Backup entry size is invalid");
     expandedBytes += size;
     if (expandedBytes > MAX_ARCHIVE_BYTES) throw new BackupError("Backup expands beyond the allowed size");
