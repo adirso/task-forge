@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
-import { BackupError, createBackup, restoreBackup } from "../backup.js";
+import { BackupError, createBackup, restoreBackup, validateBackup } from "../backup.js";
 import { ForbiddenError, ValidationError } from "../application/errors.js";
 import { db } from "../db/database.js";
 import { recordSecurityAudit } from "../lib/security-audit.js";
@@ -47,18 +47,24 @@ export async function backupRoutes(app: FastifyInstance) {
     if (!data.length || data.length > MAX_BACKUP_BYTES) throw new ValidationError("Backup file size is not supported");
     const staging = await fs.mkdtemp(path.join(os.tmpdir(), "taskforge-upload-"));
     const input = path.join(staging, `${crypto.randomUUID()}.tar.gz`);
+    const preimage = db.dialect === "mysql" ? path.join(staging, "preimage.tar.gz") : null;
     let closed = false;
     try {
       await fs.writeFile(input, data, { mode: 0o600 });
+      const manifest = await validateBackup({ inputPath: input, databaseDriver: db.dialect });
+      if (preimage) await createBackup({ outputPath: preimage, includeSecrets: true, databaseDriver: db.dialect });
       await db.close();
       closed = true;
-      const manifest = await restoreBackup({ inputPath: input, force: true });
+      await restoreBackup({ inputPath: input, force: true, databaseDriver: manifest.databaseDriver });
       await db.reopen();
       closed = false;
       await recordSecurityAudit({ action: "database_backup_restore", outcome: "success", ip: request.ip, userId: context(request).id });
       return reply.send({ restored: true, backup: { formatVersion: manifest.formatVersion, databaseDriver: manifest.databaseDriver, createdAt: manifest.createdAt } });
     } catch (error) {
-      if (closed) await db.reopen().catch(() => {});
+      if (closed) {
+        if (preimage) await restoreBackup({ inputPath: preimage, force: true, databaseDriver: "mysql" }).catch(() => {});
+        await db.reopen().catch(() => {});
+      }
       await recordSecurityAudit({ action: "database_backup_restore", outcome: "failure", ip: request.ip, userId: context(request).id });
       if (error instanceof BackupError) throw new ValidationError(safeFailure(error));
       throw new BackupError(safeFailure(error));

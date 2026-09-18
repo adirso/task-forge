@@ -243,6 +243,7 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
   async function uploadBackup(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; event.currentTarget.value = "";
     if (!file) return;
+    if (!window.confirm("Restore this secure backup and replace the current workspace? The current database will remain unchanged if validation fails.")) return;
     setBackupBusy(true); setBackupError(""); setBackupMessage("");
     try {
       const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error("Could not read backup file")); reader.readAsDataURL(file); });
@@ -488,7 +489,7 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
 
           {tab === "backup" && user.role === "ADMIN" && (
             <div className="settings-section backup-settings-section">
-              <div className="settings-section-heading"><h2>Database backup</h2><p>Export a redacted backup or restore a compatible TaskForge archive. Credentials and API tokens are never included.</p></div>
+              <div className="settings-section-heading"><h2>Database backup</h2><p>Export a redacted transfer backup or restore a compatible secure archive. Redacted exports cannot be restored because they do not contain credentials; secrets are never shown in this interface.</p></div>
               <div className="backup-actions">
                 <section className="backup-card"><Download /><div><h3>Export backup</h3><p>Download a gzip archive containing workspace data and attachments.</p></div><button type="button" className="button button-primary" onClick={() => void exportBackup()} disabled={backupBusy}><Download /> {backupBusy ? "Working…" : "Export and download"}</button></section>
                 <section className="backup-card"><Upload /><div><h3>Restore backup</h3><p>Upload a validated archive to replace this workspace. Invalid or incompatible files leave the current database unchanged.</p></div><label className="button button-secondary"><Upload /> {backupBusy ? "Validating…" : "Choose backup file"}<input type="file" accept=".tar.gz,.tgz,application/gzip,application/x-gzip" onChange={(event) => void uploadBackup(event)} disabled={backupBusy} /></label></section>
