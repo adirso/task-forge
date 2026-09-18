@@ -560,6 +560,13 @@ export const api = {
   projectActivity: (projectId: string, limit = 50) => request<{ activity: ActivityEvent[]; page?: PageInfo }>(`/activity?projectId=${projectId}&limit=${limit}`),
   activityFeed: (limit = 50) => request<{ activity: ActivityEvent[]; page?: PageInfo }>(`/activity?limit=${limit}`),
   agentOps: () => request<{ agents: AgentOpsEntry[] }>("/users/agents/ops"),
+  downloadBackup: async () => {
+    const token = localStorage.getItem("taskforge_token");
+    const response = await fetch(`${API_URL}/backup/export`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!response.ok) throw new ApiError("Could not export database backup", response.status);
+    return response.blob();
+  },
+  restoreBackup: (input: { fileName: string; mimeType: string; data: string }) => request<{ restored: boolean; backup: { formatVersion: number; databaseDriver: string; createdAt: string } }>("/backup/restore", { method: "POST", body: input }),
   updateAgentWebhook: (agentId: string, webhookUrl: string | null) => request<{ user: User; webhookSecret?: string }>(`/users/${agentId}/webhook`, { method: "PATCH", body: { webhookUrl } }),
   rotateAgentWebhookSecret: (agentId: string) => request<{ user: User; webhookSecret: string }>(`/users/${agentId}/webhook-secret/rotate`, { method: "POST" }),
   webhookDeliveries: (filters: { agentId?: string; status?: WebhookDeliveryStatus; limit?: number } = {}) => request<{ deliveries: WebhookDelivery[] }>(`/users/webhook-deliveries?${new URLSearchParams(Object.entries(filters).filter((entry): entry is [string, string | number] => entry[1] !== undefined).map(([key, value]) => [key, String(value)])).toString()}`),

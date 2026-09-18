@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { after, before, test } from "node:test";
 import bcrypt from "bcryptjs";
 import { ApiClient } from "../../smithy/src/api.js";
@@ -10,6 +12,8 @@ import { SmithyRunner } from "../../smithy/src/runner.js";
 import { MemoryJobStore } from "../../smithy/src/store.js";
 import { sign } from "../../smithy/src/security.js";
 import { HEADLESS_PROVIDER_COMMANDS } from "../../smithy/src/config.js";
+
+const execFile = promisify(execFileCallback);
 
 const testDir = mkdtempSync(path.join(tmpdir(), "taskforge-test-"));
 const mysqlTestUrl = process.env.TEST_DATABASE_URL;
@@ -26,6 +30,7 @@ process.env.TEST = "1";
 const { db } = await import("../src/db/database.js");
 const { buildApp } = await import("../src/app.js");
 const { createJwt } = await import("../src/lib/auth.js");
+const { createBackup } = await import("../src/backup.js");
 const { syncTask } = await import("../../delivery-monitor/src/sync.js");
 const app = await buildApp();
 
@@ -60,6 +65,52 @@ test("health endpoint is public", async () => {
   const response = await app.inject({ method: "GET", url: "/health" });
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), { status: "ok" });
+});
+
+test("database backup endpoints restrict access and export redacted archives", async () => {
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  const adminLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@example.com", password: "password123" } });
+  const denied = await app.inject({ method: "GET", url: "/api/backup/export", headers: { authorization: `Bearer ${memberLogin.json().token}` } });
+  assert.equal(denied.statusCode, 403);
+
+  const exported = await app.inject({ method: "GET", url: "/api/backup/export", headers: { authorization: `Bearer ${adminLogin.json().token}` } });
+  assert.equal(exported.statusCode, 200, exported.body);
+  assert.match(exported.headers["content-type"] ?? "", /application\/gzip/);
+  assert.ok(exported.rawPayload.length > 0);
+  const exportedPath = path.join(testDir, "api-export.tar.gz");
+  writeFileSync(exportedPath, exported.rawPayload, { mode: 0o600 });
+  const manifest = JSON.parse((await execFile("tar", ["-xOzf", exportedPath, "manifest.json"])).stdout) as { includeSecrets: boolean; redacted: string[] };
+  assert.equal(manifest.includeSecrets, false);
+  assert.ok(manifest.redacted.includes("users.password_hash"));
+
+  const redactedRestore = await app.inject({ method: "POST", url: "/api/backup/restore", headers: { authorization: `Bearer ${adminLogin.json().token}` }, payload: { fileName: "taskforge-backup.tar.gz", mimeType: "application/gzip", data: exported.rawPayload.toString("base64") } });
+  assert.equal(redactedRestore.statusCode, 400);
+  assert.match(redactedRestore.json().error, /could not be validated or restored/i);
+
+  const securePath = path.join(testDir, "secure-api-backup.tar.gz");
+  await createBackup({ outputPath: securePath, includeSecrets: true });
+  const restored = await app.inject({ method: "POST", url: "/api/backup/restore", headers: { authorization: `Bearer ${adminLogin.json().token}` }, payload: { fileName: "secure-api-backup.tar.gz", mimeType: "application/gzip", data: readFileSync(securePath).toString("base64") } });
+  assert.equal(restored.statusCode, 200, restored.body);
+  assert.equal(restored.json().restored, true);
+
+  const unauthenticatedRestore = await app.inject({ method: "POST", url: "/api/backup/restore", payload: {} });
+  assert.equal(unauthenticatedRestore.statusCode, 401);
+  const memberRestore = await app.inject({ method: "POST", url: "/api/backup/restore", headers: { authorization: `Bearer ${memberLogin.json().token}` }, payload: { fileName: "taskforge-backup.tar.gz", mimeType: "application/gzip", data: "" } });
+  assert.equal(memberRestore.statusCode, 403);
+
+  const invalid = await app.inject({ method: "POST", url: "/api/backup/restore", headers: { authorization: `Bearer ${adminLogin.json().token}` }, payload: { fileName: "not-a-backup.txt", mimeType: "text/plain", data: "bm90IGEgYmFja3Vw" } });
+  assert.equal(invalid.statusCode, 400);
+  assert.match(invalid.json().error, /file type/i);
+
+  const originalClose = db.close;
+  let closeCalled = false;
+  db.close = async () => { closeCalled = true; return originalClose.call(db); };
+  try {
+    const incompatible = await app.inject({ method: "POST", url: "/api/backup/restore", headers: { authorization: `Bearer ${adminLogin.json().token}` }, payload: { fileName: "taskforge-backup.tar.gz", mimeType: "application/gzip", data: Buffer.from("not a backup").toString("base64") } });
+    assert.equal(incompatible.statusCode, 400);
+    assert.match(incompatible.json().error, /could not be validated or restored/i);
+  } finally { db.close = originalClose; }
+  assert.equal(closeCalled, false);
 });
 
 test("delivery monitor diagnostics require authentication and expose safe idle state", async () => {
