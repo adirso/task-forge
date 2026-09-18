@@ -76,7 +76,7 @@ async function hashFile(filePath: string) {
   return { size: data.byteLength, sha256: crypto.createHash("sha256").update(data).digest("hex") };
 }
 async function runTar(args: string[]) {
-  try { return await execFile("tar", args, { maxBuffer: 16 * 1024 * 1024 }); }
+  try { return await execFile("tar", args, { maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: "C", LANG: "C" } }); }
   catch (error) { throw new BackupError(`tar failed: ${error instanceof Error ? error.message : String(error)}`); }
 }
 async function copyAttachments(keys: string[], sourcePath: string, stagingPath: string) {
