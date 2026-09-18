@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { ApiTokenMetadata, User } from "@taskforge/contracts";
-import { Activity, Bot, Check, Copy, Eye, KeyRound, LayoutDashboard, List, Monitor, Plus, ShieldCheck, Trash2, UserRound } from "lucide-react";
+import { Activity, Bot, Check, Copy, Download, Eye, HardDrive, KeyRound, LayoutDashboard, List, Monitor, Plus, ShieldCheck, Trash2, Upload, UserRound } from "lucide-react";
 import { api } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { AgentOpsPage } from "./AgentOpsPage";
 import { WebhookManager } from "./WebhookManager";
 import { AgentCapabilityEditor } from "./AgentCapabilityEditor";
 
-type SettingsTab = "account" | "appearance" | "agents" | "agentops";
+type SettingsTab = "account" | "appearance" | "agents" | "backup" | "agentops";
 
 export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated, onAgentCreated, onAgentUpdated, onAgentDeleted, onDefaultViewChange, onTextSizeChange }: {
   user: User;
@@ -41,6 +41,9 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
   const [revealedTokenId, setRevealedTokenId] = useState("");
   const [copied, setCopied] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState("");
+  const [backupError, setBackupError] = useState("");
   const prevAgentRef = useRef("");
 
   useEffect(() => {
@@ -226,6 +229,29 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
     }
   }
 
+  async function exportBackup() {
+    setBackupBusy(true); setBackupError(""); setBackupMessage("");
+    try {
+      const blob = await api.downloadBackup();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a"); link.href = href; link.download = "taskforge-backup.tar.gz"; link.click();
+      URL.revokeObjectURL(href); setBackupMessage("Backup exported and downloaded");
+    } catch (err) { setBackupError(err instanceof Error ? err.message : "Could not export backup"); }
+    finally { setBackupBusy(false); }
+  }
+
+  async function uploadBackup(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; event.currentTarget.value = "";
+    if (!file) return;
+    setBackupBusy(true); setBackupError(""); setBackupMessage("");
+    try {
+      const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error("Could not read backup file")); reader.readAsDataURL(file); });
+      await api.restoreBackup({ fileName: file.name, mimeType: file.type || "application/gzip", data });
+      setBackupMessage("Backup restored successfully");
+    } catch (err) { setBackupError(err instanceof Error ? err.message : "Could not restore backup"); }
+    finally { setBackupBusy(false); }
+  }
+
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
 
   return (
@@ -240,6 +266,7 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
           <button type="button" className={tab === "account" ? "active" : ""} aria-current={tab === "account" ? "page" : undefined} onClick={() => setTab("account")}><UserRound /> Account</button>
           <button type="button" className={tab === "appearance" ? "active" : ""} aria-current={tab === "appearance" ? "page" : undefined} onClick={() => setTab("appearance")}><Monitor /> Appearance</button>
           <button type="button" className={tab === "agents" ? "active" : ""} aria-current={tab === "agents" ? "page" : undefined} onClick={() => setTab("agents")}><Bot /> Agents <span>{agents.length}</span></button>
+          {user.role === "ADMIN" && <button type="button" className={tab === "backup" ? "active" : ""} aria-current={tab === "backup" ? "page" : undefined} onClick={() => setTab("backup")}><HardDrive /> Backup</button>}
           {user.role === "ADMIN" && <button type="button" className={tab === "agentops" ? "active" : ""} aria-current={tab === "agentops" ? "page" : undefined} onClick={() => setTab("agentops")}><Activity /> Agent ops</button>}
         </nav>
         <section className="settings-content">
@@ -456,6 +483,18 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {tab === "backup" && user.role === "ADMIN" && (
+            <div className="settings-section backup-settings-section">
+              <div className="settings-section-heading"><h2>Database backup</h2><p>Export a redacted backup or restore a compatible TaskForge archive. Credentials and API tokens are never included.</p></div>
+              <div className="backup-actions">
+                <section className="backup-card"><Download /><div><h3>Export backup</h3><p>Download a gzip archive containing workspace data and attachments.</p></div><button type="button" className="button button-primary" onClick={() => void exportBackup()} disabled={backupBusy}><Download /> {backupBusy ? "Working…" : "Export and download"}</button></section>
+                <section className="backup-card"><Upload /><div><h3>Restore backup</h3><p>Upload a validated archive to replace this workspace. Invalid or incompatible files leave the current database unchanged.</p></div><label className="button button-secondary"><Upload /> {backupBusy ? "Validating…" : "Choose backup file"}<input type="file" accept=".tar.gz,.tgz,application/gzip,application/x-gzip" onChange={(event) => void uploadBackup(event)} disabled={backupBusy} /></label></section>
+              </div>
+              {backupError && <div className="form-error backup-feedback" role="alert">{backupError}</div>}
+              {backupMessage && <div className="form-success backup-feedback" role="status"><Check />{backupMessage}</div>}
             </div>
           )}
 

@@ -62,6 +62,26 @@ test("health endpoint is public", async () => {
   assert.deepEqual(response.json(), { status: "ok" });
 });
 
+test("database backup endpoints restrict access and export redacted archives", async () => {
+  const memberLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } });
+  const adminLogin = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "admin@example.com", password: "password123" } });
+  const denied = await app.inject({ method: "GET", url: "/api/backup/export", headers: { authorization: `Bearer ${memberLogin.json().token}` } });
+  assert.equal(denied.statusCode, 403);
+
+  const exported = await app.inject({ method: "GET", url: "/api/backup/export", headers: { authorization: `Bearer ${adminLogin.json().token}` } });
+  assert.equal(exported.statusCode, 200, exported.body);
+  assert.match(exported.headers["content-type"] ?? "", /application\/gzip/);
+  assert.ok(exported.rawPayload.length > 0);
+
+  const invalid = await app.inject({ method: "POST", url: "/api/backup/restore", headers: { authorization: `Bearer ${adminLogin.json().token}` }, payload: { fileName: "not-a-backup.txt", mimeType: "text/plain", data: "bm90IGEgYmFja3Vw" } });
+  assert.equal(invalid.statusCode, 400);
+  assert.match(invalid.json().error, /file type/i);
+
+  const incompatible = await app.inject({ method: "POST", url: "/api/backup/restore", headers: { authorization: `Bearer ${adminLogin.json().token}` }, payload: { fileName: "taskforge-backup.tar.gz", mimeType: "application/gzip", data: Buffer.from("not a backup").toString("base64") } });
+  assert.equal(incompatible.statusCode, 400);
+  assert.match(incompatible.json().error, /could not be validated or restored/i);
+});
+
 test("delivery monitor diagnostics require authentication and expose safe idle state", async () => {
   const denied = await app.inject({ method: "GET", url: "/api/delivery-monitor/health" });
   assert.equal(denied.statusCode, 401);

@@ -32,6 +32,7 @@ import { deliveryMonitorRoutes } from "./routes/delivery-monitor.js";
 import { planRoutes } from "./routes/plans.js";
 import { agentUsageRoutes } from "./routes/agent-usage.js";
 import { artifactRoutes } from "./routes/artifacts.js";
+import { backupRoutes } from "./routes/backup.js";
 
 export async function buildApp(options: { startWebhookDispatcher?: boolean } = {}) {
   const app = Fastify({ logger: !process.env.TEST, trustProxy: config.trustedProxy });
@@ -104,6 +105,7 @@ export async function buildApp(options: { startWebhookDispatcher?: boolean } = {
   await app.register(planRoutes, { prefix: "/api" });
   await app.register(agentUsageRoutes, { prefix: "/api" });
   await app.register(artifactRoutes, { prefix: "/api" });
+  await app.register(backupRoutes, { prefix: "/api/backup" });
 
   return app;
 }
