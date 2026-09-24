@@ -7,21 +7,38 @@ test("TaskForge signs the Smithy force-cycle request without exposing its secret
   let observedUrl = "";
   let signature = "";
   let body = "";
-  const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
-    observedUrl = String(input); signature = String((init?.headers as Record<string, string>)["X-TaskForge-Signature"]); body = String(init?.body);
-    return new Response("{}", { status: 202 });
-  };
-  await dispatchForceCycle("http://127.0.0.1:4500/agents/codex", "force-secret", 4, { id: "force-1", taskId: "task-1", eventId: "event-1", priorCount: 6, newLimit: 7 }, fetchImpl as typeof fetch, () => 1_700_000_000_000);
-  assert.equal(observedUrl, "http://127.0.0.1:4500/agents/codex/force-cycle");
+  let observedAddress = "";
+  await dispatchForceCycle("https://agent.example/agents/codex", "force-secret", 4, { id: "force-1", taskId: "task-1", eventId: "event-1", priorCount: 6, newLimit: 7 }, {
+    resolveAddresses: async () => [{ address: "93.184.216.34", family: 4 }],
+    request: async (destination, options) => {
+      observedUrl = destination.url.toString(); observedAddress = destination.addresses[0]!.address;
+      signature = options.headers["X-TaskForge-Signature"]!; body = options.body;
+      return { status: 202 };
+    },
+    now: () => 1_700_000_000_000,
+  });
+  assert.equal(observedUrl, "https://agent.example/agents/codex/force-cycle");
+  assert.equal(observedAddress, "93.184.216.34");
   const timestamp = 1_700_000_000;
   assert.equal(verifyWebhookSignature("force-secret", timestamp, body, signature.split("v1=")[1]!), true);
   assert.doesNotMatch(body, /force-secret/);
 });
 
 test("Smithy dispatch failures are redacted", async () => {
-  const fetchImpl = async () => new Response("token=tf_private secret=do-not-leak", { status: 500 });
   await assert.rejects(
-    () => dispatchForceCycle("http://127.0.0.1:4500/agents/codex", "force-secret", 1, { id: "force-1", taskId: "task-1", eventId: "event-1", priorCount: 6, newLimit: 7 }, fetchImpl as typeof fetch),
+    () => dispatchForceCycle("https://agent.example/agents/codex", "force-secret", 1, { id: "force-1", taskId: "task-1", eventId: "event-1", priorCount: 6, newLimit: 7 }, {
+      resolveAddresses: async () => [{ address: "93.184.216.34", family: 4 }],
+      request: async () => ({ status: 500 }),
+    }),
     (error: Error) => error.message === "Smithy could not start the additional cycle" && !/tf_private|do-not-leak/.test(error.message),
   );
+});
+
+test("force-cycle dispatch rejects private DNS results without making a request", async () => {
+  let requested = false;
+  await assert.rejects(() => dispatchForceCycle("https://agent.example/agents/codex", "force-secret", 1, { id: "force-1", taskId: "task-1", eventId: "event-1", priorCount: 6, newLimit: 7 }, {
+    resolveAddresses: async () => [{ address: "169.254.169.254", family: 4 }],
+    request: async () => { requested = true; return { status: 202 }; },
+  }), /could not start/);
+  assert.equal(requested, false);
 });

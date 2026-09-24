@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { test } from "node:test";
 import type { RepositorySet, UnitOfWork } from "../src/application/repositories.js";
 import type { WebhookDeliveryEntity } from "../src/application/models.js";
-import { WebhookDispatcher, verifyWebhookSignature } from "../src/lib/webhook.js";
+import type { WebhookRequest } from "../src/lib/webhook.js";
+import { requestWebhook, resolveWebhookDestination, WebhookDispatcher, verifyWebhookSignature } from "../src/lib/webhook.js";
 
 const secret = "whsec_test_signing_secret";
 
@@ -17,12 +19,12 @@ function delivery(): WebhookDeliveryEntity {
   };
 }
 
-function harness(input: { fetch: typeof fetch; maxAttempts?: number; timeoutMs?: number }) {
+function harness(input: { request?: WebhookRequest; resolveAddresses?: (hostname: string) => Promise<Array<{ address: string; family: 4 | 6 }>>; url?: string; maxAttempts?: number; timeoutMs?: number }) {
   let current = new Date("2026-08-23T10:00:00.000Z");
   let state = delivery();
   const logs: Record<string, unknown>[] = [];
   const repositories = {
-    users: { getWebhookConfiguration: async () => ({ webhookUrl: "https://agent.example/webhook?token=url-secret", secretCiphertext: "encrypted-secret", secretVersion: 3 }) },
+    users: { getWebhookConfiguration: async () => ({ webhookUrl: input.url ?? "https://agent.example/webhook?token=url-secret", secretCiphertext: "encrypted-secret", secretVersion: 3 }) },
     webhookDeliveries: {
       listDue: async (now: string) => state.status !== "DELIVERED" && state.status !== "FAILED" && state.nextAttemptAt <= now && (!state.lockedUntil || state.lockedUntil <= now) ? [state.id] : [],
       claim: async (id: string, now: string, lockedUntil: string) => {
@@ -38,7 +40,7 @@ function harness(input: { fetch: typeof fetch; maxAttempts?: number; timeoutMs?:
   } as unknown as RepositorySet;
   const unitOfWork: UnitOfWork = { run: (work) => work(repositories) };
   const dispatcher = new WebhookDispatcher(unitOfWork, () => secret, {
-    fetch: input.fetch, now: () => new Date(current), maxAttempts: input.maxAttempts,
+    request: input.request ?? (async () => ({ status: 204 })), resolveAddresses: input.resolveAddresses ?? (async () => [{ address: "93.184.216.34", family: 4 }]), now: () => new Date(current), maxAttempts: input.maxAttempts,
     timeoutMs: input.timeoutMs ?? 50, retryBaseMs: 1_000, retryMaxMs: 4_000,
     logger: { info: (details) => logs.push(details), warn: (details) => logs.push(details) },
   });
@@ -46,10 +48,10 @@ function harness(input: { fetch: typeof fetch; maxAttempts?: number; timeoutMs?:
 }
 
 test("dispatcher signs successful deliveries and claims an event only once", async () => {
-  const requests: Array<{ body: string; headers: Headers }> = [];
-  const fixture = harness({ fetch: async (_url, init) => {
-    requests.push({ body: String(init?.body), headers: new Headers(init?.headers) });
-    return new Response(null, { status: 204 });
+  const requests: Array<{ body: string; headers: Headers; host: string; addresses: string[] }> = [];
+  const fixture = harness({ request: async (destination, options) => {
+    requests.push({ body: options.body, headers: new Headers(options.headers), host: destination.url.hostname, addresses: destination.addresses.map(({ address }) => address) });
+    return { status: 204 };
   } });
 
   await Promise.all([fixture.dispatcher.tick(), fixture.dispatcher.tick()]);
@@ -62,6 +64,8 @@ test("dispatcher signs successful deliveries and claims an event only once", asy
   assert.equal(request.headers.get("x-taskforge-event-id"), "event-1");
   assert.equal(request.headers.get("x-taskforge-delivery-attempt"), "1");
   assert.equal(request.headers.get("x-taskforge-secret-version"), "3");
+  assert.equal(request.host, "agent.example");
+  assert.deepEqual(request.addresses, ["93.184.216.34"]);
   const signatureHeader = request.headers.get("x-taskforge-signature")!;
   const timestamp = Number(signatureHeader.match(/^t=(\d+),/)?.[1]);
   const signature = signatureHeader.match(/v1=([a-f0-9]{64})$/)?.[1] ?? "";
@@ -70,9 +74,9 @@ test("dispatcher signs successful deliveries and claims an event only once", asy
 
 test("non-2xx responses retry exponentially with one stable idempotency key", async () => {
   const attempts: Array<{ key: string | null; body: string }> = [];
-  const fixture = harness({ maxAttempts: 3, fetch: async (_url, init) => {
-    attempts.push({ key: new Headers(init?.headers).get("idempotency-key"), body: String(init?.body) });
-    return new Response(null, { status: attempts.length < 3 ? 503 : 202 });
+  const fixture = harness({ maxAttempts: 3, request: async (_destination, options) => {
+    attempts.push({ key: new Headers(options.headers).get("idempotency-key"), body: options.body });
+    return { status: attempts.length < 3 ? 503 : 202 };
   } });
 
   await fixture.dispatcher.tick();
@@ -91,7 +95,7 @@ test("non-2xx responses retry exponentially with one stable idempotency key", as
 });
 
 test("network errors reach a bounded terminal failure without logging credentials", async () => {
-  const fixture = harness({ maxAttempts: 2, fetch: async () => { throw new Error(`request failed for ${secret} payload-secret url-secret`); } });
+  const fixture = harness({ maxAttempts: 2, request: async () => { throw new Error(`request failed for ${secret} payload-secret url-secret`); } });
   await fixture.dispatcher.tick();
   fixture.advance(1_000);
   await fixture.dispatcher.tick();
@@ -104,10 +108,83 @@ test("network errors reach a bounded terminal failure without logging credential
 });
 
 test("timeouts follow the same retry policy", async () => {
-  const fixture = harness({ maxAttempts: 1, timeoutMs: 5, fetch: async (_url, init) => new Promise((_resolve, reject) => {
-    init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+  const fixture = harness({ maxAttempts: 1, timeoutMs: 5, request: async (_destination, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
   }) });
   await fixture.dispatcher.tick();
   assert.equal(fixture.state().status, "FAILED");
   assert.equal(fixture.state().lastError, "Delivery timed out");
+});
+
+test("destination parsing blocks private and special-use IPv4 and IPv6 forms", async () => {
+  for (const url of [
+    "http://127.0.0.1/hook", "http://127.1/hook", "http://2130706433/hook", "http://0x7f000001/hook", "http://0177.0.0.1/hook",
+    "http://10.0.0.1/hook", "http://192.168.1.1/hook", "http://169.254.169.254/hook", "http://100.64.0.1/hook", "http://192.0.2.1/hook",
+    "http://[::1]/hook", "http://[::ffff:127.0.0.1]/hook", "http://[fc00::1]/hook", "http://[fe80::1]/hook", "http://[2001:db8::1]/hook",
+  ]) {
+    await assert.rejects(() => resolveWebhookDestination(url), /not allowed/);
+  }
+});
+
+test("DNS answers reject mixed public and non-public results", async () => {
+  await assert.rejects(() => resolveWebhookDestination("https://mixed.example/hook", async () => [
+    { address: "93.184.216.34", family: 4 }, { address: "127.0.0.1", family: 4 },
+  ]), /not allowed/);
+});
+
+test("dispatcher pins the single validated DNS answer to defend against rebinding", async () => {
+  let lookups = 0;
+  const fixture = harness({
+    resolveAddresses: async () => { lookups += 1; return [{ address: lookups === 1 ? "93.184.216.34" : "127.0.0.1", family: 4 }]; },
+    request: async (destination) => {
+      assert.deepEqual(destination.addresses.map(({ address }) => address), ["93.184.216.34"]);
+      return { status: 204 };
+    },
+  });
+  await fixture.dispatcher.tick();
+  assert.equal(lookups, 1);
+  assert.equal(fixture.state().status, "DELIVERED");
+});
+
+test("public HTTPS destinations remain deliverable and redirect responses are never followed", async () => {
+  let requests = 0;
+  const fixture = harness({
+    url: "https://hooks.example.test/events",
+    request: async (destination) => {
+      requests += 1;
+      assert.equal(destination.url.protocol, "https:");
+      assert.deepEqual(destination.addresses.map(({ address }) => address), ["93.184.216.34"]);
+      return { status: 302 };
+    },
+  });
+  await fixture.dispatcher.tick();
+  assert.equal(requests, 1);
+  assert.equal(fixture.state().status, "RETRYING");
+  assert.equal(fixture.state().lastError, "HTTP 302");
+  assert.doesNotMatch(JSON.stringify({ error: fixture.state().lastError, logs: fixture.logs }), /url-secret|encrypted-secret|whsec_test|payload-secret|agent\.example/);
+});
+
+test("transport pins the vetted address, does not follow redirects, and discards response bodies", async () => {
+  let redirectedRequests = 0;
+  const target = createServer((_request, response) => { redirectedRequests += 1; response.end("response-secret"); });
+  await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+  const targetPort = (target.address() as { port: number }).port;
+  const source = createServer((_request, response) => {
+    response.writeHead(302, { location: `http://127.0.0.1:${targetPort}/redirect-target` });
+    response.end("response-secret");
+  });
+  await new Promise<void>((resolve) => source.listen(0, "127.0.0.1", resolve));
+  try {
+    const sourcePort = (source.address() as { port: number }).port;
+    const response = await requestWebhook({
+      url: new URL(`http://rebind-test.invalid:${sourcePort}/webhook`),
+      addresses: [{ address: "127.0.0.1", family: 4 }],
+    }, {
+      method: "POST", headers: { "x-taskforge-signature": secret }, body: "payload-secret", signal: new AbortController().signal,
+    });
+    assert.deepEqual(response, { status: 302 });
+    assert.equal(redirectedRequests, 0);
+  } finally {
+    await Promise.all([new Promise<void>((resolve, reject) => source.close((error) => error ? reject(error) : resolve())), new Promise<void>((resolve, reject) => target.close((error) => error ? reject(error) : resolve()))]);
+  }
 });

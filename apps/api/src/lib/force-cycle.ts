@@ -1,4 +1,5 @@
-import { signWebhookPayload } from "./webhook.js";
+import { resolveWebhookDestination, requestWebhook, signWebhookPayload } from "./webhook.js";
+import type { WebhookAddressResolver, WebhookRequest } from "./webhook.js";
 
 export type ForceCyclePayload = { id: string; taskId: string; eventId: string; priorCount: number; newLimit: number };
 
@@ -7,17 +8,18 @@ export async function dispatchForceCycle(
   secret: string,
   secretVersion: number,
   payload: ForceCyclePayload,
-  fetchImpl: typeof fetch = fetch,
-  now: () => number = Date.now,
+  options: { request?: WebhookRequest; resolveAddresses?: WebhookAddressResolver; now?: () => number } = {},
 ) {
   const body = JSON.stringify(payload);
-  const timestamp = Math.floor(now() / 1_000);
-  const target = `${webhookUrl.replace(/\/$/, "")}/force-cycle`;
+  const timestamp = Math.floor((options.now ?? Date.now)() / 1_000);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetchImpl(target, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": payload.id, "X-TaskForge-Secret-Version": String(secretVersion), "X-TaskForge-Signature": `t=${timestamp},v1=${signWebhookPayload(secret, timestamp, body)}` }, body, signal: controller.signal });
-    if (!response.ok) throw new Error(`Smithy force-cycle endpoint returned HTTP ${response.status}`);
+    const target = new URL(webhookUrl);
+    target.pathname = `${target.pathname.replace(/\/+$/, "")}/force-cycle`;
+    const destination = await resolveWebhookDestination(target.toString(), options.resolveAddresses);
+    const response = await (options.request ?? requestWebhook)(destination, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": payload.id, "X-TaskForge-Secret-Version": String(secretVersion), "X-TaskForge-Signature": `t=${timestamp},v1=${signWebhookPayload(secret, timestamp, body)}` }, body, signal: controller.signal });
+    if (response.status < 200 || response.status >= 300) throw new Error("Non-success status");
   } catch {
     throw new Error("Smithy could not start the additional cycle");
   } finally {
