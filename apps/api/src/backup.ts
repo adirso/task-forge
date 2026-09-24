@@ -84,7 +84,10 @@ async function copyAttachments(keys: string[], sourcePath: string, stagingPath: 
   for (const rawKey of keys) {
     const key = safeKey(rawKey);
     const source = path.join(sourcePath, key);
-    if (!(await exists(source))) throw new BackupError(`Attachment file is missing: ${key}`);
+    // Keep the database row in the snapshot even when its blob is already
+    // missing. This preserves the source state on restore instead of making
+    // an otherwise usable backup impossible to create.
+    if (!(await exists(source))) continue;
     const stat = await fs.stat(source);
     if (!stat.isFile()) throw new BackupError(`Attachment path is not a regular file: ${key}`);
     await fs.copyFile(source, path.join(target, key));
@@ -184,7 +187,11 @@ export async function createBackup(options: BackupOptions): Promise<BackupManife
       : await mysqlSnapshot(options.databaseUrl ?? config.databaseUrl!, stagingPath, includeSecrets);
     await copyAttachments(snapshot.keys, attachmentsOf(options.attachmentsPath), stagingPath);
     const files: BackupManifest["files"] = {};
-    for (const relative of [snapshot.databaseName, ...snapshot.keys.map((key) => `attachments/${safeKey(key)}`)]) files[relative] = await hashFile(path.join(stagingPath, relative));
+    files[snapshot.databaseName] = await hashFile(path.join(stagingPath, snapshot.databaseName));
+    for (const key of snapshot.keys) {
+      const relative = `attachments/${safeKey(key)}`;
+      if (await exists(path.join(stagingPath, relative))) files[relative] = await hashFile(path.join(stagingPath, relative));
+    }
     const manifest: BackupManifest = { formatVersion: FORMAT_VERSION, createdAt: new Date().toISOString(), databaseDriver: driver, includeSecrets, redacted: includeSecrets ? [] : REDACTED_FIELDS, migrationVersions: snapshot.versions, attachmentKeys: snapshot.keys, files };
     await fs.writeFile(path.join(stagingPath, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     await runTar(["-czf", outputPath, "-C", stagingPath, "manifest.json", snapshot.databaseName, "attachments"]);
@@ -231,10 +238,6 @@ async function extractAndVerify(inputPath: string) {
       const actual = await hashFile(actualPath);
       if (actual.size !== expected.size || actual.sha256 !== expected.sha256) throw new BackupError(`Checksum mismatch for ${relative}`);
     }
-    for (const key of manifest.attachmentKeys) {
-      const relative = `attachments/${safeKey(key)}`;
-      if (!manifest.files[relative]) throw new BackupError(`Manifest is missing the attachment entry: ${key}`);
-    }
     const databaseName = manifest.databaseDriver === "sqlite" ? "database.sqlite" : "database.json";
     if (!manifest.files[databaseName]) throw new BackupError(`Manifest is missing ${databaseName}`);
     return { stagingPath, manifest, databasePath: path.join(stagingPath, databaseName) };
@@ -276,6 +279,9 @@ async function stageAttachmentDirectory(stagingPath: string, attachmentsPath: st
     if (!directoryStat.isDirectory()) throw new BackupError("Archive attachments entry is not a directory");
     for (const key of keys) {
       const source = path.join(sourceDirectory, safeKey(key));
+      // A backup may intentionally retain an attachment row without its
+      // missing blob. Restore that same state by leaving the file absent.
+      if (!(await exists(source))) continue;
       const sourceStat = await fs.lstat(source);
       if (!sourceStat.isFile()) throw new BackupError(`Archive attachment is not a regular file: ${key}`);
       await fs.copyFile(source, path.join(staged, safeKey(key)));
