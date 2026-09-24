@@ -7,10 +7,11 @@ import { UserApplicationService } from "../application/resource-services.js";
 import { createApiToken, hashToken } from "../lib/auth.js";
 import { config } from "../config.js";
 import { decryptSecret, encryptSecret } from "../lib/token-crypto.js";
-import { createWebhookSecret } from "../lib/webhook.js";
+import { createWebhookSecret, isExplicitlyUnsafeWebhookDestination } from "../lib/webhook.js";
 import { WebhookDeliveryApplicationService } from "../application/webhook-service.js";
 import { rateLimited } from "../lib/rate-limit.js";
 import { recordSecurityAudit } from "../lib/security-audit.js";
+import { ValidationError } from "../application/errors.js";
 
 type UserParams = { id: string };
 type TokenParams = { id: string };
@@ -62,6 +63,7 @@ export async function userRoutes(app: FastifyInstance) {
 
   app.patch<{ Params: UserParams }>("/:id/webhook", { schema: { tags: ["Agents"], summary: "Set the dispatch webhook URL for an agent" } }, async (request) => {
     const { webhookUrl } = agentWebhookSchema.parse(request.body);
+    if (webhookUrl && isExplicitlyUnsafeWebhookDestination(webhookUrl)) throw new ValidationError("Webhook URLs cannot target local or non-public IP addresses");
     return service.updateAgentWebhook(context(request), request.params.id, webhookUrl);
   });
 

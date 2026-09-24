@@ -1,4 +1,11 @@
+import http from "node:http";
+import https from "node:https";
+import { lookup as dnsLookup } from "node:dns/promises";
+import type { LookupAddress, LookupOptions } from "node:dns";
+import type { LookupFunction } from "node:net";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
+import ipaddr from "ipaddr.js";
 import type { UnitOfWork } from "../application/repositories.js";
 import type { WebhookDeliveryEntity } from "../application/models.js";
 
@@ -27,7 +34,8 @@ type DeliveryLogger = {
 };
 
 type DispatcherOptions = {
-  fetch?: typeof globalThis.fetch;
+  request?: WebhookRequest;
+  resolveAddresses?: (hostname: string) => Promise<LookupAddress[]>;
   now?: () => Date;
   decryptSecret: (ciphertext: string) => string;
   logger?: DeliveryLogger;
@@ -40,8 +48,94 @@ type DispatcherOptions = {
   pollIntervalMs?: number;
 };
 
+const validatedWebhookDestination: unique symbol = Symbol("validatedWebhookDestination");
+
+export interface WebhookDestination {
+  /** Compile-time marker: construct destinations with resolveWebhookDestination, never from raw request data. */
+  readonly [validatedWebhookDestination]: true;
+  url: URL;
+  addresses: LookupAddress[];
+}
+
+export interface WebhookRequestOptions {
+  method: "POST";
+  headers: Record<string, string>;
+  body: string;
+  signal: AbortSignal;
+}
+
+export type WebhookRequest = (destination: WebhookDestination, options: WebhookRequestOptions) => Promise<{ status: number }>;
+export type WebhookAddressResolver = (hostname: string) => Promise<LookupAddress[]>;
+
+const isPublicAddress = (address: string) => {
+  try { return ipaddr.process(address).range() === "unicast"; }
+  catch { return false; }
+};
+
+/** Reject local names and non-public IP literals at configuration time; DNS names are checked again for every delivery. */
+export function isExplicitlyUnsafeWebhookDestination(value: string) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+    if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "localhost.localdomain") return true;
+    return Boolean(isIP(hostname) && !isPublicAddress(hostname));
+  } catch {
+    return true;
+  }
+}
+
+/** Resolve once, reject the entire answer set if any answer is non-public, and retain it for the request. */
+export async function resolveWebhookDestination(value: string, resolveAddresses: WebhookAddressResolver = (hostname) => dnsLookup(hostname, { all: true, verbatim: true })) {
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error("Webhook destination is not allowed"); }
+  if (!(url.protocol === "http:" || url.protocol === "https:") || url.username || url.password) throw new Error("Webhook destination is not allowed");
+
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  let addresses: LookupAddress[];
+  if (isIP(hostname)) {
+    addresses = [{ address: hostname, family: isIP(hostname) as 4 | 6 }];
+  } else {
+    try { addresses = await resolveAddresses(hostname); }
+    catch { throw new Error("Webhook destination could not be resolved"); }
+  }
+  if (!addresses.length || addresses.some(({ address, family }) => !isIP(address) || isIP(address) !== family || !isPublicAddress(address))) {
+    throw new Error("Webhook destination is not allowed");
+  }
+  return { url, addresses, [validatedWebhookDestination]: true as const };
+}
+
+function pinnedLookup(addresses: LookupAddress[]): LookupFunction {
+  return (_hostname, options: LookupOptions, callback) => {
+    if ("all" in options && options.all) {
+      callback(null, addresses);
+      return;
+    }
+    const selected = addresses.find((address) => !options.family || address.family === options.family) ?? addresses[0]!;
+    callback(null, selected.address, selected.family);
+  };
+}
+
+/** Make exactly one HTTP request to a previously validated address. Node's HTTP client does not follow redirects. */
+export const requestWebhook: WebhookRequest = (destination, options) => new Promise((resolve, reject) => {
+  const transport = destination.url.protocol === "https:" ? https : http;
+  const request = transport.request(destination.url, {
+    method: options.method,
+    headers: options.headers,
+    signal: options.signal,
+    lookup: pinnedLookup(destination.addresses),
+  }, (response) => {
+    // Discard response bytes; neither response bodies nor secret request headers are exposed to callers or logs.
+    response.resume();
+    resolve({ status: response.statusCode ?? 0 });
+  });
+  request.on("error", reject);
+  request.end(options.body);
+});
+
 export class WebhookDispatcher {
-  private readonly fetch: typeof globalThis.fetch;
+  private readonly request: WebhookRequest;
+  private readonly resolveAddresses: (hostname: string) => Promise<LookupAddress[]>;
   private readonly now: () => Date;
   private readonly logger: DeliveryLogger;
   private readonly maxAttempts: number;
@@ -55,7 +149,8 @@ export class WebhookDispatcher {
   private running: Promise<number> | null = null;
 
   constructor(private readonly unitOfWork: UnitOfWork, private readonly decryptSecret: (ciphertext: string) => string, options: Omit<DispatcherOptions, "decryptSecret"> = {}) {
-    this.fetch = options.fetch ?? globalThis.fetch;
+    this.request = options.request ?? requestWebhook;
+    this.resolveAddresses = options.resolveAddresses ?? ((hostname) => dnsLookup(hostname, { all: true, verbatim: true }));
     this.now = options.now ?? (() => new Date());
     this.logger = options.logger ?? {};
     this.maxAttempts = options.maxAttempts ?? WEBHOOK_MAX_ATTEMPTS;
@@ -117,6 +212,16 @@ export class WebhookDispatcher {
     if (!configuration?.webhookUrl) return this.fail(delivery, "Webhook URL is not configured", null);
     if (!configuration.secretCiphertext) return this.fail(delivery, "Webhook signing secret is not configured", null);
 
+    let destination: WebhookDestination;
+    try {
+      destination = await resolveWebhookDestination(configuration.webhookUrl, this.resolveAddresses);
+    } catch (error) {
+      const reason = error instanceof Error && error.message === "Webhook destination could not be resolved"
+        ? error.message
+        : "Webhook destination is not allowed";
+      return this.fail(delivery, reason, null);
+    }
+
     let secret: string;
     try {
       secret = this.decryptSecret(configuration.secretCiphertext);
@@ -129,7 +234,7 @@ export class WebhookDispatcher {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await this.fetch(configuration.webhookUrl, {
+      const response = await this.request(destination, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -142,7 +247,7 @@ export class WebhookDispatcher {
         body: delivery.payload,
         signal: controller.signal,
       });
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         const deliveredAt = this.now().toISOString();
         await this.unitOfWork.run((repositories) => repositories.webhookDeliveries.markDelivered(delivery.id, deliveredAt, response.status));
         this.logger.info?.({ deliveryId: delivery.id, eventType: delivery.eventType, agentId: delivery.agentId, attempt: delivery.attemptCount, httpStatus: response.status }, "Webhook delivered");

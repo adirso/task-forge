@@ -4,7 +4,7 @@ import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { AgentRunApplicationService } from "../application/run-service.js";
 import { config } from "../config.js";
-import { dispatchForceCycle } from "../lib/force-cycle.js";
+import { dispatchForceCycle, type ForceCycleDispatchOptions } from "../lib/force-cycle.js";
 import { AgentRunCredentialApplicationService } from "../application/run-credential-service.js";
 import { createRunCredential, hashToken } from "../lib/auth.js";
 import { decryptSecret, encryptSecret } from "../lib/token-crypto.js";
@@ -26,7 +26,7 @@ const leaseSchema = z.object({ leaseMs: z.number().int().min(5_000).max(900_000)
 const completeSchema = z.object({ status: z.enum(["SUCCEEDED", "FAILED"]), controlVersion: z.number().int().nonnegative(), error: z.string().trim().max(1000).nullable().optional() });
 const idempotencyKeySchema = z.string().trim().min(1).max(180);
 
-export async function runRoutes(app: FastifyInstance) {
+export async function runRoutes(app: FastifyInstance, options: { forceCycleOptions?: ForceCycleDispatchOptions } = {}) {
   app.addHook("preHandler", app.authenticate);
   app.get<{ Params: { taskId: string } }>("/tasks/:taskId/runs", async (request) => service.list(context(request), request.params.taskId));
   app.post<{ Params: { taskId: string } }>("/tasks/:taskId/runs", async (request, reply) => reply.code(201).send({ run: await service.create(context(request), request.params.taskId, createSchema.parse(request.body)) }));
@@ -34,7 +34,7 @@ export async function runRoutes(app: FastifyInstance) {
     const requestId = idempotencyKeySchema.parse(request.headers["idempotency-key"]);
     const result = await service.forceCycle(context(request), request.params.taskId, requestId);
     try {
-      await dispatchForceCycle(result.webhook.webhookUrl!, decryptSecret(result.webhook.secretCiphertext!, config.tokenEncryptionKey), result.webhook.secretVersion, { id: result.grant.requestId, taskId: result.grant.taskId, eventId: result.grant.smithyEventId, priorCount: result.grant.priorCount, newLimit: result.grant.newLimit });
+      await dispatchForceCycle(result.webhook.webhookUrl!, decryptSecret(result.webhook.secretCiphertext!, config.tokenEncryptionKey), result.webhook.secretVersion, { id: result.grant.requestId, taskId: result.grant.taskId, eventId: result.grant.smithyEventId, priorCount: result.grant.priorCount, newLimit: result.grant.newLimit }, options.forceCycleOptions);
     } catch {
       return reply.code(502).send({ error: "Smithy could not start the additional cycle. Retry this action; the cycle grant will not be duplicated." });
     }

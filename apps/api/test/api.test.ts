@@ -32,7 +32,11 @@ const { buildApp } = await import("../src/app.js");
 const { createJwt } = await import("../src/lib/auth.js");
 const { createBackup } = await import("../src/backup.js");
 const { syncTask } = await import("../../delivery-monitor/src/sync.js");
-const app = await buildApp();
+const forceCycleDispatches: string[] = [];
+const app = await buildApp({ forceCycleOptions: {
+  resolveAddresses: async () => [{ address: "93.184.216.34", family: 4 }],
+  request: async (destination) => { forceCycleDispatches.push(destination.url.toString()); return { status: 202 }; },
+} });
 
 const adminId = randomUUID();
 const memberId = randomUUID();
@@ -696,6 +700,10 @@ test("administrators manage signed webhook secrets and durable deliveries", asyn
 
   const forbiddenConfig = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${memberToken}` }, payload: { webhookUrl: "https://agent.example/webhook" } });
   assert.equal(forbiddenConfig.statusCode, 403, forbiddenConfig.body);
+  for (const webhookUrl of ["http://127.0.0.1/agents/codex", "http://2130706433/agents/codex", "http://[::1]/agents/codex", "http://localhost/agents/codex", "http://runner.localhost/agents/codex"]) {
+    const rejected = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl } });
+    assert.equal(rejected.statusCode, 400, `${webhookUrl}: ${rejected.body}`);
+  }
   const credentialUrl = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "https://user:password@agent.example/webhook" } });
   assert.equal(credentialUrl.statusCode, 400, credentialUrl.body);
 
@@ -1078,7 +1086,7 @@ test("configured autonomous workflow routes implementation, review, fix, and re-
   const workflowStatuses = ["TODO", "IN_PROGRESS", "READY_FOR_REVIEW", "IN_REVIEW", "APPROVED", "FIX_NEEDED", "FIX_IN_PROGRESS", "RE_REVIEW"];
   const configured = await app.inject({ method: "PATCH", url: `/api/projects/${loopProjectId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { availableStatuses: workflowStatuses, defaultStatus: "TODO", agentWorkflow: { implementationQueue: "TODO", implementationStart: "IN_PROGRESS", reviewHandoff: "READY_FOR_REVIEW", reviewStart: "IN_REVIEW", approved: "APPROVED", fixNeeded: "FIX_NEEDED", fixStart: "FIX_IN_PROGRESS", reReview: "RE_REVIEW" }, reviewPolicy: { requireIndependentReview: true, requiredReviewerCount: 1, allowedReviewerAgentIds: [reviewerId] } } });
   assert.equal(configured.statusCode, 200, configured.body);
-  const reviewerWebhook = await app.inject({ method: "PATCH", url: `/api/users/${reviewerId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "http://127.0.0.1:4500/agents/reviewer" } });
+  const reviewerWebhook = await app.inject({ method: "PATCH", url: `/api/users/${reviewerId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "https://reviewer.example/agents/reviewer" } });
   assert.equal(reviewerWebhook.statusCode, 200, reviewerWebhook.body);
   const rule = async (name: string, status: string, assignee: string) => {
     const response = await app.inject({ method: "POST", url: `/api/projects/${loopProjectId}/automations`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { name, conditions: [{ field: "status", operator: "changed_to", value: status }], actions: [{ field: "assigneeId", valueType: "user", value: assignee }] } });
@@ -1333,7 +1341,7 @@ test("agent observability API exposes run health fields alongside logs", async (
 
 test("structured run interventions are authorized, idempotent, audited, and fence stale workers", async () => {
   await db.prepare("INSERT OR IGNORE INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'MEMBER', ?)").run(projectId, agentId, new Date().toISOString());
-  const webhook = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "http://127.0.0.1:4500/agents/codex" } });
+  const webhook = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "https://agent.example/agents/codex" } });
   assert.equal(webhook.statusCode, 200, webhook.body);
   const assigned = await app.inject({ method: "PATCH", url: `/api/tasks/${taskId}`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { assigneeId: agentId } });
   assert.equal(assigned.statusCode, 200, assigned.body);
@@ -1552,6 +1560,7 @@ test("Smithy agents receive revocable credentials bound to one run, task, projec
 });
 
 test("force-cycle API authorizes, audits, dispatches once, and preserves the raised cap", async () => {
+  forceCycleDispatches.length = 0;
   const createdProject = await app.inject({ method: "POST", url: "/api/projects", headers: { authorization: `Bearer ${jwtToken}` }, payload: { key: `FC${randomUUID().slice(0, 4)}`, name: "Force cycle", description: "Cycle grant integration", color: "#BF2600" } });
   assert.equal(createdProject.statusCode, 201, createdProject.body);
   const forceProjectId = createdProject.json().project.id as string;
@@ -1562,6 +1571,8 @@ test("force-cycle API authorizes, audits, dispatches once, and preserves the rai
   const createdTask = await app.inject({ method: "POST", url: `/api/projects/${forceProjectId}/tasks`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { title: "Capped agent task", assigneeId: agentId, status: "FAILED" } });
   assert.equal(createdTask.statusCode, 201, createdTask.body);
   const forceTaskId = createdTask.json().task.id as string;
+  const webhook = await app.inject({ method: "PATCH", url: `/api/users/${agentId}/webhook`, headers: { authorization: `Bearer ${jwtToken}` }, payload: { webhookUrl: "https://agent.example/agents/codex" } });
+  assert.equal(webhook.statusCode, 200, webhook.body);
   const now = new Date().toISOString();
   for (let index = 0; index < 6; index += 1) {
     await db.prepare("INSERT INTO agent_runs (id, task_id, project_id, requested_by_id, kind, status, attempt_count, max_attempts, lease_owner, lease_expires_at, heartbeat_at, timeout_at, last_error, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, 'IMPLEMENTATION', 'FAILED', 1, 3, NULL, NULL, NULL, NULL, 'failed', ?, ?, ?)").run(randomUUID(), forceTaskId, forceProjectId, adminId, now, now, now);
@@ -1574,19 +1585,14 @@ test("force-cycle API authorizes, audits, dispatches once, and preserves the rai
   const denied = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs/force-cycle`, headers: { authorization: `Bearer ${memberLogin.json().token}`, "idempotency-key": "force-integration-6" } });
   assert.equal(denied.statusCode, 403, denied.body);
 
-  const originalFetch = globalThis.fetch;
-  const dispatched: string[] = [];
-  globalThis.fetch = (async (input: string | URL | Request) => { dispatched.push(String(input)); return new Response("{}", { status: 202 }); }) as typeof fetch;
-  try {
-    const forced = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs/force-cycle`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "force-integration-6" } });
-    assert.equal(forced.statusCode, 202, forced.body);
-    assert.deepEqual(forced.json().cycle, { count: 6, limit: 7, limitFailure: false });
-    const duplicate = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs/force-cycle`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "force-integration-6" } });
-    assert.equal(duplicate.statusCode, 202, duplicate.body);
-    assert.equal(duplicate.json().duplicate, true);
-    assert.equal(dispatched.length, 2, "a repeated request may safely redeliver the same Smithy idempotency key");
-    assert.ok(dispatched.every((url) => url.endsWith("/force-cycle")));
-  } finally { globalThis.fetch = originalFetch; }
+  const forced = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs/force-cycle`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "force-integration-6" } });
+  assert.equal(forced.statusCode, 202, forced.body);
+  assert.deepEqual(forced.json().cycle, { count: 6, limit: 7, limitFailure: false });
+  const duplicate = await app.inject({ method: "POST", url: `/api/tasks/${forceTaskId}/runs/force-cycle`, headers: { authorization: `Bearer ${jwtToken}`, "idempotency-key": "force-integration-6" } });
+  assert.equal(duplicate.statusCode, 202, duplicate.body);
+  assert.equal(duplicate.json().duplicate, true);
+  assert.equal(forceCycleDispatches.length, 2, "a repeated request may safely redeliver the same Smithy idempotency key");
+  assert.ok(forceCycleDispatches.every((url) => url.endsWith("/force-cycle")));
 
   const grants = await db.prepare("SELECT prior_count, new_limit, actor_id FROM agent_cycle_grants WHERE task_id = ?").all(forceTaskId);
   assert.deepEqual(grants, [{ prior_count: 6, new_limit: 7, actor_id: adminId }]);
