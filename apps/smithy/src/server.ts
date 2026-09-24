@@ -5,6 +5,7 @@ import { ApiClient } from "./api.js";
 import { SqliteJobStore } from "./store.js";
 import { prepareWorktree } from "./worktree.js";
 import { runProviderPreflight } from "./preflight.js";
+import { verifySignature } from "./security.js";
 
 export function createSmithyServer(config = loadConfig(), runner = new SmithyRunner(config.providers, (provider) => new ApiClient(config.apiUrl, provider.apiToken), undefined, undefined, new SqliteJobStore(config.dbPath), prepareWorktree, undefined, config.apiUrl, config.sandbox)) {
   const server = createServer((request, response) => {
@@ -14,9 +15,31 @@ export function createSmithyServer(config = loadConfig(), runner = new SmithyRun
     }
     const cancelMatch = request.method === "POST" ? request.url?.match(/^\/jobs\/([^/]+)\/cancel$/) : null;
     if (cancelMatch) {
-      const cancelled = runner.cancel(cancelMatch[1]!);
-      response.writeHead(cancelled ? 200 : 404, { "Content-Type": "application/json" });
-      response.end(JSON.stringify(cancelled ? { cancelled: true, eventId: cancelMatch[1] } : { error: "Job is not cancellable" }));
+      const chunks: Buffer[] = [];
+      let size = 0;
+      let tooLarge = false;
+      request.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size <= 4096) chunks.push(chunk);
+        else tooLarge = true;
+      });
+      request.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        const signature = request.headers["x-taskforge-signature"];
+        const header = Array.isArray(signature) ? signature[0] : signature;
+        let eventId: unknown;
+        try { eventId = (JSON.parse(body) as { eventId?: unknown }).eventId; } catch { /* Unauthorized requests get a generic response. */ }
+        let pathEventId: string | undefined;
+        try { pathEventId = decodeURIComponent(cancelMatch[1]!); } catch { /* Invalid path encoding is unauthorized. */ }
+        if (tooLarge || !config.cancelSecret || !verifySignature(config.cancelSecret, header, body) || typeof eventId !== "string" || eventId !== pathEventId) {
+          response.writeHead(401, { "Content-Type": "application/json" });
+          response.end(JSON.stringify({ error: "Unauthorized" }));
+          return;
+        }
+        const cancelled = runner.cancel(pathEventId);
+        response.writeHead(cancelled ? 200 : 404, { "Content-Type": "application/json" });
+        response.end(JSON.stringify(cancelled ? { cancelled: true, eventId: pathEventId } : { error: "Job is not cancellable" }));
+      });
       return;
     }
     const forceMatch = request.method === "POST" ? request.url?.match(/^\/agents\/([^/]+)\/force-cycle$/) : null;

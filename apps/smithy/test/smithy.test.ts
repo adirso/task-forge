@@ -35,6 +35,8 @@ test("provider-neutral usage envelopes aggregate valid values and ignore malform
 test("configuration rejects non-loopback execution hosts", () => {
   assert.throws(() => loadConfig({ SMITHY_HOST: "0.0.0.0", SMITHY_PROVIDERS: "{}" }), /loopback/);
   assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PROVIDERS: "{}" }).host, "127.0.0.1");
+  assert.throws(() => loadConfig({ SMITHY_CANCEL_SECRET: "too-short", SMITHY_PROVIDERS: "{}" }), /at least 32 characters/);
+  assert.equal(loadConfig({ SMITHY_CANCEL_SECRET: "a".repeat(32), SMITHY_PROVIDERS: "{}" }).cancelSecret, "a".repeat(32));
   assert.equal(loadConfig({ SMITHY_HOST: "127.0.0.1", SMITHY_PREFLIGHT: "true", SMITHY_PROVIDERS: JSON.stringify({ codex: { cmd: "codex exec {prompt}", healthCmd: "codex login status", webhookSecret: "secret", apiToken: "token" } }) }).preflight, true);
   assert.equal(loadConfig({ SMITHY_PROVIDERS: "{}" }).sandbox.mode, "required");
   assert.deepEqual(loadConfig({ SMITHY_PROVIDERS: "{}" }).sandbox.networkAllow, []);
@@ -147,6 +149,38 @@ test("Smithy exposes the provider force-cycle endpoint", async () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/agents/claude/force-cycle`, { method: "POST", headers: { "X-TaskForge-Signature": "signed" }, body: JSON.stringify({ id: "force-1" }) });
     assert.equal(response.status, 202);
     assert.deepEqual(received, { provider: "claude", signature: "signed", body: JSON.stringify({ id: "force-1" }) });
+  } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+});
+
+test("Smithy cancellation requires a signed request and rejects browser-originated requests", async () => {
+  const cancelSecret = "cancel-secret-for-tests-that-is-long-enough";
+  let cancellations = 0;
+  const runner = { resume: async () => undefined, handle: async () => ({ status: 202, body: "{}" }), cancel: (eventId: string) => { assert.equal(eventId, "event-cancel-auth"); cancellations += 1; return true; } };
+  const config = { host: "127.0.0.1", port: 0, apiUrl: "http://127.0.0.1:4000", dbPath: ":memory:", preflight: false, cancelSecret, sandbox: { ...DISABLED_SANDBOX_POLICY }, providers: { claude: provider } };
+  const server = createSmithyServer(config, runner as never);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address() as { port: number };
+    const url = `http://127.0.0.1:${address.port}/jobs/event-cancel-auth/cancel`;
+    const body = JSON.stringify({ eventId: "event-cancel-auth" });
+    const unauthenticated = await fetch(url, { method: "POST", body });
+    assert.equal(unauthenticated.status, 401);
+    assert.equal(cancellations, 0);
+
+    const browserRequest = await fetch(url, { method: "POST", headers: { Origin: "https://attacker.example", "Content-Type": "text/plain" }, body });
+    assert.equal(browserRequest.status, 401);
+    assert.equal(browserRequest.headers.get("access-control-allow-origin"), null);
+    assert.equal(cancellations, 0);
+
+    const badSignature = await fetch(url, { method: "POST", headers: { "X-TaskForge-Signature": "t=1,v1=00" }, body });
+    assert.equal(badSignature.status, 401);
+    assert.equal(cancellations, 0);
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const authorized = await fetch(url, { method: "POST", headers: { "X-TaskForge-Signature": `t=${timestamp},v1=${sign(cancelSecret, timestamp, body)}` }, body });
+    assert.equal(authorized.status, 200);
+    assert.deepEqual(await authorized.json(), { cancelled: true, eventId: "event-cancel-auth" });
+    assert.equal(cancellations, 1);
   } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 });
 
