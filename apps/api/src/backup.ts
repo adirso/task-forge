@@ -145,7 +145,12 @@ async function mysqlSnapshot(databaseUrl: string, stagingPath: string, includeSe
     for (const table of tablesFound) {
       if (!SAFE_TABLE_NAME.test(table)) throw new BackupError(`Unsafe database table name: ${table}`);
       const [rows] = await connection.query(`SELECT * FROM \`${table}\``);
-      tables[table] = (rows as BackupRow[]).map((row) => ({ ...row }));
+      tables[table] = (rows as BackupRow[]).map((row) => Object.fromEntries(Object.entries(row).map(([column, value]) => [
+        column,
+        // mysql2 parses JSON columns into objects. Store those values as JSON
+        // text so the restore driver inserts valid JSON rather than [object Object].
+        value !== null && typeof value === "object" && !Buffer.isBuffer(value) ? JSON.stringify(value) : value,
+      ])));
     }
     const result = redactTables(tables, includeSecrets);
     const versions = migrationVersions(result);
