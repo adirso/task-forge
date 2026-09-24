@@ -31,6 +31,8 @@ const ids = {
   update: "40000000-0000-4000-8000-000000000001",
   attachment: "50000000-0000-4000-8000-000000000001",
   token: "60000000-0000-4000-8000-000000000001",
+  run: "70000000-0000-4000-8000-000000000001",
+  artifact: "80000000-0000-4000-8000-000000000001",
 };
 
 async function seed() {
@@ -162,6 +164,10 @@ test("MySQL backup round-trips representative rows and attachments", { skip: !pr
     await connection.execute("INSERT INTO projects (id, `key`, name, description, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", [ids.project, "MSR", "MySQL Restore Project", "", ids.user, now, now]);
     await connection.execute("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, priority, type, creator_id, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [ids.task, ids.project, 1, "MySQL task", "", "", "TODO", "MEDIUM", "FEATURE", ids.user, 0, now, now]);
     await connection.execute("INSERT INTO task_updates (id, task_id, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", [ids.update, ids.task, ids.user, "MySQL note", now, now]);
+    await connection.execute("INSERT INTO task_status_history (id, task_id, status, entered_at, exited_at, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)", ["90000000-0000-4000-8000-000000000001", ids.task, "TODO", now, null, null]);
+    await connection.execute("INSERT INTO agent_runs (id, task_id, project_id, requested_by_id, kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [ids.run, ids.task, ids.project, ids.user, "IMPLEMENTATION", "SUCCEEDED", now, now]);
+    const artifactContent = Buffer.from([0, 255, 1, 128, 42]);
+    await connection.execute("INSERT INTO agent_artifacts (id, run_id, task_id, project_id, head_sha, artifact_type, name, media_type, file_size, content_hash, metadata_json, content, created_by_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [ids.artifact, ids.run, ids.task, ids.project, "a".repeat(40), "COMMIT", "binary fixture", "application/octet-stream", artifactContent.length, "b".repeat(64), JSON.stringify({ source: "backup-test" }), artifactContent, ids.user, now]);
     await connection.execute("INSERT INTO task_attachments (id, task_id, file_name, mime_type, file_size, storage_key, uploaded_by_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [ids.attachment, ids.task, "mysql.txt", "text/plain", 12, ids.attachment, ids.user, now]);
     await connection.end();
     await fs.mkdir(sourceAttachments, { recursive: true });
@@ -174,6 +180,10 @@ test("MySQL backup round-trips representative rows and attachments", { skip: !pr
     assert.equal((rows as Array<{ name: string }>)[0]?.name, "MySQL Restore Project");
     const [notes] = await restored.execute("SELECT body FROM task_updates WHERE id = ?", [ids.update]);
     assert.equal((notes as Array<{ body: string }>)[0]?.body, "MySQL note");
+    const [history] = await restored.execute("SELECT status FROM task_status_history WHERE task_id = ?", [ids.task]);
+    assert.equal((history as Array<{ status: string }>)[0]?.status, "TODO");
+    const [artifacts] = await restored.execute("SELECT content FROM agent_artifacts WHERE id = ?", [ids.artifact]);
+    assert.deepEqual((artifacts as Array<{ content: Buffer }>)[0]?.content, Buffer.from([0, 255, 1, 128, 42]));
     await restored.end();
     assert.equal(await fs.readFile(path.join(targetAttachments, ids.attachment), "utf8"), "mysql content");
   } finally {
