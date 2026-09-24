@@ -11,11 +11,10 @@ import { LEGACY_MIGRATION_VERSIONS, createMysqlAdapter, migrations, runMigration
 
 const execFile = promisify(execFileCallback);
 const FORMAT_VERSION = 1;
-const TABLES = [
-  "users", "api_tokens", "projects", "project_members", "phases", "tasks", "tags", "task_tags",
-  "task_dependencies", "activity", "notifications", "task_updates", "task_attachments", "automations",
-  "webhook_deliveries", "schema_migrations",
-] as const;
+// MySQL has no single-file snapshot equivalent to SQLite. Discover all tables
+// from the selected database so newer migrations cannot silently fall out of a backup.
+const SAFE_TABLE_NAME = /^[A-Za-z0-9_]+$/;
+const BUFFER_MARKER = "__taskforge_backup_buffer_base64__";
 const REDACTED_FIELDS = ["users.password_hash", "users.webhook_url", "users.webhook_secret_ciphertext", "users.webhook_secret_version", "api_tokens"];
 const MAX_ARCHIVE_ENTRIES = 10_000;
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
@@ -141,15 +140,29 @@ async function mysqlSnapshot(databaseUrl: string, stagingPath: string, includeSe
     await connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
     await connection.beginTransaction();
     const tables: BackupTables = {};
-    for (const table of TABLES) {
+    const [tableRows] = await connection.query("SELECT TABLE_NAME AS tableName FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' ORDER BY TABLE_NAME");
+    const tablesFound = (tableRows as Array<{ tableName: string }>).map((row) => row.tableName);
+    for (const table of tablesFound) {
+      if (!SAFE_TABLE_NAME.test(table)) throw new BackupError(`Unsafe database table name: ${table}`);
       const [rows] = await connection.query(`SELECT * FROM \`${table}\``);
-      tables[table] = (rows as BackupRow[]).map((row) => ({ ...row }));
+      tables[table] = (rows as BackupRow[]).map((row) => Object.fromEntries(Object.entries(row).map(([column, value]) => [
+        column,
+        // mysql2 parses JSON columns into objects. Store those values as JSON
+        // text so the restore driver inserts valid JSON rather than [object Object].
+        value !== null && typeof value === "object" && !Buffer.isBuffer(value) ? JSON.stringify(value) : value,
+      ])));
     }
     const result = redactTables(tables, includeSecrets);
     const versions = migrationVersions(result);
     validateVersions(versions);
     const keys = attachmentKeys(result);
-    await fs.writeFile(path.join(stagingPath, "database.json"), JSON.stringify({ formatVersion: FORMAT_VERSION, tables: result }, null, 2));
+    await fs.writeFile(path.join(stagingPath, "database.json"), JSON.stringify({ formatVersion: FORMAT_VERSION, tables: result }, (_key, value) => {
+      // Buffer.toJSON runs before the replacer, so mysql2 buffers arrive in its
+      // { type: "Buffer", data: [...] } form here.
+      if (Buffer.isBuffer(value)) return { [BUFFER_MARKER]: value.toString("base64") };
+      if (value && value.type === "Buffer" && Array.isArray(value.data)) return { [BUFFER_MARKER]: Buffer.from(value.data).toString("base64") };
+      return value;
+    }, 2));
     await connection.commit();
     return { keys, versions, databaseName: "database.json" };
   } catch (error) {
@@ -323,7 +336,10 @@ async function restoreSqlite(databasePath: string, sourcePath: string, attachmen
 }
 
 async function restoreMysql(databaseUrl: string, sourcePath: string, attachmentsPath: string, manifest: BackupManifest, stagingPath: string, force: boolean) {
-  const document = JSON.parse(await fs.readFile(sourcePath, "utf8")) as { formatVersion: number; tables: BackupTables };
+  const document = JSON.parse(await fs.readFile(sourcePath, "utf8"), (_key, value) => {
+    if (value && typeof value === "object" && Object.keys(value).length === 1 && typeof value[BUFFER_MARKER] === "string") return Buffer.from(value[BUFFER_MARKER], "base64");
+    return value;
+  }) as { formatVersion: number; tables: BackupTables };
   if (document.formatVersion !== FORMAT_VERSION || !document.tables) throw new BackupError("MySQL backup database payload is invalid");
   validateVersions(migrationVersions(document.tables));
   const keys = attachmentKeys(document.tables).sort();
@@ -340,8 +356,14 @@ async function restoreMysql(databaseUrl: string, sourcePath: string, attachments
     attachmentSwap = await swapDirectory(stagedAttachments, attachmentsPath);
     await connection.beginTransaction();
     await connection.query("SET FOREIGN_KEY_CHECKS = 0");
-    for (const table of [...TABLES].reverse()) await connection.query(`DELETE FROM \`${table}\``);
-    for (const table of TABLES) {
+    const [targetTableRows] = await connection.query("SELECT TABLE_NAME AS tableName FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' ORDER BY TABLE_NAME");
+    const targetTables = (targetTableRows as Array<{ tableName: string }>).map((row) => row.tableName);
+    for (const table of [...targetTables].reverse()) {
+      if (!SAFE_TABLE_NAME.test(table)) throw new BackupError(`Unsafe database table name: ${table}`);
+      await connection.query(`DELETE FROM \`${table}\``);
+    }
+    for (const table of Object.keys(document.tables)) {
+      if (!SAFE_TABLE_NAME.test(table) || !targetTables.includes(table)) throw new BackupError(`Backup contains an unknown database table: ${table}`);
       const rows = document.tables[table] ?? [];
       for (const row of rows) {
         const columns = Object.keys(row);
