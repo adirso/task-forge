@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { test } from "node:test";
 import type { RepositorySet, UnitOfWork } from "../src/application/repositories.js";
 import type { WebhookDeliveryEntity } from "../src/application/models.js";
-import type { WebhookRequest } from "../src/lib/webhook.js";
+import type { WebhookDestination, WebhookRequest } from "../src/lib/webhook.js";
 import { requestWebhook, resolveWebhookDestination, WebhookDispatcher, verifyWebhookSignature } from "../src/lib/webhook.js";
 
 const secret = "whsec_test_signing_secret";
@@ -132,6 +132,15 @@ test("DNS answers reject mixed public and non-public results", async () => {
   ]), /not allowed/);
 });
 
+test("localhost hostnames resolving to loopback are rejected", async () => {
+  let queriedHost = "";
+  await assert.rejects(() => resolveWebhookDestination("https://localhost/webhook", async (hostname) => {
+    queriedHost = hostname;
+    return [{ address: "127.0.0.1", family: 4 }];
+  }), /not allowed/);
+  assert.equal(queriedHost, "localhost");
+});
+
 test("dispatcher pins the single validated DNS answer to defend against rebinding", async () => {
   let lookups = 0;
   const fixture = harness({
@@ -176,10 +185,12 @@ test("transport pins the vetted address, does not follow redirects, and discards
   await new Promise<void>((resolve) => source.listen(0, "127.0.0.1", resolve));
   try {
     const sourcePort = (source.address() as { port: number }).port;
+    // This unit test deliberately exercises the low-level pinned transport with a loopback socket.
+    // Production callers must pass branded output from resolveWebhookDestination first.
     const response = await requestWebhook({
       url: new URL(`http://rebind-test.invalid:${sourcePort}/webhook`),
       addresses: [{ address: "127.0.0.1", family: 4 }],
-    }, {
+    } as unknown as WebhookDestination, {
       method: "POST", headers: { "x-taskforge-signature": secret }, body: "payload-secret", signal: new AbortController().signal,
     });
     assert.deepEqual(response, { status: 302 });

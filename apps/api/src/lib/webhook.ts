@@ -48,7 +48,11 @@ type DispatcherOptions = {
   pollIntervalMs?: number;
 };
 
+const validatedWebhookDestination: unique symbol = Symbol("validatedWebhookDestination");
+
 export interface WebhookDestination {
+  /** Compile-time marker: construct destinations with resolveWebhookDestination, never from raw request data. */
+  readonly [validatedWebhookDestination]: true;
   url: URL;
   addresses: LookupAddress[];
 }
@@ -68,6 +72,18 @@ const isPublicAddress = (address: string) => {
   catch { return false; }
 };
 
+/** Reject local names and non-public IP literals at configuration time; DNS names are checked again for every delivery. */
+export function isExplicitlyUnsafeWebhookDestination(value: string) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+    if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "localhost.localdomain") return true;
+    return Boolean(isIP(hostname) && !isPublicAddress(hostname));
+  } catch {
+    return true;
+  }
+}
+
 /** Resolve once, reject the entire answer set if any answer is non-public, and retain it for the request. */
 export async function resolveWebhookDestination(value: string, resolveAddresses: WebhookAddressResolver = (hostname) => dnsLookup(hostname, { all: true, verbatim: true })) {
   let url: URL;
@@ -86,7 +102,7 @@ export async function resolveWebhookDestination(value: string, resolveAddresses:
   if (!addresses.length || addresses.some(({ address, family }) => !isIP(address) || isIP(address) !== family || !isPublicAddress(address))) {
     throw new Error("Webhook destination is not allowed");
   }
-  return { url, addresses };
+  return { url, addresses, [validatedWebhookDestination]: true as const };
 }
 
 function pinnedLookup(addresses: LookupAddress[]): LookupFunction {

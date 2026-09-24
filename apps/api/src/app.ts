@@ -33,8 +33,9 @@ import { planRoutes } from "./routes/plans.js";
 import { agentUsageRoutes } from "./routes/agent-usage.js";
 import { artifactRoutes } from "./routes/artifacts.js";
 import { backupRoutes } from "./routes/backup.js";
+import type { ForceCycleDispatchOptions } from "./lib/force-cycle.js";
 
-export async function buildApp(options: { startWebhookDispatcher?: boolean } = {}) {
+export async function buildApp(options: { startWebhookDispatcher?: boolean; forceCycleOptions?: ForceCycleDispatchOptions } = {}) {
   const app = Fastify({ logger: !process.env.TEST, trustProxy: config.trustedProxy });
   app.decorate("securityRateLimiter", new RateLimiter(config.rateLimitWindowMs, config.sensitiveRateLimit, config.rateLimitMaxBackoffMs));
   const webhookDispatcher = new WebhookDispatcher(createUnitOfWork(db), (ciphertext) => decryptSecret(ciphertext, config.tokenEncryptionKey), {
@@ -96,7 +97,7 @@ export async function buildApp(options: { startWebhookDispatcher?: boolean } = {
   await app.register(automationRoutes, { prefix: "/api" });
   await app.register(activityRoutes, { prefix: "/api/activity" });
   await app.register(dashboardRoutes, { prefix: "/api/dashboard" });
-  await app.register(runRoutes, { prefix: "/api" });
+  await app.register(runRoutes, { prefix: "/api", forceCycleOptions: options.forceCycleOptions });
   await app.register(gateRoutes, { prefix: "/api" });
   await app.register(findingRoutes, { prefix: "/api" });
   await app.register(agentLogRoutes, { prefix: "/api" });

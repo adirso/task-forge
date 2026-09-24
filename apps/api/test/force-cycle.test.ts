@@ -42,3 +42,11 @@ test("force-cycle dispatch rejects private DNS results without making a request"
   }), /could not start/);
   assert.equal(requested, false);
 });
+
+test("force-cycle dispatch rejects alternate loopback IP literals before requesting", async () => {
+  let requested = false;
+  await assert.rejects(() => dispatchForceCycle("http://2130706433/agents/codex", "force-secret", 1, { id: "force-1", taskId: "task-1", eventId: "event-1", priorCount: 6, newLimit: 7 }, {
+    request: async () => { requested = true; return { status: 202 }; },
+  }), /could not start/);
+  assert.equal(requested, false);
+});

@@ -3,12 +3,18 @@ import type { WebhookAddressResolver, WebhookRequest } from "./webhook.js";
 
 export type ForceCyclePayload = { id: string; taskId: string; eventId: string; priorCount: number; newLimit: number };
 
+export interface ForceCycleDispatchOptions {
+  request?: WebhookRequest;
+  resolveAddresses?: WebhookAddressResolver;
+  now?: () => number;
+}
+
 export async function dispatchForceCycle(
   webhookUrl: string,
   secret: string,
   secretVersion: number,
   payload: ForceCyclePayload,
-  options: { request?: WebhookRequest; resolveAddresses?: WebhookAddressResolver; now?: () => number } = {},
+  options: ForceCycleDispatchOptions = {},
 ) {
   const body = JSON.stringify(payload);
   const timestamp = Math.floor((options.now ?? Date.now)() / 1_000);
