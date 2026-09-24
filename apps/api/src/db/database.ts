@@ -130,9 +130,9 @@ export function createSqliteAdapter(databasePath: string): Adapter {
 
 class Database {
   readonly dialect: DatabaseDriver;
-  private readonly adapter: Adapter;
+  private adapter: Adapter;
   private readonly context = new AsyncLocalStorage<Executor>();
-  private readonly ready: Promise<void>;
+  private ready: Promise<void>;
 
   constructor() {
     this.dialect = config.databaseDriver;
@@ -161,6 +161,12 @@ class Database {
     } finally {
       await this.adapter.close();
     }
+  }
+
+  async reopen() {
+    this.adapter = this.dialect === "mysql" ? createMysqlAdapter(config.databaseUrl!) : createSqliteAdapter(config.databasePath);
+    this.ready = runMigrations(this.adapter, this.dialect);
+    await this.ready;
   }
 }
 

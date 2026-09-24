@@ -17,6 +17,8 @@ const TABLES = [
   "webhook_deliveries", "schema_migrations",
 ] as const;
 const REDACTED_FIELDS = ["users.password_hash", "users.webhook_url", "users.webhook_secret_ciphertext", "users.webhook_secret_version", "api_tokens"];
+const MAX_ARCHIVE_ENTRIES = 10_000;
+const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 
 export class BackupError extends Error {
   constructor(message: string) { super(message); this.name = "BackupError"; }
@@ -74,7 +76,7 @@ async function hashFile(filePath: string) {
   return { size: data.byteLength, sha256: crypto.createHash("sha256").update(data).digest("hex") };
 }
 async function runTar(args: string[]) {
-  try { return await execFile("tar", args, { maxBuffer: 16 * 1024 * 1024 }); }
+  try { return await execFile("tar", args, { maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: "C", LANG: "C" } }); }
   catch (error) { throw new BackupError(`tar failed: ${error instanceof Error ? error.message : String(error)}`); }
 }
 async function copyAttachments(keys: string[], sourcePath: string, stagingPath: string) {
@@ -181,6 +183,23 @@ async function extractAndVerify(inputPath: string) {
   if (!(await exists(inputPath))) throw new BackupError(`Backup archive does not exist: ${inputPath}`);
   const listing = await runTar(["-tzf", inputPath]);
   const entries = listing.stdout.split("\n").map((line) => line.trim()).filter(Boolean).map(safeArchivePath);
+  if (entries.length > MAX_ARCHIVE_ENTRIES) throw new BackupError("Backup contains too many archive entries");
+  const details = await runTar(["-tvzf", inputPath]);
+  const months = new Set(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]);
+  let expandedBytes = 0;
+  for (const line of details.stdout.split("\n").filter(Boolean)) {
+    const fields = line.trim().split(/\s+/);
+    // BSD tar prints `size Mon DD`; GNU tar prints `size YYYY-MM-DD`.
+    const sizeIndex = fields.findIndex((field, index) => {
+      const date = fields[index + 1] ?? "";
+      return /^\d+$/.test(field) && (months.has(date) || /^\d{4}-\d{2}-\d{2}$/.test(date));
+    });
+    if (sizeIndex < 1) throw new BackupError("Backup entry metadata is invalid");
+    const size = Number(fields[sizeIndex]);
+    if (!Number.isSafeInteger(size) || size < 0) throw new BackupError("Backup entry size is invalid");
+    expandedBytes += size;
+    if (expandedBytes > MAX_ARCHIVE_BYTES) throw new BackupError("Backup expands beyond the allowed size");
+  }
   for (const entry of entries) if (entry !== "manifest.json" && entry !== "database.sqlite" && entry !== "database.json" && entry !== "attachments" && !entry.startsWith("attachments/")) throw new BackupError(`Unexpected archive entry: ${entry}`);
   const stagingPath = await fs.mkdtemp(path.join(os.tmpdir(), "taskforge-restore-"));
   try {
@@ -212,6 +231,29 @@ async function extractAndVerify(inputPath: string) {
   }
 }
 
+export async function validateBackup(options: Pick<RestoreOptions, "inputPath" | "databaseDriver">) {
+  const extracted = await extractAndVerify(path.resolve(options.inputPath));
+  try {
+    const driver = driverOf(options.databaseDriver);
+    if (extracted.manifest.databaseDriver !== driver) throw new BackupError(`Backup driver ${extracted.manifest.databaseDriver} does not match restore driver ${driver}`);
+    if (!extracted.manifest.includeSecrets) throw new BackupError("Settings restore requires a secure backup archive");
+    if (driver === "sqlite") {
+      const inspect = new Sqlite(extracted.databasePath, { readonly: true, fileMustExist: true });
+      const versions = (inspect.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as Array<{ version: string }>).map((row) => row.version);
+      validateVersions(versions);
+      const keys = (inspect.prepare("SELECT storage_key FROM task_attachments ORDER BY storage_key").all() as Array<{ storage_key: string }>).map((row) => row.storage_key);
+      inspect.close();
+      if (JSON.stringify(keys) !== JSON.stringify([...extracted.manifest.attachmentKeys].sort())) throw new BackupError("Attachment records do not match the backup manifest");
+    } else {
+      const document = JSON.parse(await fs.readFile(extracted.databasePath, "utf8")) as { formatVersion: number; tables: BackupTables };
+      if (document.formatVersion !== FORMAT_VERSION || !document.tables) throw new BackupError("MySQL backup database payload is invalid");
+      validateVersions(migrationVersions(document.tables));
+      if (JSON.stringify(attachmentKeys(document.tables).sort()) !== JSON.stringify([...extracted.manifest.attachmentKeys].sort())) throw new BackupError("Attachment records do not match the backup manifest");
+    }
+    return extracted.manifest;
+  } finally { await fs.rm(extracted.stagingPath, { recursive: true, force: true }).catch(() => {}); }
+}
+
 async function stageAttachmentDirectory(stagingPath: string, attachmentsPath: string, keys: string[]) {
   const staged = `${attachmentsPath}.restore-${crypto.randomUUID()}`;
   await fs.mkdir(staged, { recursive: true });
@@ -230,11 +272,19 @@ async function stageAttachmentDirectory(stagingPath: string, attachmentsPath: st
 }
 async function swapDirectory(staged: string, destination: string) {
   await fs.mkdir(path.dirname(destination), { recursive: true });
+  await prunePreviousCopies(destination);
   const old = `${destination}.previous-${crypto.randomUUID()}`;
   const hadOld = await exists(destination);
   if (hadOld) await fs.rename(destination, old);
   try { await fs.rename(staged, destination); return { old, hadOld }; }
   catch (error) { if (hadOld) await fs.rename(old, destination); throw error; }
+}
+async function prunePreviousCopies(destination: string) {
+  const directory = path.dirname(destination);
+  const prefix = `${path.basename(destination)}.previous-`;
+  for (const entry of await fs.readdir(directory).catch(() => [])) {
+    if (entry.startsWith(prefix)) await fs.rm(path.join(directory, entry), { recursive: true, force: true });
+  }
 }
 async function rollbackDirectory(destination: string, old: string, hadOld: boolean) {
   await fs.rm(destination, { recursive: true, force: true });
@@ -254,6 +304,7 @@ async function restoreSqlite(databasePath: string, sourcePath: string, attachmen
   const stagedDb = path.join(targetDir, `.taskforge-restore-${crypto.randomUUID()}.db`);
   await fs.copyFile(sourcePath, stagedDb);
   const stagedAttachments = await stageAttachmentDirectory(stagingPath, attachmentsPath, manifest.attachmentKeys);
+  await prunePreviousCopies(databasePath);
   const oldDb = `${databasePath}.previous-${crypto.randomUUID()}`;
   const hadDb = await exists(databasePath);
   let attachmentSwap: { old: string; hadOld: boolean } | undefined;
@@ -261,8 +312,7 @@ async function restoreSqlite(databasePath: string, sourcePath: string, attachmen
     if (hadDb) await fs.rename(databasePath, oldDb);
     await fs.rename(stagedDb, databasePath);
     attachmentSwap = await swapDirectory(stagedAttachments, attachmentsPath);
-    // Keep the previous paths until the operator has verified the restore.
-    // They are the recovery point if post-restore checks expose a problem.
+    // Retain one bounded recovery copy; the next restore prunes this copy first.
   } catch (error) {
     await fs.rm(stagedDb, { force: true });
     if (attachmentSwap) await rollbackDirectory(attachmentsPath, attachmentSwap.old, attachmentSwap.hadOld);
