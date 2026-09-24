@@ -84,6 +84,12 @@ Important variables:
 
 Never commit `.env`, database files, agent tokens, webhook secrets, or production credentials. Put the API behind TLS before exposing it beyond localhost.
 
+### Production login rate limiting
+
+The API keeps both per-IP and per-account failed-login counters. These counters are process-local, periodically reclaim expired keys, and fail closed for new keys when each limiter's 10,000-entry capacity is full. For production with multiple API workers, apply the shared NGINX ingress limiter in [`deploy/nginx/taskforge-rate-limit.http.conf`](deploy/nginx/taskforge-rate-limit.http.conf) and [`deploy/nginx/taskforge-rate-limit.server.conf`](deploy/nginx/taskforge-rate-limit.server.conf): include the first file in `http {}` and the second in the TLS `server {}` that proxies to an `upstream taskforge_api`. Its shared-memory zone enforces the per-client-IP login request rate across that NGINX instance's worker processes. Keep the rate at or below `LOGIN_RATE_LIMIT_IP`.
+
+If NGINX sits behind a load balancer, configure its real-IP module to trust only that load balancer's addresses so `$binary_remote_addr` represents the client. Configure API `TRUST_PROXY` with only the trusted ingress addresses. When deploying multiple NGINX ingress instances, use a managed/global rate-limiting service or route each client consistently to one ingress; NGINX shared-memory zones do not synchronize between instances. The application per-account limiter remains enabled as defense in depth.
+
 ### MySQL development
 
 SQLite is recommended for day-to-day development. To exercise MySQL-specific behavior, start a disposable MySQL 8 instance and set `DATABASE_DRIVER=mysql` and `DATABASE_URL` in a shell or env file. Do not point tests or local migrations at production; the test suite creates and modifies its database.
