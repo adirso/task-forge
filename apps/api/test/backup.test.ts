@@ -134,9 +134,20 @@ test("corrupt and incomplete archives fail before overwriting an existing restor
   await assert.rejects(backup.restoreBackup({ inputPath: sourceArchive, databasePath: targetDatabase, attachmentsPath: targetAttachments, databaseDriver: "sqlite" }), /not empty|force/i);
 });
 
-test("backup refuses a database row whose attachment file is missing", async () => {
+test("backup preserves a database row whose attachment file is missing", async () => {
   await fs.rm(path.join(sourceAttachments, ids.attachment));
-  await assert.rejects(backup.createBackup({ outputPath: path.join(root, "missing-source.tar.gz"), databasePath: sourceDatabase, attachmentsPath: sourceAttachments, databaseDriver: "sqlite" }), /missing/i);
+  const archivePath = path.join(root, "missing-source.tar.gz");
+  const manifest = await backup.createBackup({ outputPath: archivePath, databasePath: sourceDatabase, attachmentsPath: sourceAttachments, databaseDriver: "sqlite" });
+  assert.deepEqual(manifest.attachmentKeys, [ids.attachment]);
+  assert.equal(manifest.files[`attachments/${ids.attachment}`], undefined);
+
+  const restoredDatabase = path.join(root, "missing-restored.db");
+  const restoredAttachments = path.join(root, "missing-restored-attachments");
+  await backup.restoreBackup({ inputPath: archivePath, databasePath: restoredDatabase, attachmentsPath: restoredAttachments, databaseDriver: "sqlite" });
+  const restored = new Sqlite(restoredDatabase, { readonly: true });
+  assert.equal(restored.prepare("SELECT COUNT(*) AS count FROM task_attachments WHERE storage_key = ?").get(ids.attachment)?.count, 1);
+  restored.close();
+  await assert.rejects(fs.access(path.join(restoredAttachments, ids.attachment)));
 });
 
 test("MySQL backup round-trips representative rows and attachments", { skip: !process.env.TEST_DATABASE_URL }, async () => {
