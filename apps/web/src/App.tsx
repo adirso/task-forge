@@ -125,10 +125,12 @@ export default function App() {
     if (!user) return;
     const url = new URL(window.location.href);
     if (showSettings) {
-      url.searchParams.set("settings", "account");
-      url.searchParams.delete("project"); url.searchParams.delete("task"); url.searchParams.delete("phase");
+      if (!url.searchParams.get("settings")) url.searchParams.set("settings", "account");
+      url.searchParams.delete("project"); url.searchParams.delete("task"); url.searchParams.delete("phase"); url.searchParams.delete("view");
     } else if (currentProject) {
       url.searchParams.delete("settings");
+      url.searchParams.delete("agent");
+      url.searchParams.delete("agentTab");
       url.searchParams.set("project", currentProject.key);
       url.searchParams.set("view", view);
       if (selectedTask) url.searchParams.set("task", `${currentProject.key}-${selectedTask.number}`);
@@ -138,6 +140,8 @@ export default function App() {
       else url.searchParams.delete("phase");
     } else {
       url.searchParams.delete("settings");
+      url.searchParams.delete("agent");
+      url.searchParams.delete("agentTab");
       url.searchParams.delete("project");
       url.searchParams.delete("task");
       url.searchParams.delete("phase");
