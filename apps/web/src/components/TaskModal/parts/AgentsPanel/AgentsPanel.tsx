@@ -172,7 +172,7 @@ export function AgentsPanel({
               </div>
             ) : <p className={styles.runsEmpty}>No agent runs yet.</p>}
           </section>
-          <section className={styles.artifacts}>
+          <section className={`${styles.artifacts} task-agent-artifacts`}>
             <div className="section-heading">
               <span><Paperclip /> Evidence &amp; provenance <b>{artifacts.length}</b></span>
               <small>Immutable, SHA-bound run artifacts</small>

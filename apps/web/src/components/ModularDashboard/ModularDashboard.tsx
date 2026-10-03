@@ -138,7 +138,7 @@ export function ModularDashboard<T extends string>({ catalog, load, save, defaul
           </>
         )}
         {mounted && isMobile && (
-          <div className={styles.mobileList}>
+          <div className={`${styles.mobileList} dashboard-mobile-list`}>
             {mobileWidgets.map((widget) => (
               <div key={widget.id} className={styles.mobileItem}>
                 <WidgetShell
@@ -166,7 +166,7 @@ export function ModularDashboard<T extends string>({ catalog, load, save, defaul
                 <button
                   key={type}
                   type="button"
-                  className={styles.pickerItem}
+                  className={`${styles.pickerItem} widget-picker-item`}
                   onClick={() => addWidget(type)}
                 >
                   <span className={styles.pickerIcon}>{catalog[type].icon}</span>
