@@ -63,13 +63,13 @@ svg { flex: 0 0 auto; }
 .nav-section-title button { border: 0; background: transparent; color: #8993a4; width: 25px; height: 25px; display: grid; place-items: center; border-radius: 5px; }
 .nav-section-title button:hover { background: #263244; color: white; }
 .nav-section-title svg { width: 14px; }
-.project-nav { display: grid; gap: 3px; overflow: auto; }
-.project-nav button { border: 0; height: 40px; padding: 0 9px; border-radius: 7px; color: #aeb8c8; background: transparent; display: flex; align-items: center; gap: 10px; text-align: left; }
+.project-nav { display: grid; gap: 3px; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+.project-nav button { border: 0; width: 100%; min-width: 0; height: 40px; padding: 0 9px; border-radius: 7px; color: #aeb8c8; background: transparent; display: flex; align-items: center; gap: 10px; text-align: left; overflow: hidden; }
 .project-nav button:hover { background: #1b2636; color: white; }
 .project-nav button.active { color: white; background: #293449; box-shadow: inset 3px 0 #8777d9; }
-.project-nav button > span:nth-child(2) { flex: 1; font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.project-nav small { font-size: 10px; color: #738097; }
-.project-glyph { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 5px; color: white; font-weight: 750; font-size: 11px; }
+.project-nav button > span:nth-child(2) { flex: 1; min-width: 0; font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-nav small { flex: 0 0 auto; font-size: 10px; color: #738097; font-variant-numeric: tabular-nums; }
+.project-glyph { flex: 0 0 23px; width: 23px; height: 23px; display: grid; place-items: center; border-radius: 5px; color: white; font-weight: 750; font-size: 11px; }
 .sidebar-bottom { margin-top: auto; display: grid; gap: 2px; border-top: 1px solid #293449; padding-top: 10px; }
 .sidebar-bottom > button.active { background: #293449; color: white; }
 .profile-button { height: auto !important; min-height: 54px; margin-top: 5px; }

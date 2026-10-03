@@ -24,7 +24,7 @@ export function Sidebar({ projects, currentId, user, unreadCount, settingsActive
         {projects.map((project) => (
           <button key={project.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/project-id", project.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveProject(event.dataTransfer.getData("text/project-id"), project.id); }} aria-label={`${project.name}. Drag to reorder`} className={currentId === project.id ? "active" : ""} onClick={() => { onSelect(project.id); onNavigate?.(); }}>
             <span className="project-glyph" style={{ background: project.color }}>{project.key.slice(0, 1)}</span>
-            <span>{project.name}</span><small>{project.taskCount ?? 0}</small>
+            <span title={project.name}>{project.name}</span><small>{project.taskCount ?? 0}</small>
           </button>
         ))}
       </nav>
