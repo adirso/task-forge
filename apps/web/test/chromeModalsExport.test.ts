@@ -15,3 +15,16 @@ test("Login unit exposes the required co-located files", () => {
     assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
   }
 });
+
+test("App imports PhasesPage from pages/PhasesPage", () => {
+  const app = readFileSync(resolve("src/App.tsx"), "utf8");
+  assert.match(app, /from ["']\.\/pages\/PhasesPage["']/);
+  assert.doesNotMatch(app, /PhaseManager/);
+});
+
+test("PhasesPage unit exposes the required co-located files", () => {
+  const root = resolve("src/pages/PhasesPage");
+  for (const file of ["index.ts", "PhasesPage.tsx", "PhasesPage.module.css", "types.ts"]) {
+    assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
+  }
+});

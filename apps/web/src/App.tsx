@@ -11,7 +11,7 @@ import { ProjectModal } from "./components/ProjectModal";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { SearchPalette } from "./components/SearchPalette";
 import { SettingsPage } from "./pages/SettingsPage";
-import { PhasesPage } from "./components/PhaseManager";
+import { PhasesPage } from "./pages/PhasesPage";
 import { ProjectDeleteModal } from "./components/ProjectDeleteModal";
 import { ProjectMembersModal } from "./components/ProjectMembersModal";
 import { ProjectHeaderActions } from "./components/ProjectHeaderActions";
