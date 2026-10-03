@@ -138,3 +138,17 @@ test("legacy chrome/modal/page selectors were removed from global styles", () =>
     assert.equal(css.includes(selector.trimEnd()), false, selector);
   }
 });
+
+test("migrated chrome modules use :global(.selector) not block :global {}", () => {
+  const roots = [
+    "src/components/Sidebar/Sidebar.module.css",
+    "src/components/Avatar/Avatar.module.css",
+    "src/pages/PhasesPage/PhasesPage.module.css",
+    "src/pages/AutomationsPage/AutomationsPage.module.css",
+  ];
+  for (const file of roots) {
+    const css = readFileSync(resolve(file), "utf8");
+    assert.equal(/^:global\s*\{/m.test(css), false, file);
+    assert.match(css, /:global\(/, file);
+  }
+});

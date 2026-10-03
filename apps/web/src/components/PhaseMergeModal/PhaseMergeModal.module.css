@@ -2,26 +2,35 @@
   /* CSS Modules ownership hook; rules live in :global below */
 }
 
-:global {
-.phase-merge-modal { width: min(680px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; background: white; box-shadow: 0 24px 70px rgba(9,30,66,.3); animation: modal-in .16s ease-out; }
-.phase-merge-modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 25px 16px; }
-.phase-merge-modal h2 { margin: 4px 0 0; color: #172b4d; font-size: 22px; }
-.phase-merge-modal-body { min-height: 0; overflow: auto; padding: 0 25px 20px; display: grid; gap: 15px; }
-.phase-merge-modal-body > p { margin: 0; color: #6b778c; font-size: 12px; line-height: 1.55; }
-.phase-merge-modal dl { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.phase-merge-modal dl > div { display: grid; gap: 5px; padding: 10px 11px; border: 1px solid #ebecf0; border-radius: 8px; background: #fafbfc; }
-.phase-merge-modal dt, .phase-merge-modal label { color: #42526e; font-size: 11px; font-weight: 700; }
-.phase-merge-modal dd { min-width: 0; margin: 0; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-.phase-merge-modal code { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #253858; font-size: 11px; }
-.phase-merge-modal label { display: grid; gap: 7px; }
-.phase-merge-copy-row { display: flex; gap: 7px; }
-.phase-merge-modal input, .phase-merge-modal textarea { width: 100%; min-width: 0; border: 1px solid #dfe1e6; border-radius: 6px; background: #fafbfc; color: #253858; padding: 9px 10px; outline: 0; font: inherit; font-size: 12px; }
-.phase-merge-modal textarea { resize: vertical; line-height: 1.5; }
-.phase-merge-modal .button { flex: 0 0 auto; white-space: nowrap; }
-.phase-merge-copy-button { justify-self: start; }
-.phase-merge-modal > footer { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #ebecf0; padding: 14px 25px 16px; }
+:global(.phase-merge-modal) { width: min(680px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; background: white; box-shadow: 0 24px 70px rgba(9,30,66,.3); animation: modal-in .16s ease-out; }
+:global(.phase-merge-modal > header) { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 25px 16px; }
+:global(.phase-merge-modal h2) { margin: 4px 0 0; color: #172b4d; font-size: 22px; }
+:global(.phase-merge-modal-body) { min-height: 0; overflow: auto; padding: 0 25px 20px; display: grid; gap: 15px; }
+:global(.phase-merge-modal-body > p) { margin: 0; color: #6b778c; font-size: 12px; line-height: 1.55; }
+:global(.phase-merge-modal dl) { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+:global(.phase-merge-modal dl > div) { display: grid; gap: 5px; padding: 10px 11px; border: 1px solid #ebecf0; border-radius: 8px; background: #fafbfc; }
+:global(.phase-merge-modal dt), :global(.phase-merge-modal label) { color: #42526e; font-size: 11px; font-weight: 700; }
+:global(.phase-merge-modal dd) { min-width: 0; margin: 0; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+:global(.phase-merge-modal code) { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #253858; font-size: 11px; }
+:global(.phase-merge-modal label) { display: grid; gap: 7px; }
+:global(.phase-merge-copy-row) { display: flex; gap: 7px; }
+:global(.phase-merge-modal input), :global(.phase-merge-modal textarea) { width: 100%; min-width: 0; border: 1px solid #dfe1e6; border-radius: 6px; background: #fafbfc; color: #253858; padding: 9px 10px; outline: 0; font: inherit; font-size: 12px; }
+:global(.phase-merge-modal textarea) { resize: vertical; line-height: 1.5; }
+:global(.phase-merge-modal .button) { flex: 0 0 auto; white-space: nowrap; }
+:global(.phase-merge-copy-button) { justify-self: start; }
+:global(.phase-merge-modal > footer) { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #ebecf0; padding: 14px 25px 16px; }
 
 @media (max-width: 650px) {
-  .phase-merge-modal { max-height: calc(100vh - 20px); }.phase-merge-modal > header, .phase-merge-modal-body { padding-left: 16px; padding-right: 16px; }.phase-merge-modal > footer { padding-left: 16px; padding-right: 16px; flex-wrap: wrap; }.phase-merge-modal dl { grid-template-columns: 1fr; }.phase-merge-copy-row { align-items: stretch; }.phase-merge-copy-row .button { padding-left: 10px; padding-right: 10px; }
+  :global(.phase-merge-modal) { max-height: calc(100vh - 20px); }
+
+:global(.phase-merge-modal > header), :global(.phase-merge-modal-body) { padding-left: 16px; padding-right: 16px; }
+
+:global(.phase-merge-modal > footer) { padding-left: 16px; padding-right: 16px; flex-wrap: wrap; }
+
+:global(.phase-merge-modal dl) { grid-template-columns: 1fr; }
+
+:global(.phase-merge-copy-row) { align-items: stretch; }
+
+:global(.phase-merge-copy-row .button) { padding-left: 10px; padding-right: 10px; }
 }
-}
+
