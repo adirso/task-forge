@@ -1,0 +1,105 @@
+.root {
+  background: white;
+  border: 1px solid #dfe1e6;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(9, 30, 66, 0.04);
+  overflow: hidden;
+}
+
+.heading {
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #ebecf0;
+}
+
+.heading h2 {
+  margin: 0 0 5px;
+  font-size: 19px;
+}
+
+.heading p {
+  margin: 0;
+  color: #6b778c;
+  font-size: 12px;
+}
+
+.group {
+  padding: 23px 24px;
+  border-bottom: 1px solid #ebecf0;
+}
+
+.group:last-child {
+  border-bottom: 0;
+}
+
+.group h3 {
+  margin: 0 0 13px;
+  color: #42526e;
+  font-size: 12px;
+}
+
+.choiceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.choice {
+  min-height: 76px;
+  border: 1px solid #dfe1e6;
+  border-radius: 8px;
+  background: white;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  padding: 13px;
+}
+
+.choice:hover {
+  border-color: #b9b3dd;
+}
+
+.choiceSelected {
+  border-color: #6554c0;
+  background: #f8f7ff;
+  box-shadow: inset 0 0 0 1px #6554c0;
+}
+
+.choice > svg,
+.choiceSelected > svg {
+  width: 21px;
+  color: #6554c0;
+}
+
+.choice > svg:last-child,
+.choiceSelected > svg:last-child {
+  width: 16px;
+}
+
+.choiceCopy {
+  display: grid;
+  gap: 4px;
+}
+
+.choiceCopy strong {
+  font-size: 12px;
+}
+
+.choiceCopy small {
+  color: #7a869a;
+  font-size: 10px;
+}
+
+.textPreview {
+  color: #5243aa;
+  font-weight: 750;
+}
+
+.textPreviewComfortable {
+  font-size: 18px;
+}
+
+.textPreviewLarge {
+  font-size: 24px;
+}

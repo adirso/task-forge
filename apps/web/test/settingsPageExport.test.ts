@@ -15,3 +15,12 @@ test("SettingsPage unit exposes the required co-located files", () => {
     assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
   }
 });
+
+test("SettingsPage includes Account and Appearance parts", () => {
+  for (const part of ["AccountSection", "AppearanceSection"]) {
+    const base = resolve(`src/pages/SettingsPage/parts/${part}`);
+    for (const file of [`${part}.tsx`, `${part}.module.css`, "types.ts", "index.ts"]) {
+      assert.equal(readFileSync(resolve(base, file), "utf8").length > 0, true, `${part}/${file}`);
+    }
+  }
+});

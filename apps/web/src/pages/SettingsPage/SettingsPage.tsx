@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { ApiTokenMetadata } from "@taskforge/contracts";
-import { Activity, Bot, Check, Copy, Download, Eye, HardDrive, KeyRound, LayoutDashboard, List, Monitor, Plus, Route, ShieldCheck, Trash2, Upload, UserRound, Webhook } from "lucide-react";
+import { Activity, Bot, Check, Copy, Download, Eye, HardDrive, KeyRound, Monitor, Plus, Route, ShieldCheck, Trash2, Upload, UserRound, Webhook } from "lucide-react";
 import { api } from "../../lib/api";
 import { type AgentDetailTab, type SettingsTab, parseSettingsTab, readSettingsLocation, writeSettingsLocation } from "../../lib/settingsNav";
 import { Avatar } from "../../components/Avatar";
@@ -9,7 +9,10 @@ import { WebhookManager } from "../../components/WebhookManager";
 import { WebhookDeliveriesPanel } from "../../components/WebhookDeliveriesPanel";
 import { AgentCapabilityEditor } from "../../components/AgentCapabilityEditor";
 import { RevealTokenConfirmModal } from "../../components/RevealTokenConfirmModal";
+import { AccountSection } from "./parts/AccountSection";
+import { AppearanceSection } from "./parts/AppearanceSection";
 import type { SettingsPageProps } from "./types";
+import styles from "./SettingsPage.module.css";
 
 export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated, onAgentCreated, onAgentUpdated, onAgentDeleted, onDefaultViewChange, onTextSizeChange }: SettingsPageProps) {
   const initialSettings = useMemo(() => readSettingsLocation(window.location.search, user.role === "ADMIN"), [user.role]);
@@ -291,61 +294,44 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
 
+  function navClass(active: boolean) {
+    return `${styles.navButton}${active ? ` ${styles.navButtonActive}` : ""}`;
+  }
+
   return (
-    <div className="settings-page">
-      <header className="settings-header">
+    <div className={styles.root}>
+      <header className={styles.header}>
         <span>Workspace</span>
         <h1>Settings</h1>
         <p>Manage your account, workspace preferences, and agent access.</p>
       </header>
-      <div className="settings-layout">
-        <nav className="settings-nav" aria-label="Settings sections">
-          <button type="button" className={tab === "account" ? "active" : ""} aria-current={tab === "account" ? "page" : undefined} onClick={() => setTab("account")}><UserRound /> Account</button>
-          <button type="button" className={tab === "appearance" ? "active" : ""} aria-current={tab === "appearance" ? "page" : undefined} onClick={() => setTab("appearance")}><Monitor /> Appearance</button>
-          <button type="button" className={tab === "agents" ? "active" : ""} aria-current={tab === "agents" ? "page" : undefined} onClick={() => setTab("agents")}><Bot /> Agents <span>{agents.length}</span></button>
-          {user.role === "ADMIN" && <button type="button" className={tab === "backup" ? "active" : ""} aria-current={tab === "backup" ? "page" : undefined} onClick={() => setTab("backup")}><HardDrive /> Backup</button>}
-          {user.role === "ADMIN" && <button type="button" className={tab === "agentops" ? "active" : ""} aria-current={tab === "agentops" ? "page" : undefined} onClick={() => setTab("agentops")}><Activity /> Agent ops</button>}
+      <div className={styles.layout}>
+        <nav className={styles.nav} aria-label="Settings sections">
+          <button type="button" className={navClass(tab === "account")} aria-current={tab === "account" ? "page" : undefined} onClick={() => setTab("account")}><UserRound /> Account</button>
+          <button type="button" className={navClass(tab === "appearance")} aria-current={tab === "appearance" ? "page" : undefined} onClick={() => setTab("appearance")}><Monitor /> Appearance</button>
+          <button type="button" className={navClass(tab === "agents")} aria-current={tab === "agents" ? "page" : undefined} onClick={() => setTab("agents")}><Bot /> Agents <span>{agents.length}</span></button>
+          {user.role === "ADMIN" && <button type="button" className={navClass(tab === "backup")} aria-current={tab === "backup" ? "page" : undefined} onClick={() => setTab("backup")}><HardDrive /> Backup</button>}
+          {user.role === "ADMIN" && <button type="button" className={navClass(tab === "agentops")} aria-current={tab === "agentops" ? "page" : undefined} onClick={() => setTab("agentops")}><Activity /> Agent ops</button>}
         </nav>
-        <section className="settings-content">
+        <section className={styles.content}>
           {tab === "account" && (
-            <div className="settings-section">
-              <div className="settings-section-heading">
-                <h2>Account details</h2>
-                <p>These details identify you to project members and agents.</p>
-              </div>
-              <form className="profile-form" onSubmit={saveProfile}>
-                <div className="profile-summary">
-                  <Avatar user={user} size="lg" />
-                  <span><strong>{user.name}</strong><small>{user.role.toLowerCase()} · human account</small></span>
-                </div>
-                <label>Full name<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
-                <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
-                <div><button type="submit" className="button button-primary">Save changes</button></div>
-              </form>
-            </div>
+            <AccountSection
+              user={user}
+              name={name}
+              email={email}
+              onNameChange={setName}
+              onEmailChange={setEmail}
+              onSubmit={saveProfile}
+            />
           )}
 
           {tab === "appearance" && (
-            <div className="settings-section">
-              <div className="settings-section-heading">
-                <h2>Appearance</h2>
-                <p>Choose how TaskForge looks when you return.</p>
-              </div>
-              <div className="preference-group">
-                <h3>Default project view</h3>
-                <div className="choice-grid">
-                  <button type="button" className={defaultView === "board" ? "selected" : ""} onClick={() => onDefaultViewChange("board")}><LayoutDashboard /><span><strong>Board</strong><small>Visual workflow columns</small></span>{defaultView === "board" && <Check />}</button>
-                  <button type="button" className={defaultView === "list" ? "selected" : ""} onClick={() => onDefaultViewChange("list")}><List /><span><strong>List</strong><small>Structured table view</small></span>{defaultView === "list" && <Check />}</button>
-                </div>
-              </div>
-              <div className="preference-group">
-                <h3>Text size</h3>
-                <div className="choice-grid">
-                  <button type="button" className={textSize === "comfortable" ? "selected" : ""} onClick={() => onTextSizeChange("comfortable")}><span className="text-preview text-preview-comfortable">Aa</span><span><strong>Comfortable</strong><small>Balanced information density</small></span>{textSize === "comfortable" && <Check />}</button>
-                  <button type="button" className={textSize === "large" ? "selected" : ""} onClick={() => onTextSizeChange("large")}><span className="text-preview text-preview-large">Aa</span><span><strong>Large</strong><small>Extra readable text and controls</small></span>{textSize === "large" && <Check />}</button>
-                </div>
-              </div>
-            </div>
+            <AppearanceSection
+              defaultView={defaultView}
+              textSize={textSize}
+              onDefaultViewChange={onDefaultViewChange}
+              onTextSizeChange={onTextSizeChange}
+            />
           )}
 
           {tab === "agents" && (
@@ -601,8 +587,8 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
             </div>
           )}
 
-          {error && <div className="form-error settings-message" role="alert">{error}</div>}
-          {message && <div className="form-success settings-message" role="status"><Check />{message}</div>}
+          {error && <div className={`form-error ${styles.message}`} role="alert">{error}</div>}
+          {message && <div className={`form-success ${styles.message}`} role="status"><Check />{message}</div>}
         </section>
       </div>
       {tokenPendingReveal && (
