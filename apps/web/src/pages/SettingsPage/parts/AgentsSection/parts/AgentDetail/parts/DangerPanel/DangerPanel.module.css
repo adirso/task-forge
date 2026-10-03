@@ -1,0 +1,35 @@
+.root {
+  padding: 20px 22px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  background: #fffaf8;
+}
+
+.heading {
+  display: grid;
+  gap: 4px;
+}
+
+.heading h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #172b4d;
+}
+
+.heading p {
+  margin: 0;
+  color: #6b778c;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.root :global(.button-danger-quiet) {
+  justify-self: start;
+}
+
+@media (max-width: 860px) {
+  .root {
+    padding: 16px;
+  }
+}

@@ -62,7 +62,7 @@ export function WebhookManager({ agent, onAgentUpdated, onSuccess, onError }: We
         </div>
       </form>
       {webhookSecret && (
-        <div className={`issued-token ${styles.secret}`}>
+        <div className={styles.issued}>
           <strong>Copy this signing secret now</strong>
           <p>Update the receiver before another delivery. TaskForge will not show this value again.</p>
           <div>

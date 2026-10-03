@@ -49,3 +49,21 @@ test("Settings-owned shared components are folder units", () => {
     assert.equal(readFileSync(resolve(`src/components/${name}/${name}.module.css`), "utf8").length > 0, true);
   }
 });
+
+test("SettingsPage AgentDetail panels and BackupSection exist", () => {
+  const files = [
+    "parts/AgentsSection/parts/AgentDetail/parts/AccessPanel/AccessPanel.tsx",
+    "parts/AgentsSection/parts/AgentDetail/parts/DeliveriesPanel/DeliveriesPanel.tsx",
+    "parts/BackupSection/BackupSection.tsx",
+  ];
+  for (const rel of files) {
+    assert.equal(readFileSync(resolve("src/pages/SettingsPage", rel), "utf8").length > 0, true, rel);
+  }
+});
+
+test("legacy Settings selectors were removed from global styles", () => {
+  const css = readFileSync(resolve("src/styles.css"), "utf8");
+  for (const selector of [".settings-page", ".agent-manager", ".webhook-deliveries", ".new-agent-form", ".backup-card"]) {
+    assert.equal(css.includes(selector), false, selector);
+  }
+});

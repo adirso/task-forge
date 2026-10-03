@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { ApiTokenMetadata } from "@taskforge/contracts";
-import { Activity, Bot, Check, Download, HardDrive, Monitor, ShieldCheck, Upload, UserRound } from "lucide-react";
+import { Activity, Bot, Check, HardDrive, Monitor, ShieldCheck, UserRound } from "lucide-react";
 import { api } from "../../lib/api";
 import { type AgentDetailTab, type SettingsTab, parseSettingsTab, readSettingsLocation, writeSettingsLocation } from "../../lib/settingsNav";
 import { AgentOpsPage } from "../../components/AgentOpsPage";
@@ -8,6 +8,7 @@ import { RevealTokenConfirmModal } from "../../components/RevealTokenConfirmModa
 import { AccountSection } from "./parts/AccountSection";
 import { AppearanceSection } from "./parts/AppearanceSection";
 import { AgentsSection } from "./parts/AgentsSection";
+import { BackupSection } from "./parts/BackupSection";
 import type { SettingsPageProps } from "./types";
 import styles from "./SettingsPage.module.css";
 
@@ -381,15 +382,13 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
           )}
 
           {tab === "backup" && user.role === "ADMIN" && (
-            <div className="settings-section backup-settings-section">
-              <div className="settings-section-heading"><h2>Database backup</h2><p>Export a redacted transfer backup or restore a compatible secure archive. Redacted exports cannot be restored because they do not contain credentials; secrets are never shown in this interface.</p></div>
-              <div className="backup-actions">
-                <section className="backup-card"><Download /><div><h3>Export backup</h3><p>Download a gzip archive containing workspace data and attachments.</p></div><button type="button" className="button button-primary" onClick={() => void exportBackup()} disabled={backupBusy}><Download /> {backupBusy ? "Working…" : "Export and download"}</button></section>
-                <section className="backup-card"><Upload /><div><h3>Restore backup</h3><p>Upload a validated archive to replace this workspace. Invalid or incompatible files leave the current database unchanged.</p></div><label className="button button-secondary"><Upload /> {backupBusy ? "Validating…" : "Choose backup file"}<input type="file" accept=".tar.gz,.tgz,application/gzip,application/x-gzip" onChange={(event) => void uploadBackup(event)} disabled={backupBusy} /></label></section>
-              </div>
-              {backupError && <div className="form-error backup-feedback" role="alert">{backupError}</div>}
-              {backupMessage && <div className="form-success backup-feedback" role="status"><Check />{backupMessage}</div>}
-            </div>
+            <BackupSection
+              backupBusy={backupBusy}
+              backupError={backupError}
+              backupMessage={backupMessage}
+              onExport={exportBackup}
+              onUpload={uploadBackup}
+            />
           )}
 
           {tab === "agentops" && (

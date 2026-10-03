@@ -79,8 +79,58 @@
   width: 12px;
 }
 
-.secret {
-  margin-top: 0;
+.issued {
+  margin: 16px 0 0;
+  background: #e3fcef;
+  border: 1px solid #abf5d1;
+  border-radius: 8px;
+  padding: 13px;
+}
+
+.issued > strong {
+  color: #006644;
+  font-size: 11px;
+}
+
+.issued > p {
+  color: #47705f;
+  margin: 4px 0 10px;
+  font-size: 9px;
+}
+
+.issued > div {
+  display: flex;
+  border: 1px solid #79f2c0;
+  background: white;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.issued code {
+  flex: 1;
+  min-width: 0;
+  padding: 9px;
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issued button {
+  border: 0;
+  border-left: 1px solid #79f2c0;
+  background: #f1fff8;
+  color: #006644;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.issued button svg {
+  width: 12px;
 }
 
 @media (max-width: 860px) {

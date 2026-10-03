@@ -1,0 +1,91 @@
+.root {
+  background: white;
+  border: 1px solid #dfe1e6;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(9, 30, 66, 0.04);
+  overflow: hidden;
+}
+
+.heading {
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #ebecf0;
+}
+
+.heading h2 {
+  margin: 0 0 5px;
+  font-size: 19px;
+}
+
+.heading p {
+  margin: 0;
+  color: #6b778c;
+  font-size: 12px;
+}
+
+.actions {
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #dfe1e6;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.card > svg {
+  width: 22px;
+  color: #6554c0;
+}
+
+.card h3,
+.card p {
+  margin: 0;
+}
+
+.card h3 {
+  color: #172b4d;
+  font-size: 13px;
+}
+
+.card p {
+  margin-top: 4px;
+  color: #6b778c;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.card > label.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.card input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.feedback {
+  margin: 0 24px 20px;
+}
+
+@media (max-width: 860px) {
+  .card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .card :global(.button) {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
