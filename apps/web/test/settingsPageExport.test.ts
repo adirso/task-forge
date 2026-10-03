@@ -42,6 +42,7 @@ test("Settings-owned shared components are folder units", () => {
     "WebhookManager",
     "WebhookDeliveriesPanel",
     "RevealTokenConfirmModal",
+    "RevokeTokenConfirmModal",
     "AgentCapabilityEditor",
   ]) {
     const index = readFileSync(resolve(`src/components/${name}/index.ts`), "utf8");

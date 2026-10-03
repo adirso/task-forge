@@ -19,6 +19,6 @@ export type AccessPanelProps = {
   onTokenNameChange: (value: string) => void;
   onExpiresInDaysChange: (value: string) => void;
   onRequestRevealToken: (token: ApiTokenMetadata) => void;
-  onRevokeToken: (id: string) => void | Promise<void>;
+  onRequestRevokeToken: (token: ApiTokenMetadata) => void;
   onCopyToken: () => void | Promise<void>;
 };

@@ -5,6 +5,7 @@ import { api } from "../../lib/api";
 import { type AgentDetailTab, type SettingsTab, parseSettingsTab, readSettingsLocation, writeSettingsLocation } from "../../lib/settingsNav";
 import { AgentOpsPage } from "../../components/AgentOpsPage";
 import { RevealTokenConfirmModal } from "../../components/RevealTokenConfirmModal";
+import { RevokeTokenConfirmModal } from "../../components/RevokeTokenConfirmModal";
 import { AccountSection } from "./parts/AccountSection";
 import { AppearanceSection } from "./parts/AppearanceSection";
 import { AgentsSection } from "./parts/AgentsSection";
@@ -36,6 +37,8 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
   const [revealedTokenId, setRevealedTokenId] = useState("");
   const [tokenPendingReveal, setTokenPendingReveal] = useState<ApiTokenMetadata | null>(null);
   const [revealingToken, setRevealingToken] = useState(false);
+  const [tokenPendingRevoke, setTokenPendingRevoke] = useState<ApiTokenMetadata | null>(null);
+  const [revokingToken, setRevokingToken] = useState(false);
   const [copied, setCopied] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
@@ -85,6 +88,7 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
       setRevealedTokenId("");
       setIssuedToken("");
       setTokenPendingReveal(null);
+      setTokenPendingRevoke(null);
       prevAgentRef.current = selectedAgentId;
     }
     let cancelled = false;
@@ -184,8 +188,16 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
     }
   }
 
-  async function revokeToken(id: string) {
-    if (!window.confirm("Revoke this token? Any agent using it will immediately lose access.")) return;
+  function requestRevokeToken(token: ApiTokenMetadata) {
+    if (!selectedAgentId || token.revokedAt) return;
+    setTokenPendingRevoke(token);
+  }
+
+  async function confirmRevokeToken() {
+    if (!tokenPendingRevoke) return;
+    const id = tokenPendingRevoke.id;
+    setError("");
+    setRevokingToken(true);
     try {
       await api.revokeAgentToken(id);
       setTokens((items) => items.map((token) => token.id === id ? { ...token, revokedAt: new Date().toISOString(), revealable: false } : token));
@@ -193,9 +205,12 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
         setIssuedToken("");
         setRevealedTokenId("");
       }
+      setTokenPendingRevoke(null);
       success("Token revoked");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not revoke token");
+    } finally {
+      setRevokingToken(false);
     }
   }
 
@@ -373,7 +388,7 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
               onTokenNameChange={setTokenName}
               onExpiresInDaysChange={setExpiresInDays}
               onRequestRevealToken={requestRevealToken}
-              onRevokeToken={revokeToken}
+              onRequestRevokeToken={requestRevokeToken}
               onCopyToken={copyToken}
               onUpdateAgentAvatar={updateAgentAvatar}
               onRemoveAgentAvatar={removeAgentAvatar}
@@ -418,6 +433,14 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
           busy={revealingToken}
           onClose={() => { if (!revealingToken) setTokenPendingReveal(null); }}
           onConfirm={() => void confirmRevealToken()}
+        />
+      )}
+      {tokenPendingRevoke && (
+        <RevokeTokenConfirmModal
+          token={tokenPendingRevoke}
+          busy={revokingToken}
+          onClose={() => { if (!revokingToken) setTokenPendingRevoke(null); }}
+          onConfirm={() => void confirmRevokeToken()}
         />
       )}
     </div>

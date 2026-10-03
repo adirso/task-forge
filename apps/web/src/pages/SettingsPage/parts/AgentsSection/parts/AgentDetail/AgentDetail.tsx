@@ -32,7 +32,7 @@ export function AgentDetail({
   onTokenNameChange,
   onExpiresInDaysChange,
   onRequestRevealToken,
-  onRevokeToken,
+  onRequestRevokeToken,
   onCopyToken,
   onUpdateAgentAvatar,
   onRemoveAgentAvatar,
@@ -76,7 +76,7 @@ export function AgentDetail({
           onTokenNameChange={onTokenNameChange}
           onExpiresInDaysChange={onExpiresInDaysChange}
           onRequestRevealToken={onRequestRevealToken}
-          onRevokeToken={onRevokeToken}
+          onRequestRevokeToken={onRequestRevokeToken}
           onCopyToken={onCopyToken}
         />
       )}

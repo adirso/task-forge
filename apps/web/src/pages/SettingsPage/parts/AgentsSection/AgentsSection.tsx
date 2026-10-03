@@ -40,7 +40,7 @@ export function AgentsSection({
   onTokenNameChange,
   onExpiresInDaysChange,
   onRequestRevealToken,
-  onRevokeToken,
+  onRequestRevokeToken,
   onCopyToken,
   onUpdateAgentAvatar,
   onRemoveAgentAvatar,
@@ -125,7 +125,7 @@ export function AgentsSection({
                   onTokenNameChange={onTokenNameChange}
                   onExpiresInDaysChange={onExpiresInDaysChange}
                   onRequestRevealToken={onRequestRevealToken}
-                  onRevokeToken={onRevokeToken}
+                  onRequestRevokeToken={onRequestRevokeToken}
                   onCopyToken={onCopyToken}
                   onUpdateAgentAvatar={onUpdateAgentAvatar}
                   onRemoveAgentAvatar={onRemoveAgentAvatar}

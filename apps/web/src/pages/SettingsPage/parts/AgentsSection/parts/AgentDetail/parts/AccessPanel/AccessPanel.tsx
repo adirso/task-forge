@@ -21,7 +21,7 @@ export function AccessPanel({
   onTokenNameChange,
   onExpiresInDaysChange,
   onRequestRevealToken,
-  onRevokeToken,
+  onRequestRevokeToken,
   onCopyToken,
 }: AccessPanelProps) {
   return (
@@ -76,7 +76,7 @@ export function AccessPanel({
                     </button>
                   )}
                   {!token.revokedAt && (
-                    <button type="button" className={styles.revoke} onClick={() => void onRevokeToken(token.id)} title="Revoke token" aria-label={`Revoke ${token.name}`}>
+                    <button type="button" className={styles.revoke} onClick={() => onRequestRevokeToken(token)} title="Revoke token" aria-label={`Revoke ${token.name}`}>
                       <Trash2 />
                     </button>
                   )}
