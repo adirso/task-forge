@@ -1,0 +1,51 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.root svg {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+}
+
+.feature {
+  color: #0747a6;
+  background: #deebff;
+}
+
+.bug {
+  color: #bf2600;
+  background: #ffebe6;
+}
+
+.infra {
+  color: #403294;
+  background: #eae6ff;
+}
+
+.update {
+  color: #006644;
+  background: #e3fcef;
+}
+
+.security {
+  color: #974f0c;
+  background: #fff0d3;
+}
+
+.docs {
+  color: #505f79;
+  background: #ebecf0;
+}
+
+.chore {
+  color: #164555;
+  background: #e0f4f8;
+}

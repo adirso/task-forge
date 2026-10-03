@@ -15,3 +15,11 @@ test("TaskModal unit exposes the required co-located files", () => {
     assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
   }
 });
+
+test("task helper components are folder units", () => {
+  for (const name of ["TaskTags", "TaskDependencies", "TaskTypePill"]) {
+    const index = readFileSync(resolve(`src/components/${name}/index.ts`), "utf8");
+    assert.match(index, new RegExp(`export \\{`));
+    assert.equal(readFileSync(resolve(`src/components/${name}/${name}.module.css`), "utf8").length > 0, true);
+  }
+});

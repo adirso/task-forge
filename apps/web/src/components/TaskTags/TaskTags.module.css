@@ -1,0 +1,118 @@
+.list {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+/* removed when TaskCard migrates */
+:global(.task-card) > .list {
+  display: flex;
+  margin: -4px 0 10px;
+}
+
+.tag {
+  flex: 0 1 auto;
+  max-width: 110px;
+  border-radius: 10px;
+  background: #eae6ff;
+  color: #403294;
+  padding: 3px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.more {
+  flex: 0 0 auto;
+  color: #7a869a;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.editor {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.selected .tag {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 4px;
+}
+
+.selected button {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: currentColor;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.selected button:hover {
+  background: rgba(9, 30, 66, 0.1);
+}
+
+.selected button svg {
+  width: 10px;
+  height: 10px;
+  display: block;
+}
+
+.inputRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 5px;
+}
+
+.inputRow > button {
+  border: 1px solid #dfe1e6;
+  border-radius: 6px;
+  background: white;
+  color: #5243aa;
+  display: grid;
+  place-items: center;
+}
+
+.inputRow > button:hover:not(:disabled) {
+  border-color: #8777d9;
+  background: #efecff;
+}
+
+.inputRow > button:disabled {
+  color: #a5adba;
+  cursor: not-allowed;
+}
+
+.inputRow > button svg {
+  width: 14px;
+}
+
+.help {
+  color: #8993a4;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.error {
+  color: #bf2600;
+}

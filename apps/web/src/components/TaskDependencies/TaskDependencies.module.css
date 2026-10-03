@@ -1,0 +1,199 @@
+.list {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+/* removed when TaskCard migrates */
+:global(.task-card) > .list {
+  display: flex;
+  margin: -4px 0 10px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 170px;
+  border-radius: 10px;
+  padding: 3px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.pill svg {
+  width: 11px;
+  flex: 0 0 auto;
+}
+
+.blocking {
+  background: #ffebe6;
+  color: #bf2600;
+}
+
+.resolved {
+  background: #e3fcef;
+  color: #006644;
+}
+
+.more {
+  color: #7a869a;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.editor {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.selected .pill {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 4px;
+}
+
+.selected button {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: currentColor;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.selected button:hover {
+  background: rgba(9, 30, 66, 0.1);
+}
+
+.selected button svg {
+  width: 10px;
+  height: 10px;
+  display: block;
+}
+
+.picker {
+  position: relative;
+}
+
+.trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #dfe1e6;
+  border-radius: 6px;
+  background: white;
+  color: #6b778c;
+  padding: 10px 11px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  border-color: #8777d9;
+  box-shadow: 0 0 0 3px rgba(101, 84, 192, 0.1);
+}
+
+.trigger span {
+  color: #6554c0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  border: 1px solid #c7c9d1;
+  border-radius: 7px;
+  background: white;
+  box-shadow: 0 12px 28px rgba(9, 30, 66, 0.18);
+}
+
+.menu > input {
+  border: 0;
+  border-bottom: 1px solid #ebecf0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.options {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.option {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #42526e;
+  padding: 9px 8px;
+  text-align: left;
+}
+
+.option:hover {
+  background: #f4f3fa;
+}
+
+.option strong {
+  color: #403294;
+  font-size: 11px;
+}
+
+.option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.option em {
+  color: #8993a4;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.help,
+.noResults {
+  color: #8993a4;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.noResults {
+  display: block;
+  padding: 10px 8px;
+  color: #bf2600;
+}
