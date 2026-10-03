@@ -1,0 +1,131 @@
+.root {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  gap: 28px;
+  padding: 24px 30px 40px;
+  align-content: start;
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 26px 28px;
+  border: 1px solid #d8d3f0;
+  border-radius: 10px;
+  background: linear-gradient(120deg, #f8f7ff, white);
+}
+
+.heading h2 {
+  margin: 8px 0;
+  font-size: 22px;
+}
+
+.heading p {
+  margin: 0;
+  color: #6b778c;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.metrics article {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: center;
+  padding: 18px 20px;
+  border: 1px solid #dfe1e6;
+  border-radius: 10px;
+  background: white;
+}
+
+.metrics svg {
+  grid-row: span 2;
+  color: #6554c0;
+  width: 19px;
+}
+
+.metrics strong {
+  font-size: 20px;
+  color: #172b4d;
+}
+
+.metrics span {
+  color: #7a869a;
+  font-size: 10px;
+}
+
+/* Composition with ModularDashboard dual-class hooks */
+.root:global(.project-dashboard-modular) :global(.dashboard-page) {
+  min-height: 650px;
+}
+
+.root:global(.project-dashboard-modular) :global(.dashboard-canvas) {
+  min-height: 600px;
+}
+
+.root:global(.project-dashboard-modular) :global(.widget-body) {
+  overflow: auto;
+}
+
+.root:global(.project-dashboard-modular) :global(.widget-body) > p {
+  color: #6b778c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 700px) {
+  .root:global(.project-dashboard-modular) {
+    padding: 16px 8px;
+  }
+
+  .root:global(.project-dashboard-modular) .heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .root:global(.project-dashboard-modular) .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .root:global(.project-dashboard-modular) .metrics article {
+    padding: 12px;
+  }
+
+  .root:global(.project-dashboard-modular) :global(.dashboard-fab-area) {
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .root:global(.project-dashboard-modular) :global(.widget-picker) {
+    max-width: calc(100vw - 24px);
+  }
+}
+
+@media (max-width: 900px) {
+  .root {
+    gap: 20px;
+    padding: 16px 12px 32px;
+  }
+
+  .heading {
+    padding: 20px;
+  }
+
+  .metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+}

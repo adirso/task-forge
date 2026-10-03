@@ -1,0 +1,41 @@
+.monitorList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+}
+
+.monitorList li {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.monitorList progress {
+  width: 100%;
+  accent-color: #6554c0;
+}
+
+.attentionGroup h4 {
+  text-transform: capitalize;
+  margin: 16px 0 8px;
+}
+
+.attentionGroup ul {
+  padding-left: 18px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.attentionGroup li {
+  margin-bottom: 8px;
+}
+
+.attentionGroup p,
+.copy {
+  color: #6b778c;
+  font-size: 12px;
+  line-height: 1.5;
+}

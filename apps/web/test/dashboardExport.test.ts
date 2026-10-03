@@ -65,3 +65,21 @@ test("DashboardPage unit exposes the required co-located files", () => {
     assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
   }
 });
+
+test("App imports ProjectDashboardPage from pages/ProjectDashboardPage", () => {
+  const app = readFileSync(resolve("src/App.tsx"), "utf8");
+  assert.match(app, /from ["']\.\/pages\/ProjectDashboardPage["']/);
+  assert.doesNotMatch(app, /from ["']\.\/components\/ProjectDashboard["']/);
+  assert.match(app, /<ProjectDashboardPage/);
+});
+
+test("ProjectDashboardPage unit exposes shell and parts tree", () => {
+  const root = resolve("src/pages/ProjectDashboardPage");
+  for (const file of ["index.ts", "ProjectDashboardPage.tsx", "ProjectDashboardPage.module.css", "types.ts"]) {
+    assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
+  }
+  for (const part of ["ProjectBars", "ProjectModuleContent"]) {
+    assert.equal(readFileSync(resolve(root, `parts/${part}/${part}.tsx`), "utf8").length > 0, true, part);
+    assert.equal(readFileSync(resolve(root, `parts/${part}/${part}.module.css`), "utf8").length > 0, true, `${part}.css`);
+  }
+});
