@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+test("main imports styles/global.css instead of styles.css", () => {
+  const main = readFileSync(resolve("src/main.tsx"), "utf8");
+  assert.match(main, /from ["']\.\/styles\/global\.css["']|import ["']\.\/styles\/global\.css["']/);
+  assert.doesNotMatch(main, /import ["']\.\/styles\.css["']/);
+});
+
+test("styles/global.css exposes shared primitives", () => {
+  const css = readFileSync(resolve("src/styles/global.css"), "utf8");
+  for (const token of [":root", ".button-primary", ".modal-backdrop", ".form-error", ".status-pill", ".brand-lockup", ".settings-notice", "@keyframes spin"]) {
+    assert.equal(css.includes(token), true, token);
+  }
+});
