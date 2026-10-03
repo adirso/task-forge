@@ -7,12 +7,6 @@
   vertical-align: middle;
 }
 
-/* removed when TaskCard migrates */
-:global(.task-card) > .list {
-  display: flex;
-  margin: -4px 0 10px;
-}
-
 .tag {
   flex: 0 1 auto;
   max-width: 110px;
