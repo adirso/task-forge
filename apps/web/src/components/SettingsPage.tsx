@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { ApiTokenMetadata, User } from "@taskforge/contracts";
-import { Activity, Bot, Check, Copy, Download, Eye, HardDrive, KeyRound, LayoutDashboard, List, Monitor, Plus, ShieldCheck, Trash2, Upload, UserRound } from "lucide-react";
+import { Activity, Bot, Check, Copy, Download, Eye, HardDrive, KeyRound, LayoutDashboard, List, Monitor, Plus, Route, ShieldCheck, Trash2, Upload, UserRound, Webhook } from "lucide-react";
 import { api } from "../lib/api";
+import { type AgentDetailTab, type SettingsTab, parseSettingsTab, readSettingsLocation, writeSettingsLocation } from "../lib/settingsNav";
 import { Avatar } from "./Avatar";
 import { AgentOpsPage } from "./AgentOpsPage";
 import { WebhookManager } from "./WebhookManager";
+import { WebhookDeliveriesPanel } from "./WebhookDeliveriesPanel";
 import { AgentCapabilityEditor } from "./AgentCapabilityEditor";
-
-type SettingsTab = "account" | "appearance" | "agents" | "backup" | "agentops";
+import { RevealTokenConfirmModal } from "./RevealTokenConfirmModal";
 
 export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated, onAgentCreated, onAgentUpdated, onAgentDeleted, onDefaultViewChange, onTextSizeChange }: {
   user: User;
@@ -21,16 +22,19 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
   onDefaultViewChange: (view: "board" | "list") => void;
   onTextSizeChange: (size: "comfortable" | "large") => void;
 }) {
-  const [tab, setTab] = useState<SettingsTab>("account");
+  const initialSettings = useMemo(() => readSettingsLocation(window.location.search, user.role === "ADMIN"), [user.role]);
+  const [tab, setTab] = useState<SettingsTab>(initialSettings.tab);
   const [name, setName] = useState(user.name);
   const [email, setEmail] = useState(user.email ?? "");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const agents = useMemo(() => users.filter((candidate) => candidate.kind === "AGENT"), [users]);
-  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState(initialSettings.agentId);
+  const [agentDetailTab, setAgentDetailTab] = useState<AgentDetailTab>(initialSettings.agentTab);
   const [tokens, setTokens] = useState<ApiTokenMetadata[]>([]);
   const [tokensLoading, setTokensLoading] = useState(false);
   const [tokensError, setTokensError] = useState("");
+  const [showNewAgentForm, setShowNewAgentForm] = useState(false);
   const [agentName, setAgentName] = useState("");
   const [agentEmail, setAgentEmail] = useState("");
   const [creatingAgent, setCreatingAgent] = useState(false);
@@ -39,6 +43,8 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
   const [issuingToken, setIssuingToken] = useState(false);
   const [issuedToken, setIssuedToken] = useState("");
   const [revealedTokenId, setRevealedTokenId] = useState("");
+  const [tokenPendingReveal, setTokenPendingReveal] = useState<ApiTokenMetadata | null>(null);
+  const [revealingToken, setRevealingToken] = useState(false);
   const [copied, setCopied] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
@@ -47,8 +53,33 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
   const prevAgentRef = useRef("");
 
   useEffect(() => {
-    if (!selectedAgentId && agents[0]) setSelectedAgentId(agents[0].id);
-  }, [agents, selectedAgentId]);
+    const nextTab = parseSettingsTab(tab, user.role === "ADMIN");
+    if (nextTab !== tab) setTab(nextTab);
+  }, [tab, user.role]);
+
+  useEffect(() => {
+    if (!agents.length) {
+      if (selectedAgentId) setSelectedAgentId("");
+      return;
+    }
+    if (selectedAgentId && agents.some((agent) => agent.id === selectedAgentId)) return;
+    const fromUrl = initialSettings.agentId && agents.some((agent) => agent.id === initialSettings.agentId) ? initialSettings.agentId : "";
+    const nextId = fromUrl || agents[0]!.id;
+    setSelectedAgentId(nextId);
+    if (!fromUrl) setAgentDetailTab("identity");
+  }, [agents, selectedAgentId, initialSettings.agentId]);
+
+  useEffect(() => {
+    const next = writeSettingsLocation({
+      href: window.location.href,
+      tab,
+      agentId: selectedAgentId,
+      agentTab: agentDetailTab,
+    });
+    if (`${window.location.pathname}${window.location.search}` !== next) {
+      window.history.replaceState({}, "", next);
+    }
+  }, [tab, selectedAgentId, agentDetailTab]);
 
   useEffect(() => {
     if (!selectedAgentId || user.role !== "ADMIN") {
@@ -62,6 +93,7 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
     if (prevAgentRef.current !== selectedAgentId) {
       setRevealedTokenId("");
       setIssuedToken("");
+      setTokenPendingReveal(null);
       prevAgentRef.current = selectedAgentId;
     }
     let cancelled = false;
@@ -96,6 +128,12 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
     }
   }
 
+  function closeNewAgentForm() {
+    setShowNewAgentForm(false);
+    setAgentName("");
+    setAgentEmail("");
+  }
+
   async function addAgent(event: FormEvent) {
     event.preventDefault();
     setError("");
@@ -104,8 +142,8 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
       const { user: created } = await api.createAgent({ name: agentName, ...(agentEmail ? { email: agentEmail } : {}) });
       onAgentCreated(created);
       setSelectedAgentId(created.id);
-      setAgentName("");
-      setAgentEmail("");
+      setAgentDetailTab("identity");
+      closeNewAgentForm();
       success("Agent identity created");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create agent");
@@ -133,17 +171,25 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
     }
   }
 
-  async function revealToken(token: ApiTokenMetadata) {
+  function requestRevealToken(token: ApiTokenMetadata) {
     if (!selectedAgentId || token.revokedAt || !token.revealable) return;
-    if (!window.confirm(`Reveal the full token for “${token.name}”? Anyone with this value can act as the agent.`)) return;
+    setTokenPendingReveal(token);
+  }
+
+  async function confirmRevealToken() {
+    if (!selectedAgentId || !tokenPendingReveal) return;
     setError("");
+    setRevealingToken(true);
     try {
-      const result = await api.revealAgentToken(selectedAgentId, token.id);
+      const result = await api.revealAgentToken(selectedAgentId, tokenPendingReveal.id);
       setIssuedToken(result.token);
-      setRevealedTokenId(token.id);
+      setRevealedTokenId(tokenPendingReveal.id);
+      setTokenPendingReveal(null);
       success("Token revealed");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reveal token");
+    } finally {
+      setRevealingToken(false);
     }
   }
 
@@ -314,9 +360,22 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
 
           {tab === "agents" && (
             <div className="settings-section agents-settings-section">
-              <div className="settings-section-heading">
-                <h2>Agents</h2>
-                <p>Create identities for automation and manage credentials, webhooks, and routing for each agent.</p>
+              <div className="settings-section-heading agents-section-heading">
+                <div>
+                  <h2>Agents</h2>
+                  <p>Create identities for automation and manage credentials, webhooks, and routing for each agent.</p>
+                </div>
+                {user.role === "ADMIN" && (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    aria-expanded={showNewAgentForm}
+                    aria-controls="new-agent-form"
+                    onClick={() => setShowNewAgentForm((open) => !open)}
+                  >
+                    <Plus /> {showNewAgentForm ? "Close" : "New agent"}
+                  </button>
+                )}
               </div>
               {user.role !== "ADMIN" ? (
                 <div className="settings-notice">
@@ -325,20 +384,30 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
                 </div>
               ) : (
                 <div className="agent-settings">
-                  <form className="new-agent-form" onSubmit={addAgent} aria-label="Create agent identity">
-                    <h3><Plus /> New agent identity</h3>
-                    <div>
-                      <label>Name<input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Repository Builder" required autoComplete="off" /></label>
-                      <label>Email <span>Optional</span><input type="email" value={agentEmail} onChange={(event) => setAgentEmail(event.target.value)} placeholder="builder@example.local" autoComplete="off" /></label>
-                      <button type="submit" className="button button-secondary" disabled={creatingAgent}>{creatingAgent ? "Creating…" : "Create agent"}</button>
-                    </div>
-                  </form>
+                  {showNewAgentForm && (
+                    <form id="new-agent-form" className="new-agent-form" onSubmit={addAgent} aria-label="Create agent identity">
+                      <h3><Plus /> New agent identity</h3>
+                      <div>
+                        <label>Name<input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Repository Builder" required autoComplete="off" /></label>
+                        <label>Email <span>Optional</span><input type="email" value={agentEmail} onChange={(event) => setAgentEmail(event.target.value)} placeholder="builder@example.local" autoComplete="off" /></label>
+                        <div className="new-agent-actions">
+                          <button type="button" className="button button-secondary" disabled={creatingAgent} onClick={closeNewAgentForm}>Cancel</button>
+                          <button type="submit" className="button button-primary" disabled={creatingAgent}>{creatingAgent ? "Creating…" : "Create agent"}</button>
+                        </div>
+                      </div>
+                    </form>
+                  )}
 
                   {!agents.length ? (
                     <div className="agent-empty-state" role="status">
                       <Bot />
                       <strong>No agents yet</strong>
-                      <small>Create an agent identity above to issue tokens and configure routing.</small>
+                      <small>{showNewAgentForm ? "Fill in the form above to create your first agent identity." : "Use New agent to create an identity, then issue tokens and configure routing."}</small>
+                      {!showNewAgentForm && (
+                        <button type="button" className="button button-secondary" onClick={() => setShowNewAgentForm(true)}>
+                          <Plus /> New agent
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="agent-manager">
@@ -350,7 +419,7 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
                             role="option"
                             aria-selected={selectedAgentId === agent.id}
                             className={selectedAgentId === agent.id ? "active" : ""}
-                            onClick={() => { setSelectedAgentId(agent.id); setIssuedToken(""); setRevealedTokenId(""); }}
+                            onClick={() => { setSelectedAgentId(agent.id); setAgentDetailTab("identity"); setIssuedToken(""); setRevealedTokenId(""); }}
                           >
                             <Avatar user={agent} size="md" />
                             <span><strong>{agent.name}</strong><small>{agent.email || "No email"}</small></span>
@@ -360,119 +429,145 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
 
                       {selectedAgent ? (
                         <div className="agent-detail" aria-label={`${selectedAgent.name} settings`}>
-                          <section className="agent-panel">
-                            <header className="agent-panel-heading">
-                              <h3>Identity</h3>
-                              <p>Name and profile picture for this agent.</p>
-                            </header>
-                            <div className="agent-identity">
-                              <Avatar user={selectedAgent} size="lg" />
-                              <div className="agent-identity-copy">
-                                <strong>{selectedAgent.name}</strong>
-                                <small>{selectedAgent.email || "No email on file"}</small>
-                              </div>
-                              <div className="agent-avatar-actions">
-                                <label className="button button-secondary">
-                                  <input
-                                    type="file"
-                                    accept="image/png,image/jpeg,image/gif,image/webp"
-                                    aria-label="Change agent picture"
-                                    onChange={(event) => {
-                                      const file = event.target.files?.[0];
-                                      if (file) void updateAgentAvatar(file);
-                                      event.currentTarget.value = "";
-                                    }}
-                                  />
-                                  {avatarUploading ? "Uploading…" : "Change picture"}
-                                </label>
-                                {selectedAgent.avatarUrl && (
-                                  <button type="button" className="button button-secondary" disabled={avatarUploading} onClick={() => void removeAgentAvatar()}>
-                                    Remove picture
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </section>
+                          <nav className="agent-detail-tabs" role="tablist" aria-label={`${selectedAgent.name} setting sections`}>
+                            <button type="button" role="tab" aria-selected={agentDetailTab === "identity"} className={agentDetailTab === "identity" ? "active" : ""} onClick={() => setAgentDetailTab("identity")}><UserRound /> Identity</button>
+                            <button type="button" role="tab" aria-selected={agentDetailTab === "access"} className={agentDetailTab === "access" ? "active" : ""} onClick={() => setAgentDetailTab("access")}><KeyRound /> Access</button>
+                            <button type="button" role="tab" aria-selected={agentDetailTab === "deliveries"} className={agentDetailTab === "deliveries" ? "active" : ""} onClick={() => setAgentDetailTab("deliveries")}><Webhook /> Deliveries</button>
+                            <button type="button" role="tab" aria-selected={agentDetailTab === "routing"} className={agentDetailTab === "routing" ? "active" : ""} onClick={() => setAgentDetailTab("routing")}><Route /> Routing</button>
+                            <button type="button" role="tab" aria-selected={agentDetailTab === "danger"} className={agentDetailTab === "danger" ? "active" : ""} onClick={() => setAgentDetailTab("danger")}><Trash2 /> Danger zone</button>
+                          </nav>
 
-                          <section className="agent-panel">
-                            <header className="agent-panel-heading">
-                              <h3>Access</h3>
-                              <p>Webhook delivery and revocable API tokens. Secrets are shown only when created or revealed.</p>
-                            </header>
-                            <WebhookManager agent={selectedAgent} onAgentUpdated={onAgentUpdated} onSuccess={success} onError={setError} />
-                            <div className="agent-token-block">
-                              <h4>API tokens</h4>
-                              <form className="token-form" onSubmit={issueToken} aria-label="Issue API token">
-                                <label>Token name<input value={tokenName} onChange={(event) => setTokenName(event.target.value)} required /></label>
-                                <label>Expires after
-                                  <select value={expiresInDays} onChange={(event) => setExpiresInDays(event.target.value)}>
-                                    <option value="30">30 days</option>
-                                    <option value="90">90 days</option>
-                                    <option value="365">1 year</option>
-                                    <option value="">Never</option>
-                                  </select>
-                                </label>
-                                <button type="submit" className="button button-primary" disabled={issuingToken}><KeyRound /> {issuingToken ? "Issuing…" : "Issue token"}</button>
-                              </form>
-                              {issuedToken && (
-                                <div className="issued-token" role="status">
-                                  <strong>{revealedTokenId ? "Revealed token" : "Copy this token now"}</strong>
-                                  <p>{revealedTokenId ? "Store it securely. You can reveal it again from the list below." : "You can also reveal it later from the issued tokens list."}</p>
-                                  <div>
-                                    <code>{issuedToken}</code>
-                                    <button type="button" onClick={() => void copyToken()}>{copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy"}</button>
-                                  </div>
+                          {agentDetailTab === "identity" && (
+                            <section className="agent-panel" role="tabpanel" aria-label="Identity">
+                              <header className="agent-panel-heading">
+                                <h3>Identity</h3>
+                                <p>Name and profile picture for this agent.</p>
+                              </header>
+                              <div className="agent-identity">
+                                <Avatar user={selectedAgent} size="lg" />
+                                <div className="agent-identity-copy">
+                                  <strong>{selectedAgent.name}</strong>
+                                  <small>{selectedAgent.email || "No email on file"}</small>
                                 </div>
-                              )}
-                              <div className="token-list">
-                                <h4>Issued tokens</h4>
-                                {tokensLoading ? <p className="no-tokens" role="status">Loading tokens…</p>
-                                  : tokensError ? <p className="form-error" role="alert">{tokensError}</p>
-                                  : tokens.length ? tokens.map((token) => (
-                                    <article key={token.id} className={token.revokedAt ? "revoked" : ""}>
-                                      <KeyRound />
-                                      <span>
-                                        <strong>{token.name}</strong>
-                                        <small>
-                                          tf_{token.prefix}_… · {token.revokedAt ? "Revoked" : token.lastUsedAt ? `Used ${new Date(token.lastUsedAt).toLocaleDateString()}` : "Never used"}
-                                          {!token.revokedAt && !token.revealable ? " · Not recoverable" : ""}
-                                        </small>
-                                      </span>
-                                      <div className="token-actions">
-                                        {!token.revokedAt && token.revealable && (
-                                          <button type="button" className="reveal-token" onClick={() => void revealToken(token)} title={`Reveal ${token.name}`} aria-label={`Reveal ${token.name}`}>
-                                            <Eye />
-                                          </button>
-                                        )}
-                                        {!token.revokedAt && (
-                                          <button type="button" onClick={() => void revokeToken(token.id)} title="Revoke token" aria-label={`Revoke ${token.name}`}>
-                                            <Trash2 />
-                                          </button>
-                                        )}
-                                      </div>
-                                    </article>
-                                  )) : <p className="no-tokens">No tokens issued for this agent.</p>}
+                                <div className="agent-avatar-actions">
+                                  <label className="button button-secondary">
+                                    <input
+                                      type="file"
+                                      accept="image/png,image/jpeg,image/gif,image/webp"
+                                      aria-label="Change agent picture"
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0];
+                                        if (file) void updateAgentAvatar(file);
+                                        event.currentTarget.value = "";
+                                      }}
+                                    />
+                                    {avatarUploading ? "Uploading…" : "Change picture"}
+                                  </label>
+                                  {selectedAgent.avatarUrl && (
+                                    <button type="button" className="button button-secondary" disabled={avatarUploading} onClick={() => void removeAgentAvatar()}>
+                                      Remove picture
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          </section>
+                            </section>
+                          )}
 
-                          <section className="agent-panel">
-                            <header className="agent-panel-heading">
-                              <h3>Routing</h3>
-                              <p>Capabilities used for deterministic automatic assignment.</p>
-                            </header>
-                            <AgentCapabilityEditor agent={selectedAgent} onUpdated={onAgentUpdated} onSuccess={success} onError={setError} embedded />
-                          </section>
+                          {agentDetailTab === "access" && (
+                            <section className="agent-panel" role="tabpanel" aria-label="Access">
+                              <header className="agent-panel-heading">
+                                <h3>Access</h3>
+                                <p>Webhook endpoint and revocable API tokens. Secrets are shown only when created or revealed.</p>
+                              </header>
+                              <WebhookManager agent={selectedAgent} onAgentUpdated={onAgentUpdated} onSuccess={success} onError={setError} />
+                              <div className="agent-token-block">
+                                <h4>API tokens</h4>
+                                <form className="token-form" onSubmit={issueToken} aria-label="Issue API token">
+                                  <label>Token name<input value={tokenName} onChange={(event) => setTokenName(event.target.value)} required /></label>
+                                  <label>Expires after
+                                    <select value={expiresInDays} onChange={(event) => setExpiresInDays(event.target.value)}>
+                                      <option value="30">30 days</option>
+                                      <option value="90">90 days</option>
+                                      <option value="365">1 year</option>
+                                      <option value="">Never</option>
+                                    </select>
+                                  </label>
+                                  <button type="submit" className="button button-primary" disabled={issuingToken}><KeyRound /> {issuingToken ? "Issuing…" : "Issue token"}</button>
+                                </form>
+                                {issuedToken && (
+                                  <div className="issued-token" role="status">
+                                    <strong>{revealedTokenId ? "Revealed token" : "Copy this token now"}</strong>
+                                    <p>{revealedTokenId ? "Store it securely. You can reveal it again from the list below." : "You can also reveal it later from the issued tokens list."}</p>
+                                    <div>
+                                      <code>{issuedToken}</code>
+                                      <button type="button" onClick={() => void copyToken()}>{copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy"}</button>
+                                    </div>
+                                  </div>
+                                )}
+                                <div className="token-list">
+                                  <h4>Issued tokens</h4>
+                                  {tokensLoading ? <p className="no-tokens" role="status">Loading tokens…</p>
+                                    : tokensError ? <p className="form-error" role="alert">{tokensError}</p>
+                                    : tokens.length ? tokens.map((token) => (
+                                      <article key={token.id} className={token.revokedAt ? "revoked" : ""}>
+                                        <KeyRound />
+                                        <span>
+                                          <strong>{token.name}</strong>
+                                          <small>
+                                            tf_{token.prefix}_… · {token.revokedAt ? "Revoked" : token.lastUsedAt ? `Used ${new Date(token.lastUsedAt).toLocaleDateString()}` : "Never used"}
+                                            {!token.revokedAt && !token.revealable ? " · Not recoverable" : ""}
+                                          </small>
+                                        </span>
+                                        <div className="token-actions">
+                                          {!token.revokedAt && token.revealable && (
+                                            <button type="button" className="reveal-token" onClick={() => requestRevealToken(token)} title={`Reveal ${token.name}`} aria-label={`Reveal ${token.name}`}>
+                                              <Eye />
+                                            </button>
+                                          )}
+                                          {!token.revokedAt && (
+                                            <button type="button" onClick={() => void revokeToken(token.id)} title="Revoke token" aria-label={`Revoke ${token.name}`}>
+                                              <Trash2 />
+                                            </button>
+                                          )}
+                                        </div>
+                                      </article>
+                                    )) : <p className="no-tokens">No tokens issued for this agent.</p>}
+                                </div>
+                              </div>
+                            </section>
+                          )}
 
-                          <section className="agent-panel agent-panel-danger">
-                            <header className="agent-panel-heading">
-                              <h3>Danger zone</h3>
-                              <p>Deleting an agent revokes every token and removes the identity.</p>
-                            </header>
-                            <button type="button" className="button button-danger-quiet" onClick={() => deleteAgent().catch(() => undefined)}>
-                              <Trash2 /> Delete {selectedAgent.name}
-                            </button>
-                          </section>
+                          {agentDetailTab === "deliveries" && (
+                            <section className="agent-panel agent-panel-deliveries" role="tabpanel" aria-label="Deliveries">
+                              <header className="agent-panel-heading">
+                                <h3>Deliveries</h3>
+                                <p>Inspect and retry webhook delivery attempts for this agent.</p>
+                              </header>
+                              <WebhookDeliveriesPanel agent={selectedAgent} onSuccess={success} onError={setError} />
+                            </section>
+                          )}
+
+                          {agentDetailTab === "routing" && (
+                            <section className="agent-panel" role="tabpanel" aria-label="Routing">
+                              <header className="agent-panel-heading">
+                                <h3>Routing</h3>
+                                <p>Capabilities used for deterministic automatic assignment.</p>
+                              </header>
+                              <AgentCapabilityEditor agent={selectedAgent} onUpdated={onAgentUpdated} onSuccess={success} onError={setError} embedded />
+                            </section>
+                          )}
+
+                          {agentDetailTab === "danger" && (
+                            <section className="agent-panel agent-panel-danger" role="tabpanel" aria-label="Danger zone">
+                              <header className="agent-panel-heading">
+                                <h3>Danger zone</h3>
+                                <p>Deleting an agent revokes every token and removes the identity.</p>
+                              </header>
+                              <button type="button" className="button button-danger-quiet" onClick={() => deleteAgent().catch(() => undefined)}>
+                                <Trash2 /> Delete {selectedAgent.name}
+                              </button>
+                            </section>
+                          )}
                         </div>
                       ) : (
                         <div className="select-agent-empty" role="status">
@@ -511,7 +606,7 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
                   <span><strong>Administrator access required</strong><small>Only admins can view the agent operations dashboard.</small></span>
                 </div>
               ) : (
-                <AgentOpsPage onOpenAgent={(id) => { setSelectedAgentId(id); setTab("agents"); }} />
+                <AgentOpsPage onOpenAgent={(id) => { setSelectedAgentId(id); setAgentDetailTab("identity"); setTab("agents"); }} />
               )}
             </div>
           )}
@@ -520,6 +615,14 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
           {message && <div className="form-success settings-message" role="status"><Check />{message}</div>}
         </section>
       </div>
+      {tokenPendingReveal && (
+        <RevealTokenConfirmModal
+          token={tokenPendingReveal}
+          busy={revealingToken}
+          onClose={() => { if (!revealingToken) setTokenPendingReveal(null); }}
+          onConfirm={() => void confirmRevealToken()}
+        />
+      )}
     </div>
   );
 }
