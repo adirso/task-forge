@@ -2,15 +2,15 @@ import type { DashboardSummary } from "@taskforge/contracts";
 import { api } from "../../lib/api";
 import { openProject } from "../../lib/dashboardNav";
 import { useWidgetQuery } from "../../lib/widgetQuery";
-import { WidgetError } from "../WidgetShell";
+import { WidgetEmpty, WidgetError, WidgetLoading } from "../WidgetShell";
 import { formatAgentUsage } from "../../lib/agentUsage";
 
 export function ProjectProgressWidget() {
   const { data, error, loading, reload } = useWidgetQuery<DashboardSummary>(() => api.dashboardSummary());
 
   if (error) return <WidgetError message={error} onRetry={reload} />;
-  if (loading || !data) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
-  if (data.projects.length === 0) return <div className="widget-empty">No projects yet.</div>;
+  if (loading || !data) return <WidgetLoading />;
+  if (data.projects.length === 0) return <WidgetEmpty>No projects yet.</WidgetEmpty>;
 
   return (
     <div className="widget-project-progress">

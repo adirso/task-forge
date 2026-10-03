@@ -6,13 +6,13 @@ import { statusMeta } from "../lib/ui";
 import { useWidgetQuery } from "../lib/widgetQuery";
 import { defaultProjectLayout, formatDuration, loadProjectLayout, PROJECT_MODULES, PROJECT_MODULE_SIZE, projectMetrics, saveProjectLayout, type ProjectModule } from "../lib/projectDashboard";
 import { ModularDashboard } from "./ModularDashboard";
-import { WidgetError } from "./WidgetShell";
+import { WidgetEmpty, WidgetError } from "./WidgetShell";
 
 const catalog = Object.fromEntries(Object.entries(PROJECT_MODULES).map(([type, module]) => [type, { ...module, ...PROJECT_MODULE_SIZE, icon: <BarChart3 /> }])) as Record<ProjectModule, typeof PROJECT_MODULES[ProjectModule] & typeof PROJECT_MODULE_SIZE & { icon: React.ReactNode }>;
 const statusLabel = (status: string) => statusMeta[status as keyof typeof statusMeta]?.label ?? status;
 export function ProjectBars({ rows, empty, format = String }: { rows: Array<{ label: string; value: number }>; empty: string; format?: (value: number) => string }) {
   const max = Math.max(0, ...rows.map((row) => row.value));
-  if (!max) return <p className="widget-empty">{empty}</p>;
+  if (!max) return <WidgetEmpty>{empty}</WidgetEmpty>;
   return <ul className="project-chart" aria-label="Chart values">{rows.map((row, index) => <li key={`${row.label}-${index}`}>
     <div><span>{row.label}</span><strong>{format(row.value)}</strong></div>
     <div className="project-chart-track" aria-hidden="true"><span style={{ width: `${row.value / max * 100}%` }} /></div>
@@ -25,7 +25,7 @@ function DeliveryWidget({ taskIds }: { taskIds: Set<string> }) {
   if (query.error || !query.data) return <WidgetError message="Could not load delivery checkpoints." onRetry={query.reload} />;
   const failures = query.data.monitor.failures.filter((failure) => taskIds.has(failure.taskId));
   return <><p>Failed checkpoints for this project. Service state: {query.data.monitor.status} (global).</p>
-    {failures.length ? <ul className="project-monitor-list">{failures.map((failure) => <li key={`${failure.runId}-${failure.taskId}`}><strong>Task {failure.taskId.slice(0, 8)}</strong><span>{failure.errorCategory ?? "Unknown error"}</span>{failure.nextRetryAt && <span>Retry: {new Date(failure.nextRetryAt).toLocaleString()}</span>}</li>)}</ul> : <p className="widget-empty">No failed delivery checkpoints for this project.</p>}
+    {failures.length ? <ul className="project-monitor-list">{failures.map((failure) => <li key={`${failure.runId}-${failure.taskId}`}><strong>Task {failure.taskId.slice(0, 8)}</strong><span>{failure.errorCategory ?? "Unknown error"}</span>{failure.nextRetryAt && <span>Retry: {new Date(failure.nextRetryAt).toLocaleString()}</span>}</li>)}</ul> : <WidgetEmpty>No failed delivery checkpoints for this project.</WidgetEmpty>}
   </>;
 }
 
@@ -36,7 +36,7 @@ export function ProjectModuleContent({ type, metrics, projectKey }: { type: Proj
     case "priority": return <ProjectBars rows={metrics.priority} empty="No open tasks in this project." />;
     case "workload": return <ProjectBars rows={metrics.workload} empty="No open tasks in this project." />;
     case "durations": return <><p>Aggregate tracked time from task status history.</p><ProjectBars rows={metrics.durations.map((row) => ({ ...row, label: statusLabel(row.label) }))} format={formatDuration} empty="No duration data yet." /></>;
-    case "phases": return metrics.phases.length ? <ul className="project-monitor-list">{metrics.phases.map((phase) => <li key={phase.id}><strong>Phase {phase.number}{phase.isActive ? " · Active" : ""}</strong><span>{phase.goal}</span><progress aria-label={`Phase ${phase.number} completed tasks`} max={phase.total || 1} value={phase.done} /><span>{phase.done} completed · {phase.open} open · {phase.cancelled} cancelled</span></li>)}</ul> : <p className="widget-empty">No phases in this project yet.</p>;
+    case "phases": return metrics.phases.length ? <ul className="project-monitor-list">{metrics.phases.map((phase) => <li key={phase.id}><strong>Phase {phase.number}{phase.isActive ? " · Active" : ""}</strong><span>{phase.goal}</span><progress aria-label={`Phase ${phase.number} completed tasks`} max={phase.total || 1} value={phase.done} /><span>{phase.done} completed · {phase.open} open · {phase.cancelled} cancelled</span></li>)}</ul> : <WidgetEmpty>No phases in this project yet.</WidgetEmpty>;
     case "attention": return <><p>Open work only. Stale means in progress without an update for 4+ hours. A task can appear in more than one group.</p>{Object.entries(metrics.attention).map(([label, tasks]) => <section className="project-attention-group" key={label}><h4>{label} · {tasks.length}</h4>{tasks.length ? <ul>{tasks.map((task) => <li key={task.id}><strong>{projectKey}-{task.number}</strong> {task.title}</li>)}</ul> : <p>No {label} tasks.</p>}</section>)}</>;
     case "delivery": return <DeliveryWidget taskIds={new Set(metrics.tasks.map((task) => task.id))} />;
   }

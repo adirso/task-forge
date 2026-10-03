@@ -5,7 +5,7 @@ import { openTask } from "../../lib/dashboardNav";
 import { useWidgetQuery } from "../../lib/widgetQuery";
 import type { User } from "@taskforge/contracts";
 import { Avatar } from "../Avatar";
-import { WidgetError } from "../WidgetShell";
+import { WidgetEmpty, WidgetError, WidgetLoading } from "../WidgetShell";
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -26,16 +26,16 @@ export function AgentOpsWidget({ currentUser }: { currentUser: User }) {
 
   if (!isAdmin) {
     return (
-      <div className="widget-empty">
+      <WidgetEmpty>
         <ShieldCheck style={{ width: 20, opacity: 0.5 }} />
         Admin access required.
-      </div>
+      </WidgetEmpty>
     );
   }
 
   if (error) return <WidgetError message={error} onRetry={reload} />;
-  if (loading || !agents) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
-  if (agents.length === 0) return <div className="widget-empty"><Bot style={{ width: 20, opacity: 0.4 }} /> No agents yet.</div>;
+  if (loading || !agents) return <WidgetLoading lines={2} />;
+  if (agents.length === 0) return <WidgetEmpty><Bot style={{ width: 20, opacity: 0.4 }} /> No agents yet.</WidgetEmpty>;
 
   return (
     <div className="widget-agent-ops">

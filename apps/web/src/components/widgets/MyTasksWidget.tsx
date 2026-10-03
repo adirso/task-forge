@@ -2,15 +2,15 @@ import type { DashboardSummary } from "@taskforge/contracts";
 import { api } from "../../lib/api";
 import { openTask } from "../../lib/dashboardNav";
 import { useWidgetQuery } from "../../lib/widgetQuery";
-import { WidgetError } from "../WidgetShell";
+import { WidgetEmpty, WidgetError, WidgetLoading } from "../WidgetShell";
 import { statusMeta } from "../../lib/ui";
 
 export function MyTasksWidget() {
   const { data, error, loading, reload } = useWidgetQuery<DashboardSummary>(() => api.dashboardSummary());
 
   if (error) return <WidgetError message={error} onRetry={reload} />;
-  if (loading || !data) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
-  if (data.myTasks.length === 0) return <div className="widget-empty">No open tasks assigned to you.</div>;
+  if (loading || !data) return <WidgetLoading />;
+  if (data.myTasks.length === 0) return <WidgetEmpty>No open tasks assigned to you.</WidgetEmpty>;
 
   return (
     <div className="widget-task-list">

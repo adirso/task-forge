@@ -3,7 +3,7 @@ import { api } from "../../lib/api";
 import { activityHref, openHref } from "../../lib/dashboardNav";
 import { useWidgetQuery } from "../../lib/widgetQuery";
 import { Avatar } from "../Avatar";
-import { WidgetError } from "../WidgetShell";
+import { WidgetEmpty, WidgetError, WidgetLoading } from "../WidgetShell";
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -34,8 +34,8 @@ export function ActivityWidget() {
   const { data: events, error, loading, reload } = useWidgetQuery<ActivityEvent[]>(() => api.activityFeed(20).then((res) => res.activity));
 
   if (error) return <WidgetError message={error} onRetry={reload} />;
-  if (loading || !events) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
-  if (events.length === 0) return <div className="widget-empty">No recent activity.</div>;
+  if (loading || !events) return <WidgetLoading />;
+  if (events.length === 0) return <WidgetEmpty>No recent activity.</WidgetEmpty>;
 
   return (
     <div className="widget-activity">
