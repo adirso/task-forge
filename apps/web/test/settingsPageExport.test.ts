@@ -63,7 +63,7 @@ test("SettingsPage AgentDetail panels and BackupSection exist", () => {
 });
 
 test("legacy Settings selectors were removed from global styles", () => {
-  const css = readFileSync(resolve("src/styles.css"), "utf8");
+  const css = readFileSync(resolve("src/styles/global.css"), "utf8");
   for (const selector of [".settings-page", ".agent-manager", ".webhook-deliveries", ".new-agent-form", ".backup-card"]) {
     assert.equal(css.includes(selector), false, selector);
   }

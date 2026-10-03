@@ -85,7 +85,7 @@ test("ProjectDashboardPage unit exposes shell and parts tree", () => {
 });
 
 test("legacy dashboard/widget selectors were removed from global styles", () => {
-  const css = readFileSync(resolve("src/styles.css"), "utf8");
+  const css = readFileSync(resolve("src/styles/global.css"), "utf8");
   for (const selector of [
     ".dashboard-page",
     ".dashboard-fab",

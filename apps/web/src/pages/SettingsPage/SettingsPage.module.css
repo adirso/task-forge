@@ -120,3 +120,8 @@
     flex: 0 0 auto;
   }
 }
+
+:global(.settings-section) { background: white; border: 1px solid #dfe1e6; border-radius: 10px; box-shadow: 0 2px 5px rgba(9,30,66,.04); overflow: hidden; }
+:global(.settings-section-heading) { padding: 22px 24px 18px; border-bottom: 1px solid #ebecf0; }
+:global(.settings-section-heading h2) { margin: 0 0 5px; font-size: 19px; }
+:global(.settings-section-heading p) { margin: 0; color: #6b778c; font-size: 12px; }

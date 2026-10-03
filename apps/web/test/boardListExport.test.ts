@@ -50,7 +50,7 @@ test("BoardPage unit exposes shell and parts tree", () => {
 });
 
 test("legacy Board/List selectors were removed from global styles", () => {
-  const css = readFileSync(resolve("src/styles.css"), "utf8");
+  const css = readFileSync(resolve("src/styles/global.css"), "utf8");
   for (const selector of [".active-phase-banner", ".board-column", ".phase-list-stack", ".task-card", ".add-task-quiet", ".empty-board-phase"]) {
     assert.equal(css.includes(selector), false, selector);
   }
