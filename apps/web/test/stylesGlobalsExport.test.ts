@@ -15,3 +15,18 @@ test("styles/global.css exposes shared primitives", () => {
     assert.equal(css.includes(token), true, token);
   }
 });
+
+test("App loads App.module.css and keeps app-shell class", () => {
+  const app = readFileSync(resolve("src/App.tsx"), "utf8");
+  assert.match(app, /import styles from ["']\.\/App\.module\.css["']/);
+  assert.match(app, /app-shell/);
+  assert.match(app, /styles\.root/);
+});
+
+test("App.module.css owns shell chrome via :global(.selector)", () => {
+  const css = readFileSync(resolve("src/App.module.css"), "utf8");
+  assert.equal(/^:global\s*\{/m.test(css), false);
+  for (const token of [":global(.app-shell)", ":global(.workspace)", ":global(.project-tabs)", ":global(.content-toolbar)", ":global(.automations-hidden)", ":global(.toast)", ":global(.loading-screen)"]) {
+    assert.equal(css.includes(token), true, token);
+  }
+});

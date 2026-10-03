@@ -23,6 +23,7 @@ import { MultiFilterDropdown } from "./components/MultiFilterDropdown";
 import { PhaseMergeModal } from "./components/PhaseMergeModal";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
 import { priorityMeta, statusMeta } from "./lib/ui";
+import styles from "./App.module.css";
 
 type DefaultView = "board" | "list";
 type View = DefaultView | "dashboard" | "phases" | "automations";
@@ -296,12 +297,12 @@ export default function App() {
     try { await api.reorderProjects(projectIds); } catch { setProjects(previous); flash("Could not save project order"); }
   }
 
-  if (loading) return <div className="loading-screen"><span className="loading-mark" />Loading your workspace…</div>;
+  if (loading) return <div className={`loading-screen ${styles.root}`}><span className="loading-mark" />Loading your workspace…</div>;
   if (!user) return <Login onLogin={login} />;
 
   const members = currentProject?.members ?? allUsers.filter((candidate) => candidate.id === user.id);
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${styles.root}`}>
       <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} dashboardActive={!showSettings && !currentProject} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} onHome={() => { setShowSettings(false); setCurrentProject(null); setSelectedTask(null); }} />
       {showMobileNav && <button className="mobile-nav-scrim" type="button" aria-label="Close navigation menu" onClick={() => setShowMobileNav(false)} />}
       <Sidebar className={`mobile-sidebar${showMobileNav ? " mobile-open" : ""}`} onNavigate={() => setShowMobileNav(false)} projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} dashboardActive={!showSettings && !currentProject} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} onHome={() => { setShowSettings(false); setCurrentProject(null); setSelectedTask(null); }} />
