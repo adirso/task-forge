@@ -29,3 +29,13 @@
 :global(.agent-ops-link svg) { width: 14px; }
 :global(.agent-ops-link:hover) { text-decoration: underline; }
 
+
+:global(.stuck-summary) { display: flex; align-items: center; gap: 6px; color: #bf2600; font-size: 14px; }
+:global(.stuck-summary svg) { width: 15px; }
+:global(.ops-badge) { display: flex; align-items: center; gap: 5px; border-radius: 20px; padding: 5px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+:global(.ops-badge svg) { width: 13px; }
+:global(.ops-badge-stuck) { background: #ffebe6; color: #bf2600; }
+:global(.ops-badge-active) { background: #e3fcef; color: #006644; }
+:global(.ops-badge-idle) { background: #f1f3f5; color: #7a869a; }
+:global(.ops-task-key) { font-size: 12px; font-weight: 700; color: #6554c0; white-space: nowrap; }
+:global(.ops-task-title) { font-size: 13px; color: #253858; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }

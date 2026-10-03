@@ -30,3 +30,16 @@ test("App.module.css owns shell chrome via :global(.selector)", () => {
     assert.equal(css.includes(token), true, token);
   }
 });
+
+test("SettingsPage module owns settings-section rules", () => {
+  const css = readFileSync(resolve("src/pages/SettingsPage/SettingsPage.module.css"), "utf8");
+  assert.match(css, /:global\(\.settings-section\)/);
+  assert.match(css, /:global\(\.settings-section-heading\)/);
+});
+
+test("AgentOpsPage module owns ops-badge and stuck-summary rules", () => {
+  const css = readFileSync(resolve("src/pages/AgentOpsPage/AgentOpsPage.module.css"), "utf8");
+  assert.match(css, /:global\(\.ops-badge\)/);
+  assert.match(css, /:global\(\.stuck-summary\)/);
+  assert.match(css, /:global\(\.ops-task-key\)/);
+});

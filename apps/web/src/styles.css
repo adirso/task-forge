@@ -1,18 +1,7 @@
-/* Temporary leftovers pending Tasks 3–4 */
+/* Dead unused rules pending Task 4 deletion */
 .workspace-switch { width: 100%; border: 1px solid #303b4e; background: #1b2535; border-radius: 8px; color: white; padding: 9px; display: flex; align-items: center; text-align: left; gap: 9px; }
 .workspace-switch > span:nth-child(2) { flex: 1; display: grid; gap: 2px; min-width: 0; }
 .workspace-switch strong { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .workspace-switch small { color: #8993a4; font-size: 11px; }
 .workspace-icon { width: 28px; height: 28px; border-radius: 7px; background: #00a3bf; display: grid; place-items: center; font-weight: 700; }
 .empty-project { margin: auto; text-align: center; }.empty-project h1 { margin-bottom: 7px; }.empty-project p { color: #6b778c; margin: 0 0 20px; }
-.settings-section { background: white; border: 1px solid #dfe1e6; border-radius: 10px; box-shadow: 0 2px 5px rgba(9,30,66,.04); overflow: hidden; }
-.settings-section-heading { padding: 22px 24px 18px; border-bottom: 1px solid #ebecf0; }.settings-section-heading h2 { margin: 0 0 5px; font-size: 19px; }.settings-section-heading p { margin: 0; color: #6b778c; font-size: 12px; }
-.stuck-summary { display: flex; align-items: center; gap: 6px; color: #bf2600; font-size: 14px; }
-.stuck-summary svg { width: 15px; }
-.ops-badge { display: flex; align-items: center; gap: 5px; border-radius: 20px; padding: 5px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.ops-badge svg { width: 13px; }
-.ops-badge-stuck { background: #ffebe6; color: #bf2600; }
-.ops-badge-active { background: #e3fcef; color: #006644; }
-.ops-badge-idle { background: #f1f3f5; color: #7a869a; }
-.ops-task-key { font-size: 12px; font-weight: 700; color: #6554c0; white-space: nowrap; }
-.ops-task-title { font-size: 13px; color: #253858; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
