@@ -1,0 +1,438 @@
+.root {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-height: 100%;
+}
+.root .runs, .root .logs {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.artifacts {
+  display: grid;
+  gap: 10px;
+}
+.artifacts :global(.section-heading) b {
+  background: #e9f2ff;
+  color: #0c66e4;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 10px;
+}
+.artifactList {
+  display: grid;
+  gap: 7px;
+}
+.artifact {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid #dfe1e6;
+  border-radius: 7px;
+  color: #172b4d;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  background: #fff;
+}
+.artifact:hover {
+  border-color: #85b8ff;
+  background: #f7f9fc;
+}
+.artifact span {
+  display: grid;
+  min-width: 0;
+}
+.artifact strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.artifact small {
+  color: #6b778c;
+  font-size: 9px;
+}
+.artifact code {
+  color: #44546f;
+  font-size: 9px;
+}
+.artifact svg {
+  width: 13px;
+}
+.forceCycle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #ffbdad;
+  border-radius: 8px;
+  background: #ffebe6;
+  padding: 11px 12px;
+}
+.forceCycle > span {
+  display: grid;
+  gap: 3px;
+  color: #bf2600;
+}
+.forceCycle strong {
+  font-size: 11px;
+}
+.forceCycle small {
+  font-size: 9px;
+  line-height: 1.45;
+}
+.forceCycle :global(.button) {
+  flex: 0 0 auto;
+}
+.root:has(> .empty) {
+  align-content: center;
+  justify-items: center;
+}
+.empty {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: #6b778c;
+  padding: 12px 16px;
+}
+.empty > span {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  max-width: 320px;
+}
+.empty svg {
+  width: 28px;
+  color: #a5adba;
+}
+.empty strong {
+  color: #42526e;
+  font-size: 13px;
+}
+.empty small {
+  font-size: 11px;
+  line-height: 1.45;
+}
+.runs {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #ebecf0;
+  display: grid;
+  gap: 10px;
+}
+.runs :global(.section-heading) b {
+  background: #ebecf0;
+  color: #6b778c;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 10px;
+}
+.runs :global(.section-heading) small {
+  color: #6554c0;
+  font-size: 9px;
+  font-weight: 600;
+}
+.runList {
+  display: grid;
+  gap: 7px;
+}
+.runItem {
+  border: 1px solid #ebecf0;
+  border-radius: 7px;
+  background: #fafbfc;
+  padding: 10px 11px;
+  display: grid;
+  gap: 6px;
+}
+.runItem.stale {
+  border-color: #f0ad4e;
+  background: #fffaf0;
+}
+.runItemHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.runItemHeader strong {
+  color: #253858;
+  font-size: 10px;
+}
+.runItemHeader time {
+  color: #a5adba;
+  font-size: 9px;
+  margin-left: auto;
+}
+.runStatus, .runHealth {
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 8px;
+  font-weight: 750;
+}
+.statusRunning {
+  background: #deebff;
+  color: #0747a6;
+}
+.statusPending {
+  background: #fffae6;
+  color: #974f0c;
+}
+.statusSucceeded {
+  background: #e3fcef;
+  color: #006644;
+}
+.statusFailed, .statusCancelled {
+  background: #ffebe6;
+  color: #bf2600;
+}
+.healthLive {
+  background: #e3fcef;
+  color: #006644;
+}
+.healthWaiting {
+  background: #fffae6;
+  color: #974f0c;
+}
+.healthStale, .healthTimedOut, .healthFailed {
+  background: #ffebe6;
+  color: #bf2600;
+}
+.healthCompleted {
+  background: #e3fcef;
+  color: #006644;
+}
+.healthCancelled {
+  background: #ebecf0;
+  color: #6b778c;
+}
+.healthDetail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #6b778c;
+  font-size: 9px;
+}
+.waiting {
+  color: #974f0c;
+}
+.runItemMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #7a869a;
+  font-size: 9px;
+}
+.outputTimeline {
+  display: grid;
+  gap: 4px;
+  border-left: 2px solid #b3bac5;
+  padding-left: 8px;
+}
+.outputTimeline > small {
+  color: #8993a4;
+  font-size: 8px;
+}
+.timelineEntry {
+  display: grid;
+  gap: 2px;
+  border-top: 1px solid #ebecf0;
+  padding-top: 4px;
+}
+.timelineEntry > span {
+  color: #7a869a;
+  font-size: 8px;
+}
+.timelineEntry pre {
+  max-height: 56px;
+  overflow: auto;
+  margin: 0;
+  color: #42526e;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 9px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.runError {
+  margin: 0;
+  border-radius: 5px;
+  background: #ffebe6;
+  color: #bf2600;
+  padding: 6px 7px;
+  font-size: 10px;
+  white-space: pre-wrap;
+}
+.runsEmpty {
+  color: #8993a4;
+  font-size: 11px;
+  text-align: center;
+  padding: 10px;
+  margin: 0;
+}
+.logs {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #ebecf0;
+  display: grid;
+  gap: 10px;
+}
+.logs :global(.section-heading) b {
+  background: #ebecf0;
+  color: #6b778c;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 10px;
+}
+.logs :global(.section-heading) small {
+  color: #8993a4;
+  font-size: 9px;
+}
+.logList {
+  display: grid;
+  gap: 6px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 2px;
+  background: #172b4d;
+  border-radius: 7px;
+}
+.logEntry {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.09);
+}
+.logEntry:last-child {
+  border-bottom: 0;
+}
+.logEntry header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #b3bac5;
+  font-size: 9px;
+}
+.logEntry header strong {
+  color: #c0b6f2;
+}
+.logEntry header time {
+  margin-left: auto;
+  color: #8993a4;
+}
+.logEntry pre {
+  margin: 5px 0 0;
+  color: #deebff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.logsEmpty {
+  color: #8993a4;
+  font-size: 11px;
+  text-align: center;
+  padding: 10px;
+  margin: 0;
+}
+.healthPaused {
+  background: #eae6ff;
+  color: #403294;
+}
+.healthWaitingForInput {
+  background: #fffae6;
+  color: #974f0c;
+}
+.inputRequest {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #ffe380;
+  border-radius: 6px;
+  background: #fffae6;
+  padding: 8px;
+}
+.inputRequest strong {
+  color: #6f4e00;
+  font-size: 9px;
+}
+.inputRequest p {
+  margin: 0;
+  color: #42526e;
+  font-size: 10px;
+  white-space: pre-wrap;
+}
+.inputRequest textarea {
+  resize: vertical;
+  min-height: 52px;
+  border: 1px solid #dfe1e6;
+  border-radius: 5px;
+  padding: 7px;
+  font: inherit;
+}
+.controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top: 1px solid #ebecf0;
+  padding-top: 7px;
+}
+.controls :global(.button) {
+  min-height: 28px;
+  padding: 5px 8px;
+  font-size: 9px;
+}
+.controls label {
+  display: grid;
+  gap: 2px;
+  color: #6b778c;
+  font-size: 8px;
+}
+.controls select {
+  min-height: 28px;
+  max-width: 150px;
+  border: 1px solid #dfe1e6;
+  border-radius: 5px;
+  background: white;
+  font-size: 9px;
+}
+.providerProgress {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 9px 10px;
+  border: 1px solid #b9b3dd;
+  border-radius: 7px;
+  color: #5243aa;
+  background: #f8f7ff;
+}
+.providerProgress > svg {
+  width: 15px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.providerProgress > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.providerProgress strong {
+  color: #403294;
+  font-size: 10px;
+}
+.providerProgress small {
+  color: #7a869a;
+  font-size: 9px;
+}
+.providerProgress pre {
+  max-height: 70px;
+  overflow: auto;
+  margin: 3px 0 0;
+  color: #42526e;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 9px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@media (max-width: 650px) {
+  .artifact { grid-template-columns: minmax(0, 1fr) auto; }
+  .artifact code { grid-column: 1 / -1; overflow-wrap: anywhere; }
+}
