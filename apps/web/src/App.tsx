@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { phaseBranchName, type Notification, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskPriority, type TaskSearchResult, type TaskStatus, type User } from "@taskforge/contracts";
 import { BarChart3, Bell, Filter, Flag, Kanban, LayoutList, Link2, Menu, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
-import { Login } from "./components/Login";
+import { Login } from "./pages/Login";
 import { Sidebar } from "./components/Sidebar";
 import { BoardPage } from "./pages/BoardPage";
 import { ListPage } from "./pages/ListPage";
