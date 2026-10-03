@@ -13,3 +13,24 @@ test("WidgetShell is a folder unit with drag-handle hook", () => {
     assert.equal(readFileSync(resolve("src/components/WidgetShell", file), "utf8").length > 0, true, file);
   }
 });
+
+const WIDGETS = [
+  "ProjectStatusWidget",
+  "ProjectProgressWidget",
+  "ProjectTimeWidget",
+  "MyTasksWidget",
+  "StuckTasksWidget",
+  "ActivityWidget",
+  "AgentOpsWidget",
+] as const;
+
+test("home widgets are folder units", () => {
+  for (const name of WIDGETS) {
+    const root = resolve("src/components/widgets", name);
+    const index = readFileSync(resolve(root, "index.ts"), "utf8");
+    assert.match(index, new RegExp(`export \\{ ${name} \\}`));
+    for (const file of [`${name}.tsx`, `${name}.module.css`, "types.ts"]) {
+      assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, `${name}/${file}`);
+    }
+  }
+});

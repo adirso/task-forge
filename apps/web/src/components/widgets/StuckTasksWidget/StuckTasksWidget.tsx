@@ -1,9 +1,10 @@
 import type { DashboardSummary } from "@taskforge/contracts";
 import { AlertTriangle } from "lucide-react";
-import { api } from "../../lib/api";
-import { openTask } from "../../lib/dashboardNav";
-import { useWidgetQuery } from "../../lib/widgetQuery";
-import { WidgetEmpty, WidgetError, WidgetLoading } from "../WidgetShell";
+import { api } from "../../../lib/api";
+import { openTask } from "../../../lib/dashboardNav";
+import { useWidgetQuery } from "../../../lib/widgetQuery";
+import { WidgetEmpty, WidgetError, WidgetLoading } from "../../WidgetShell";
+import styles from "./StuckTasksWidget.module.css";
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -20,17 +21,17 @@ export function StuckTasksWidget() {
   if (data.stuckTasks.length === 0) return <WidgetEmpty><AlertTriangle style={{ width: 18, opacity: 0.4 }} /> No stuck tasks — nice!</WidgetEmpty>;
 
   return (
-    <div className="widget-task-list">
+    <div className={styles.root}>
       {data.stuckTasks.map((task) => (
         <button
           key={task.id}
           type="button"
-          className="wtl-row wtl-row-stuck"
+          className={`${styles.row} ${styles.rowStuck}`}
           onClick={() => openTask(task.projectKey, task.number)}
         >
-          <span className="wtl-key">{task.projectKey}-{task.number}</span>
-          <span className="wtl-title">{task.title}</span>
-          <span className="wtl-meta">
+          <span className={styles.key}>{task.projectKey}-{task.number}</span>
+          <span className={styles.title}>{task.title}</span>
+          <span className={styles.meta}>
             {task.assigneeName ? `@${task.assigneeName.split(" ")[0]}` : "Unassigned"}
             {" · "}
             {formatRelative(task.updatedAt)}
