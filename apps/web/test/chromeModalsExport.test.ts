@@ -121,7 +121,7 @@ test("modal units are folders and App imports them from components/<Name>", () =
 });
 
 test("legacy chrome/modal/page selectors were removed from global styles", () => {
-  const css = readFileSync(resolve("src/styles.css"), "utf8");
+  const css = readFileSync(resolve("src/styles/global.css"), "utf8");
   for (const selector of [
     ".login-page",
     ".phases-page",

@@ -1,7 +1,0 @@
-/* Dead unused rules pending Task 4 deletion */
-.workspace-switch { width: 100%; border: 1px solid #303b4e; background: #1b2535; border-radius: 8px; color: white; padding: 9px; display: flex; align-items: center; text-align: left; gap: 9px; }
-.workspace-switch > span:nth-child(2) { flex: 1; display: grid; gap: 2px; min-width: 0; }
-.workspace-switch strong { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.workspace-switch small { color: #8993a4; font-size: 11px; }
-.workspace-icon { width: 28px; height: 28px; border-radius: 7px; background: #00a3bf; display: grid; place-items: center; font-weight: 700; }
-.empty-project { margin: auto; text-align: center; }.empty-project h1 { margin-bottom: 7px; }.empty-project p { color: #6b778c; margin: 0 0 20px; }

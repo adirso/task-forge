@@ -43,3 +43,27 @@ test("AgentOpsPage module owns ops-badge and stuck-summary rules", () => {
   assert.match(css, /:global\(\.stuck-summary\)/);
   assert.match(css, /:global\(\.ops-task-key\)/);
 });
+
+test("root styles.css is removed", () => {
+  assert.equal(existsSync(resolve("src/styles.css")), false);
+});
+
+test("styles/global.css does not contain App or page-exclusive selectors", () => {
+  const css = readFileSync(resolve("src/styles/global.css"), "utf8");
+  for (const selector of [
+    ".app-shell",
+    ".workspace ",
+    ".project-tabs",
+    ".content-toolbar",
+    ".automations-hidden",
+    ".toast",
+    ".loading-screen",
+    ".settings-section",
+    ".ops-badge",
+    ".stuck-summary",
+    ".workspace-switch",
+    ".empty-project",
+  ]) {
+    assert.equal(css.includes(selector.trimEnd()), false, selector);
+  }
+});
