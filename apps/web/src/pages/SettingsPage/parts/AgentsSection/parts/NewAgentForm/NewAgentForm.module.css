@@ -1,0 +1,37 @@
+.root {
+  padding: 20px 24px;
+  border-bottom: 1px solid #ebecf0;
+  background: #fafbfc;
+}
+
+.root h3 {
+  margin: 0 0 13px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.root h3 svg {
+  width: 15px;
+  color: #6554c0;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 860px) {
+  .fields {
+    grid-template-columns: 1fr;
+  }
+}

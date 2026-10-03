@@ -1,0 +1,31 @@
+import type { FormEvent } from "react";
+import type { ApiTokenMetadata, User } from "@taskforge/contracts";
+import type { AgentDetailTab } from "../../../../../../lib/settingsNav";
+
+export type AgentDetailProps = {
+  agent: User;
+  agentDetailTab: AgentDetailTab;
+  tokens: ApiTokenMetadata[];
+  tokensLoading: boolean;
+  tokensError: string;
+  tokenName: string;
+  expiresInDays: string;
+  issuingToken: boolean;
+  issuedToken: string;
+  revealedTokenId: string;
+  copied: boolean;
+  avatarUploading: boolean;
+  onAgentDetailTabChange: (tab: AgentDetailTab) => void;
+  onAgentUpdated: (user: User) => void;
+  onSuccess: (text: string) => void;
+  onError: (text: string) => void;
+  onIssueToken: (event: FormEvent) => void | Promise<void>;
+  onTokenNameChange: (value: string) => void;
+  onExpiresInDaysChange: (value: string) => void;
+  onRequestRevealToken: (token: ApiTokenMetadata) => void;
+  onRevokeToken: (id: string) => void | Promise<void>;
+  onCopyToken: () => void | Promise<void>;
+  onUpdateAgentAvatar: (file: File) => void | Promise<void>;
+  onRemoveAgentAvatar: () => void | Promise<void>;
+  onDeleteAgent: () => void | Promise<void>;
+};

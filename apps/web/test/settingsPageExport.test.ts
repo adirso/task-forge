@@ -24,3 +24,15 @@ test("SettingsPage includes Account and Appearance parts", () => {
     }
   }
 });
+
+test("SettingsPage includes AgentsSection parts tree", () => {
+  const required = [
+    "parts/AgentsSection/AgentsSection.tsx",
+    "parts/AgentsSection/parts/NewAgentForm/NewAgentForm.tsx",
+    "parts/AgentsSection/parts/AgentPicker/AgentPicker.tsx",
+    "parts/AgentsSection/parts/AgentDetail/AgentDetail.tsx",
+  ];
+  for (const rel of required) {
+    assert.equal(readFileSync(resolve("src/pages/SettingsPage", rel), "utf8").length > 0, true, rel);
+  }
+});

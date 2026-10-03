@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { ApiTokenMetadata } from "@taskforge/contracts";
-import { Activity, Bot, Check, Copy, Download, Eye, HardDrive, KeyRound, Monitor, Plus, Route, ShieldCheck, Trash2, Upload, UserRound, Webhook } from "lucide-react";
+import { Activity, Bot, Check, Download, HardDrive, Monitor, ShieldCheck, Upload, UserRound } from "lucide-react";
 import { api } from "../../lib/api";
 import { type AgentDetailTab, type SettingsTab, parseSettingsTab, readSettingsLocation, writeSettingsLocation } from "../../lib/settingsNav";
-import { Avatar } from "../../components/Avatar";
 import { AgentOpsPage } from "../../components/AgentOpsPage";
-import { WebhookManager } from "../../components/WebhookManager";
-import { WebhookDeliveriesPanel } from "../../components/WebhookDeliveriesPanel";
-import { AgentCapabilityEditor } from "../../components/AgentCapabilityEditor";
 import { RevealTokenConfirmModal } from "../../components/RevealTokenConfirmModal";
 import { AccountSection } from "./parts/AccountSection";
 import { AppearanceSection } from "./parts/AppearanceSection";
+import { AgentsSection } from "./parts/AgentsSection";
 import type { SettingsPageProps } from "./types";
 import styles from "./SettingsPage.module.css";
 
@@ -335,227 +332,52 @@ export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated
           )}
 
           {tab === "agents" && (
-            <div className="settings-section agents-settings-section">
-              <div className="settings-section-heading agents-section-heading">
-                <div>
-                  <h2>Agents</h2>
-                  <p>Create identities for automation and manage credentials, webhooks, and routing for each agent.</p>
-                </div>
-                {user.role === "ADMIN" && (
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    aria-expanded={showNewAgentForm}
-                    aria-controls="new-agent-form"
-                    onClick={() => setShowNewAgentForm((open) => !open)}
-                  >
-                    <Plus /> {showNewAgentForm ? "Close" : "New agent"}
-                  </button>
-                )}
-              </div>
-              {user.role !== "ADMIN" ? (
-                <div className="settings-notice">
-                  <ShieldCheck />
-                  <span><strong>Administrator access required</strong><small>Ask a workspace administrator to manage agent identities and tokens.</small></span>
-                </div>
-              ) : (
-                <div className="agent-settings">
-                  {showNewAgentForm && (
-                    <form id="new-agent-form" className="new-agent-form" onSubmit={addAgent} aria-label="Create agent identity">
-                      <h3><Plus /> New agent identity</h3>
-                      <div>
-                        <label>Name<input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Repository Builder" required autoComplete="off" /></label>
-                        <label>Email <span>Optional</span><input type="email" value={agentEmail} onChange={(event) => setAgentEmail(event.target.value)} placeholder="builder@example.local" autoComplete="off" /></label>
-                        <div className="new-agent-actions">
-                          <button type="button" className="button button-secondary" disabled={creatingAgent} onClick={closeNewAgentForm}>Cancel</button>
-                          <button type="submit" className="button button-primary" disabled={creatingAgent}>{creatingAgent ? "Creating…" : "Create agent"}</button>
-                        </div>
-                      </div>
-                    </form>
-                  )}
-
-                  {!agents.length ? (
-                    <div className="agent-empty-state" role="status">
-                      <Bot />
-                      <strong>No agents yet</strong>
-                      <small>{showNewAgentForm ? "Fill in the form above to create your first agent identity." : "Use New agent to create an identity, then issue tokens and configure routing."}</small>
-                      {!showNewAgentForm && (
-                        <button type="button" className="button button-secondary" onClick={() => setShowNewAgentForm(true)}>
-                          <Plus /> New agent
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="agent-manager">
-                      <div className="agent-list" role="listbox" aria-label="Agents">
-                        {agents.map((agent) => (
-                          <button
-                            key={agent.id}
-                            type="button"
-                            role="option"
-                            aria-selected={selectedAgentId === agent.id}
-                            className={selectedAgentId === agent.id ? "active" : ""}
-                            onClick={() => { setSelectedAgentId(agent.id); setAgentDetailTab("identity"); setIssuedToken(""); setRevealedTokenId(""); }}
-                          >
-                            <Avatar user={agent} size="md" />
-                            <span><strong>{agent.name}</strong><small>{agent.email || "No email"}</small></span>
-                          </button>
-                        ))}
-                      </div>
-
-                      {selectedAgent ? (
-                        <div className="agent-detail" aria-label={`${selectedAgent.name} settings`}>
-                          <nav className="agent-detail-tabs" role="tablist" aria-label={`${selectedAgent.name} setting sections`}>
-                            <button type="button" role="tab" aria-selected={agentDetailTab === "identity"} className={agentDetailTab === "identity" ? "active" : ""} onClick={() => setAgentDetailTab("identity")}><UserRound /> Identity</button>
-                            <button type="button" role="tab" aria-selected={agentDetailTab === "access"} className={agentDetailTab === "access" ? "active" : ""} onClick={() => setAgentDetailTab("access")}><KeyRound /> Access</button>
-                            <button type="button" role="tab" aria-selected={agentDetailTab === "deliveries"} className={agentDetailTab === "deliveries" ? "active" : ""} onClick={() => setAgentDetailTab("deliveries")}><Webhook /> Deliveries</button>
-                            <button type="button" role="tab" aria-selected={agentDetailTab === "routing"} className={agentDetailTab === "routing" ? "active" : ""} onClick={() => setAgentDetailTab("routing")}><Route /> Routing</button>
-                            <button type="button" role="tab" aria-selected={agentDetailTab === "danger"} className={agentDetailTab === "danger" ? "active" : ""} onClick={() => setAgentDetailTab("danger")}><Trash2 /> Danger zone</button>
-                          </nav>
-
-                          {agentDetailTab === "identity" && (
-                            <section className="agent-panel" role="tabpanel" aria-label="Identity">
-                              <header className="agent-panel-heading">
-                                <h3>Identity</h3>
-                                <p>Name and profile picture for this agent.</p>
-                              </header>
-                              <div className="agent-identity">
-                                <Avatar user={selectedAgent} size="lg" />
-                                <div className="agent-identity-copy">
-                                  <strong>{selectedAgent.name}</strong>
-                                  <small>{selectedAgent.email || "No email on file"}</small>
-                                </div>
-                                <div className="agent-avatar-actions">
-                                  <label className="button button-secondary">
-                                    <input
-                                      type="file"
-                                      accept="image/png,image/jpeg,image/gif,image/webp"
-                                      aria-label="Change agent picture"
-                                      onChange={(event) => {
-                                        const file = event.target.files?.[0];
-                                        if (file) void updateAgentAvatar(file);
-                                        event.currentTarget.value = "";
-                                      }}
-                                    />
-                                    {avatarUploading ? "Uploading…" : "Change picture"}
-                                  </label>
-                                  {selectedAgent.avatarUrl && (
-                                    <button type="button" className="button button-secondary" disabled={avatarUploading} onClick={() => void removeAgentAvatar()}>
-                                      Remove picture
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </section>
-                          )}
-
-                          {agentDetailTab === "access" && (
-                            <section className="agent-panel" role="tabpanel" aria-label="Access">
-                              <header className="agent-panel-heading">
-                                <h3>Access</h3>
-                                <p>Webhook endpoint and revocable API tokens. Secrets are shown only when created or revealed.</p>
-                              </header>
-                              <WebhookManager agent={selectedAgent} onAgentUpdated={onAgentUpdated} onSuccess={success} onError={setError} />
-                              <div className="agent-token-block">
-                                <h4>API tokens</h4>
-                                <form className="token-form" onSubmit={issueToken} aria-label="Issue API token">
-                                  <label>Token name<input value={tokenName} onChange={(event) => setTokenName(event.target.value)} required /></label>
-                                  <label>Expires after
-                                    <select value={expiresInDays} onChange={(event) => setExpiresInDays(event.target.value)}>
-                                      <option value="30">30 days</option>
-                                      <option value="90">90 days</option>
-                                      <option value="365">1 year</option>
-                                      <option value="">Never</option>
-                                    </select>
-                                  </label>
-                                  <button type="submit" className="button button-primary" disabled={issuingToken}><KeyRound /> {issuingToken ? "Issuing…" : "Issue token"}</button>
-                                </form>
-                                {issuedToken && (
-                                  <div className="issued-token" role="status">
-                                    <strong>{revealedTokenId ? "Revealed token" : "Copy this token now"}</strong>
-                                    <p>{revealedTokenId ? "Store it securely. You can reveal it again from the list below." : "You can also reveal it later from the issued tokens list."}</p>
-                                    <div>
-                                      <code>{issuedToken}</code>
-                                      <button type="button" onClick={() => void copyToken()}>{copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy"}</button>
-                                    </div>
-                                  </div>
-                                )}
-                                <div className="token-list">
-                                  <h4>Issued tokens</h4>
-                                  {tokensLoading ? <p className="no-tokens" role="status">Loading tokens…</p>
-                                    : tokensError ? <p className="form-error" role="alert">{tokensError}</p>
-                                    : tokens.length ? tokens.map((token) => (
-                                      <article key={token.id} className={token.revokedAt ? "revoked" : ""}>
-                                        <KeyRound />
-                                        <span>
-                                          <strong>{token.name}</strong>
-                                          <small>
-                                            tf_{token.prefix}_… · {token.revokedAt ? "Revoked" : token.lastUsedAt ? `Used ${new Date(token.lastUsedAt).toLocaleDateString()}` : "Never used"}
-                                            {!token.revokedAt && !token.revealable ? " · Not recoverable" : ""}
-                                          </small>
-                                        </span>
-                                        <div className="token-actions">
-                                          {!token.revokedAt && token.revealable && (
-                                            <button type="button" className="reveal-token" onClick={() => requestRevealToken(token)} title={`Reveal ${token.name}`} aria-label={`Reveal ${token.name}`}>
-                                              <Eye />
-                                            </button>
-                                          )}
-                                          {!token.revokedAt && (
-                                            <button type="button" onClick={() => void revokeToken(token.id)} title="Revoke token" aria-label={`Revoke ${token.name}`}>
-                                              <Trash2 />
-                                            </button>
-                                          )}
-                                        </div>
-                                      </article>
-                                    )) : <p className="no-tokens">No tokens issued for this agent.</p>}
-                                </div>
-                              </div>
-                            </section>
-                          )}
-
-                          {agentDetailTab === "deliveries" && (
-                            <section className="agent-panel agent-panel-deliveries" role="tabpanel" aria-label="Deliveries">
-                              <header className="agent-panel-heading">
-                                <h3>Deliveries</h3>
-                                <p>Inspect and retry webhook delivery attempts for this agent.</p>
-                              </header>
-                              <WebhookDeliveriesPanel agent={selectedAgent} onSuccess={success} onError={setError} />
-                            </section>
-                          )}
-
-                          {agentDetailTab === "routing" && (
-                            <section className="agent-panel" role="tabpanel" aria-label="Routing">
-                              <header className="agent-panel-heading">
-                                <h3>Routing</h3>
-                                <p>Capabilities used for deterministic automatic assignment.</p>
-                              </header>
-                              <AgentCapabilityEditor agent={selectedAgent} onUpdated={onAgentUpdated} onSuccess={success} onError={setError} embedded />
-                            </section>
-                          )}
-
-                          {agentDetailTab === "danger" && (
-                            <section className="agent-panel agent-panel-danger" role="tabpanel" aria-label="Danger zone">
-                              <header className="agent-panel-heading">
-                                <h3>Danger zone</h3>
-                                <p>Deleting an agent revokes every token and removes the identity.</p>
-                              </header>
-                              <button type="button" className="button button-danger-quiet" onClick={() => deleteAgent().catch(() => undefined)}>
-                                <Trash2 /> Delete {selectedAgent.name}
-                              </button>
-                            </section>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="select-agent-empty" role="status">
-                          <Bot />
-                          <span>Select an agent to manage its settings.</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            <AgentsSection
+              isAdmin={user.role === "ADMIN"}
+              agents={agents}
+              selectedAgentId={selectedAgentId}
+              selectedAgent={selectedAgent}
+              agentDetailTab={agentDetailTab}
+              showNewAgentForm={showNewAgentForm}
+              agentName={agentName}
+              agentEmail={agentEmail}
+              creatingAgent={creatingAgent}
+              tokens={tokens}
+              tokensLoading={tokensLoading}
+              tokensError={tokensError}
+              tokenName={tokenName}
+              expiresInDays={expiresInDays}
+              issuingToken={issuingToken}
+              issuedToken={issuedToken}
+              revealedTokenId={revealedTokenId}
+              copied={copied}
+              avatarUploading={avatarUploading}
+              onToggleNewAgentForm={() => setShowNewAgentForm((open) => !open)}
+              onOpenNewAgentForm={() => setShowNewAgentForm(true)}
+              onCloseNewAgentForm={closeNewAgentForm}
+              onAgentNameChange={setAgentName}
+              onAgentEmailChange={setAgentEmail}
+              onAddAgent={addAgent}
+              onSelectAgent={(id) => {
+                setSelectedAgentId(id);
+                setAgentDetailTab("identity");
+                setIssuedToken("");
+                setRevealedTokenId("");
+              }}
+              onAgentDetailTabChange={setAgentDetailTab}
+              onAgentUpdated={onAgentUpdated}
+              onSuccess={success}
+              onError={setError}
+              onIssueToken={issueToken}
+              onTokenNameChange={setTokenName}
+              onExpiresInDaysChange={setExpiresInDays}
+              onRequestRevealToken={requestRevealToken}
+              onRevokeToken={revokeToken}
+              onCopyToken={copyToken}
+              onUpdateAgentAvatar={updateAgentAvatar}
+              onRemoveAgentAvatar={removeAgentAvatar}
+              onDeleteAgent={deleteAgent}
+            />
           )}
 
           {tab === "backup" && user.role === "ADMIN" && (
