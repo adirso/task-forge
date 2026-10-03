@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { phaseBranchName, type Notification, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskPriority, type TaskSearchResult, type TaskStatus, type User } from "@taskforge/contracts";
 import { BarChart3, Bell, Filter, Flag, Kanban, LayoutList, Link2, Menu, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
-import { Login } from "./components/Login";
+import { Login } from "./pages/Login";
 import { Sidebar } from "./components/Sidebar";
 import { BoardPage } from "./pages/BoardPage";
 import { ListPage } from "./pages/ListPage";
@@ -11,12 +11,12 @@ import { ProjectModal } from "./components/ProjectModal";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { SearchPalette } from "./components/SearchPalette";
 import { SettingsPage } from "./pages/SettingsPage";
-import { PhasesPage } from "./components/PhaseManager";
+import { PhasesPage } from "./pages/PhasesPage";
 import { ProjectDeleteModal } from "./components/ProjectDeleteModal";
 import { ProjectMembersModal } from "./components/ProjectMembersModal";
 import { ProjectHeaderActions } from "./components/ProjectHeaderActions";
 import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
-import { AutomationManager } from "./components/AutomationManager";
+import { AutomationsPage } from "./pages/AutomationsPage";
 import { ProjectDashboardPage } from "./pages/ProjectDashboardPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { MultiFilterDropdown } from "./components/MultiFilterDropdown";
@@ -393,7 +393,7 @@ export default function App() {
             </div>
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
-          {view === "automations" && <AutomationManager key={currentProject?.id} project={currentProject} users={allUsers} phases={phases} />}
+          {view === "automations" && <AutomationsPage key={currentProject?.id} project={currentProject} users={allUsers} phases={phases} />}
           {view === "dashboard" && <ProjectDashboardPage project={currentProject} />}
           <section className={`content-area${view === "automations" ? " automations-hidden" : ""}${view === "dashboard" ? " dashboard-hidden" : ""}`}>
             {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {

@@ -1,0 +1,63 @@
+.root {
+  /* CSS Modules ownership hook; rules live in :global below */
+}
+
+:global(.sidebar) { width: 244px; background: var(--sidebar); color: #c9d1df; display: flex; flex-direction: column; padding: 20px 14px 14px; position: fixed; inset: 0 auto 0 0; z-index: 20; }
+:global(.mobile-sidebar) { display: none; }
+:global(.main-nav) { margin: 20px 0 16px; display: grid; gap: 3px; }
+:global(.main-nav button), :global(.sidebar-bottom > button) { position: relative; background: transparent; border: 0; color: #aeb8c8; height: 38px; padding: 0 10px; border-radius: 7px; display: flex; align-items: center; gap: 11px; text-align: left; }
+:global(.main-nav button:hover), :global(.sidebar-bottom > button:hover) { background: #1f2a3a; color: white; }
+:global(.main-nav svg), :global(.sidebar-bottom > button > svg) { width: 17px; }
+:global(.main-nav span), :global(.sidebar-bottom button > span) { flex: 1; font-size: 14px; }
+:global(.main-nav kbd) { flex: 0 0 auto; display: grid; place-items: center; height: 18px; padding: 0 6px; font-family: inherit; font-size: 11px; line-height: 1; color: #778399; border: 1px solid #3a4555; border-radius: 4px; }
+:global(.main-nav i) { flex: 0 0 auto; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #de350b; color: white; font-style: normal; font-weight: 700; font-size: 10px; line-height: 1; font-variant-numeric: tabular-nums; }
+:global(.nav-section-title) { color: #738097; text-transform: uppercase; font-weight: 700; font-size: 10px; letter-spacing: .08em; padding: 0 8px 8px 10px; display: flex; align-items: center; }
+:global(.nav-section-title span) { flex: 1; }
+:global(.nav-section-title button) { border: 0; background: transparent; color: #8993a4; width: 25px; height: 25px; display: grid; place-items: center; border-radius: 5px; }
+:global(.nav-section-title button:hover) { background: #263244; color: white; }
+:global(.nav-section-title svg) { width: 14px; }
+:global(.project-nav) { display: grid; gap: 3px; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+:global(.project-nav button) { border: 0; width: 100%; min-width: 0; height: 40px; padding: 0 9px; border-radius: 7px; color: #aeb8c8; background: transparent; display: flex; align-items: center; gap: 10px; text-align: left; overflow: hidden; }
+:global(.project-nav button:hover) { background: #1b2636; color: white; }
+:global(.project-nav button.active) { color: white; background: #293449; box-shadow: inset 3px 0 #8777d9; }
+:global(.project-nav button > span:nth-child(2)) { flex: 1; min-width: 0; font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:global(.project-nav small) { flex: 0 0 auto; font-size: 10px; color: #738097; font-variant-numeric: tabular-nums; }
+:global(.project-glyph) { flex: 0 0 23px; width: 23px; height: 23px; display: grid; place-items: center; border-radius: 5px; color: white; font-weight: 750; font-size: 11px; }
+:global(.sidebar-bottom) { margin-top: auto; display: grid; gap: 2px; border-top: 1px solid #293449; padding-top: 10px; }
+:global(.sidebar-bottom > button.active) { background: #293449; color: white; }
+:global(.profile-button) { height: auto !important; min-height: 54px; margin-top: 5px; }
+:global(.profile-button > .avatar) { flex: 0 0 30px; width: 30px; height: 30px; }
+:global(.profile-button span:nth-child(2)) { display: grid; gap: 2px; min-width: 0; }
+:global(.profile-button strong) { font-size: 12px; color: #e5e9f0; }
+:global(.profile-button small) { font-size: 9px; color: #738097; overflow: hidden; text-overflow: ellipsis; }
+:global(.profile-button > svg) { width: 14px !important; }
+
+@media (max-width: 900px) {
+  :global(.sidebar) { width: 72px; padding-inline: 10px; }
+  :global(.sidebar .brand-lockup) { padding-inline: 11px; font-size: 0; }
+  :global(.main-nav span), :global(.main-nav kbd), :global(.nav-section-title span), :global(.project-nav button > span:nth-child(2)), :global(.project-nav small), :global(.sidebar-bottom button > span), :global(.sidebar-bottom button > svg:last-child) { display: none; }
+  :global(.main-nav button), :global(.sidebar-bottom > button) { justify-content: center; padding: 0; }
+
+:global(.main-nav i) { position: absolute; top: 3px; right: 10px; }
+  :global(.nav-section-title) { justify-content: center; padding-inline: 0; }
+
+:global(.project-nav button) { justify-content: center; padding: 0; }
+
+:global(.project-nav button.active) { box-shadow: none; }
+  :global(.profile-button .avatar) { margin: auto; }
+}
+
+@media (max-width: 650px) {
+  :global(.sidebar) { display: none; }
+  :global(.mobile-sidebar) { display: flex; transform: translateX(-100%); transition: transform .16s ease-out; width: min(86vw, 320px); z-index: 30; }
+  :global(.mobile-sidebar.mobile-open) { transform: translateX(0); }
+  :global(.mobile-sidebar .brand-lockup) { padding-inline: 9px; font-size: 18px; }
+  :global(.mobile-sidebar .main-nav span), :global(.mobile-sidebar .main-nav kbd), :global(.mobile-sidebar .nav-section-title span), :global(.mobile-sidebar .project-nav button > span:nth-child(2)), :global(.mobile-sidebar .project-nav small), :global(.mobile-sidebar .sidebar-bottom button > span), :global(.mobile-sidebar .sidebar-bottom button > svg:last-child) { display: initial; }
+  :global(.mobile-sidebar .main-nav button), :global(.mobile-sidebar .sidebar-bottom > button) { justify-content: flex-start; padding: 0 10px; }
+  :global(.mobile-sidebar .main-nav i) { top: 9px; right: 10px; }
+  :global(.mobile-sidebar .nav-section-title) { justify-content: space-between; padding-inline: 10px; }
+  :global(.mobile-sidebar .project-nav button) { justify-content: flex-start; padding: 0 10px; }
+  :global(.mobile-sidebar .project-nav button.active) { box-shadow: inset 3px 0 #8777d9; }
+  :global(.mobile-sidebar .profile-button .avatar) { margin: 0; }
+}
+

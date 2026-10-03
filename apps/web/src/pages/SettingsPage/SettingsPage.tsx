@@ -3,7 +3,7 @@ import type { ApiTokenMetadata } from "@taskforge/contracts";
 import { Activity, Bot, Check, HardDrive, Monitor, ShieldCheck, UserRound } from "lucide-react";
 import { api } from "../../lib/api";
 import { type AgentDetailTab, type SettingsTab, parseSettingsTab, readSettingsLocation, writeSettingsLocation } from "../../lib/settingsNav";
-import { AgentOpsPage } from "../../components/AgentOpsPage";
+import { AgentOpsPage } from "../AgentOpsPage";
 import { RevealTokenConfirmModal } from "../../components/RevealTokenConfirmModal";
 import { RevokeTokenConfirmModal } from "../../components/RevokeTokenConfirmModal";
 import { AccountSection } from "./parts/AccountSection";

@@ -1,0 +1,33 @@
+.root {
+  /* CSS Modules ownership hook; rules live in :global below */
+}
+
+:global(.delete-project-modal) { width: min(470px, 100%); border-radius: 12px; background: white; box-shadow: 0 24px 70px rgba(9,30,66,.3); padding: 23px 25px 20px; animation: modal-in .16s ease-out; }
+
+:global(.delete-project-modal > header) { display: flex; align-items: flex-start; justify-content: space-between; }
+
+:global(.delete-warning-icon) { width: 42px; height: 42px; border-radius: 9px; background: #ffebe6; color: #de350b; display: grid; place-items: center; }
+
+:global(.delete-warning-icon svg) { width: 21px; }
+
+:global(.delete-project-modal h2) { margin: 17px 0 7px; color: #172b4d; font-size: 22px; letter-spacing: -.35px; }
+
+:global(.delete-project-modal > p) { margin: 0 0 18px; color: #6b778c; font-size: 12px; line-height: 1.55; }
+
+:global(.delete-project-summary) { min-height: 58px; border: 1px solid #ebecf0; border-radius: 8px; background: #fafbfc; display: flex; align-items: center; gap: 10px; padding: 9px 11px; margin-bottom: 17px; }
+
+:global(.delete-project-summary > span:last-child) { min-width: 0; display: grid; gap: 3px; }
+
+:global(.delete-project-summary strong) { color: #253858; font-size: 12px; }
+
+:global(.delete-project-summary small) { color: #7a869a; font-size: 10px; }
+
+:global(.delete-project-modal label) { display: grid; gap: 7px; color: #42526e; font-size: 11px; }
+
+:global(.delete-project-modal label input) { height: 40px; border: 1px solid #dfe1e6; border-radius: 6px; padding: 0 10px; outline: 0; font-size: 13px; }
+
+:global(.delete-project-modal label input:focus) { border-color: #de350b; box-shadow: 0 0 0 3px rgba(222,53,11,.09); }
+
+:global(.delete-project-modal > footer) { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #ebecf0; margin-top: 20px; padding-top: 16px; }
+:global(.project-glyph) { flex: 0 0 23px; width: 23px; height: 23px; display: grid; place-items: center; border-radius: 5px; color: white; font-weight: 750; font-size: 11px; }
+
