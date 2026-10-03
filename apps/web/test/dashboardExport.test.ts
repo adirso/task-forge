@@ -83,3 +83,19 @@ test("ProjectDashboardPage unit exposes shell and parts tree", () => {
     assert.equal(readFileSync(resolve(root, `parts/${part}/${part}.module.css`), "utf8").length > 0, true, `${part}.css`);
   }
 });
+
+test("legacy dashboard/widget selectors were removed from global styles", () => {
+  const css = readFileSync(resolve("src/styles.css"), "utf8");
+  for (const selector of [
+    ".dashboard-page",
+    ".dashboard-fab",
+    ".widget-card",
+    ".widget-picker",
+    ".widget-project-status",
+    ".project-dashboard-heading",
+    ".project-chart",
+    ".project-dashboard-modular",
+  ]) {
+    assert.equal(css.includes(selector), false, selector);
+  }
+});
