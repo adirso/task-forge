@@ -41,3 +41,10 @@ test("TaskModal includes tab panel parts tree", () => {
     assert.equal(readFileSync(resolve("src/components/TaskModal", rel), "utf8").length > 0, true, rel);
   }
 });
+
+test("legacy TaskModal selectors were removed from global styles", () => {
+  const css = readFileSync(resolve("src/styles.css"), "utf8");
+  for (const selector of [".task-modal-tabs", ".send-to-ai-dialog", ".task-tag-editor", ".attachment-dropzone", ".task-agents-empty"]) {
+    assert.equal(css.includes(selector), false, selector);
+  }
+});
