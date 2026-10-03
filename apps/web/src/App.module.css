@@ -55,6 +55,7 @@
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 7px); } }
 :global(.loading-screen) { min-height: 100vh; display: flex; align-items: center; justify-content: center; gap: 10px; color: #6b778c; font-size: 12px; }
 :global(.loading-mark) { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #dfe1e6; border-top-color: #6554c0; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 900px) {
   :global(.workspace) { margin-left: 72px; width: calc(100% - 72px); }

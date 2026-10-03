@@ -31,7 +31,11 @@ test("App.module.css owns shell chrome via :global(.selector)", () => {
   }
 });
 
-test("SettingsPage module owns settings-section rules", () => {
+test("App.module.css loading-mark co-locates spin keyframes", () => {
+  const css = readFileSync(resolve("src/App.module.css"), "utf8");
+  assert.match(css, /:global\(\.loading-mark\)[^}]*animation:\s*spin\b/);
+  assert.match(css, /@keyframes\s+spin\b/);
+});test("SettingsPage module owns settings-section rules", () => {
   const css = readFileSync(resolve("src/pages/SettingsPage/SettingsPage.module.css"), "utf8");
   assert.match(css, /:global\(\.settings-section\)/);
   assert.match(css, /:global\(\.settings-section-heading\)/);
