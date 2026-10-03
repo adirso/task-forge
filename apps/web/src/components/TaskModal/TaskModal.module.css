@@ -1,4 +1,190 @@
-/* shell styles arrive in Task 4 */
-.rootPlaceholder {
-  display: contents;
+.root {
+  width: min(1040px, 100%);
+  height: min(900px, calc(100vh - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 24px 70px rgba(9, 30, 66, 0.3);
+  animation: modal-in 0.16s ease-out;
+}
+
+.root > .body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 20px 25px 12px;
+}
+
+.root > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 16px;
+  margin: 0;
+  padding: 18px 25px 14px;
+  border-bottom: 0;
+  background: #fff;
+}
+
+.headerCopy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.root h2 {
+  margin: 4px 0 0;
+  font-size: 23px;
+  letter-spacing: -0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  color: #172b4d;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 18px;
+  border-bottom: 1px solid #ebecf0;
+  background: #fff;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tabs button {
+  flex: 0 0 auto;
+  height: 40px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #6b778c;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tabs button svg { width: 14px; }
+.tabs button:hover:not(:disabled) { color: #403294; }
+.tabs button.active { color: #5243aa; border-bottom-color: #6554c0; }
+.tabs button:disabled { color: #a5adba; cursor: not-allowed; }
+.tabs button b {
+  margin-left: 2px;
+  border-radius: 9px;
+  background: #ebecf0;
+  color: #6b778c;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.tabs button.active b { background: #eae6ff; color: #403294; }
+
+.copyLink {
+  height: 32px;
+  border: 1px solid #dfe1e6;
+  border-radius: 6px;
+  background: #fff;
+  color: #42526e;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.copyLink:hover { border-color: #c0b6f2; background: #f8f7ff; color: #403294; }
+.copyLink svg { width: 14px; }
+
+.sendToAI {
+  height: 32px;
+  border: 1px solid #c0b6f2;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #f3f0ff, #eae6ff);
+  color: #403294;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 750;
+}
+.sendToAI:hover { border-color: #8777d9; background: #eae6ff; }
+.sendToAI svg { width: 14px; }
+
+.root label {
+  display: grid;
+  gap: 7px;
+  color: #42526e;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.root input,
+.root textarea,
+.root select {
+  width: 100%;
+  border: 1px solid #dfe1e6;
+  border-radius: 6px;
+  background: white;
+  color: #172b4d;
+  outline: none;
+  padding: 10px 11px;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.root input:focus,
+.root textarea:focus,
+.root select:focus {
+  border-color: #8777d9;
+  box-shadow: 0 0 0 3px rgba(101, 84, 192, 0.1);
+}
+
+.root > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #ebecf0;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 14px 25px 16px;
+  background: #fff;
+  gap: 8px;
+}
+
+.root > footer > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 650px) {
+  .root > header { padding: 14px 16px 10px; }
+  .tabs { padding: 0 8px; }
+  .tabs button { padding: 0 10px; font-size: 11px; }
+  .root > .body { padding: 16px 16px 10px; }
+  .root > footer { padding: 12px 16px 14px; flex-wrap: wrap; gap: 10px; }
+  .headerActions .copyLink { width: 32px; padding: 0; justify-content: center; font-size: 0; }
+  .sendToAI { padding: 0 8px; }
 }

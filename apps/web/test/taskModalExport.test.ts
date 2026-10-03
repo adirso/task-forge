@@ -29,3 +29,15 @@ test("SendToAI is a folder unit", () => {
   assert.match(index, /export \{ SendToAI \}/);
   assert.equal(readFileSync(resolve("src/components/SendToAI/SendToAI.module.css"), "utf8").length > 0, true);
 });
+
+test("TaskModal includes tab panel parts tree", () => {
+  const required = [
+    "parts/DetailsPanel/DetailsPanel.tsx",
+    "parts/UpdatesPanel/UpdatesPanel.tsx",
+    "parts/PlansPanel/PlansPanel.tsx",
+    "parts/AgentsPanel/AgentsPanel.tsx",
+  ];
+  for (const rel of required) {
+    assert.equal(readFileSync(resolve("src/components/TaskModal", rel), "utf8").length > 0, true, rel);
+  }
+});
