@@ -36,3 +36,16 @@ test("SettingsPage includes AgentsSection parts tree", () => {
     assert.equal(readFileSync(resolve("src/pages/SettingsPage", rel), "utf8").length > 0, true, rel);
   }
 });
+
+test("Settings-owned shared components are folder units", () => {
+  for (const name of [
+    "WebhookManager",
+    "WebhookDeliveriesPanel",
+    "RevealTokenConfirmModal",
+    "AgentCapabilityEditor",
+  ]) {
+    const index = readFileSync(resolve(`src/components/${name}/index.ts`), "utf8");
+    assert.match(index, new RegExp(`export \\{ ${name} \\}`));
+    assert.equal(readFileSync(resolve(`src/components/${name}/${name}.module.css`), "utf8").length > 0, true);
+  }
+});

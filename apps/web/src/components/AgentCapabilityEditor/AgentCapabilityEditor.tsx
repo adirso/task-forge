@@ -1,18 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { TASK_TYPES, type AgentCapabilityProfile, type TaskType, type User } from "@taskforge/contracts";
+import { TASK_TYPES, type AgentCapabilityProfile, type TaskType } from "@taskforge/contracts";
 import { Bot, Save } from "lucide-react";
-import { api } from "../lib/api";
-import { taskTypeMeta } from "../lib/ui";
+import { api } from "../../lib/api";
+import { taskTypeMeta } from "../../lib/ui";
+import type { AgentCapabilityEditorProps } from "./types";
+import styles from "./AgentCapabilityEditor.module.css";
 
 const DEFAULT_PROFILE: AgentCapabilityProfile = { provider: "codex", model: "default", skills: [], taskTypes: [...TASK_TYPES], repositories: ["*"], maxConcurrency: 1, availability: "AVAILABLE", health: "UNKNOWN" };
 
-export function AgentCapabilityEditor({ agent, onUpdated, onSuccess, onError, embedded = false }: {
-  agent: User;
-  onUpdated: (user: User) => void;
-  onSuccess: (message: string) => void;
-  onError: (message: string) => void;
-  embedded?: boolean;
-}) {
+export function AgentCapabilityEditor({ agent, onUpdated, onSuccess, onError, embedded = false }: AgentCapabilityEditorProps) {
   const [profile, setProfile] = useState(agent.capabilityProfile ?? DEFAULT_PROFILE);
   const [skills, setSkills] = useState((agent.capabilityProfile?.skills ?? []).join(", "));
   const [repositories, setRepositories] = useState((agent.capabilityProfile?.repositories ?? ["*"]).join("\n"));
@@ -46,7 +42,7 @@ export function AgentCapabilityEditor({ agent, onUpdated, onSuccess, onError, em
     }
   }
   return (
-    <form className={`agent-capability-form${embedded ? " embedded" : ""}`} onSubmit={submit} aria-label="Routing capabilities">
+    <form className={`${styles.root}${embedded ? ` ${styles.embedded}` : ""}`} onSubmit={submit} aria-label="Routing capabilities">
       {!embedded && (
         <div className="section-heading">
           <span><Bot /> Routing capabilities</span>
@@ -62,7 +58,7 @@ export function AgentCapabilityEditor({ agent, onUpdated, onSuccess, onError, em
       <label>Repository access<textarea rows={2} value={repositories} onChange={(event) => setRepositories(event.target.value)} placeholder="github.com/org/repo or *" required /></label>
       <fieldset>
         <legend>Supported task types</legend>
-        <div className="capability-task-types">
+        <div className={styles.taskTypes}>
           {TASK_TYPES.map((type) => (
             <label key={type}>
               <input type="checkbox" checked={profile.taskTypes.includes(type)} onChange={() => toggleTaskType(type)} />

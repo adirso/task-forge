@@ -1,0 +1,72 @@
+.root {
+  margin: 16px 24px;
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dfe1e6;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.embedded {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.root > label,
+.root :global(.pr-fields-row) > label {
+  display: grid;
+  gap: 5px;
+  font-size: 10px;
+  color: #42526e;
+}
+
+.root input,
+.root textarea,
+.root select {
+  min-height: 34px;
+  border: 1px solid #dfe1e6;
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: #fff;
+  color: #172b4d;
+  font: inherit;
+}
+
+.root fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.root legend {
+  margin-bottom: 7px;
+  font-size: 10px;
+  color: #42526e;
+}
+
+.taskTypes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.taskTypes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #42526e;
+}
+
+.taskTypes input {
+  min-height: 0;
+  width: auto;
+}
+
+.root > :global(.button) {
+  justify-self: start;
+}
