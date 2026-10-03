@@ -119,3 +119,22 @@ test("modal units are folders and App imports them from components/<Name>", () =
     assert.match(app, new RegExp(`from ["']\.\/components\/${name}["']`));
   }
 });
+
+test("legacy chrome/modal/page selectors were removed from global styles", () => {
+  const css = readFileSync(resolve("src/styles.css"), "utf8");
+  for (const selector of [
+    ".login-page",
+    ".phases-page",
+    ".automation-page",
+    ".agent-ops",
+    ".sidebar ",
+    ".notification-panel",
+    ".search-palette",
+    ".multi-filter-trigger",
+    ".project-modal",
+    ".phase-merge-modal",
+    ".logout-modal",
+  ]) {
+    assert.equal(css.includes(selector.trimEnd()), false, selector);
+  }
+});
