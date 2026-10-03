@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import type { TaskSearchResult } from "@taskforge/contracts";
 import { ArrowRight, Search, X } from "lucide-react";
-import { api } from "../lib/api";
-import { statusMeta } from "../lib/ui";
-import { Avatar } from "./Avatar";
+import { api } from "../../lib/api";
+import { statusMeta } from "../../lib/ui";
+import { Avatar } from "../Avatar";
+import type { SearchPaletteProps } from "./types";
+import styles from "./SearchPalette.module.css";
 
-export function SearchPalette({ onClose, onOpen }: { onClose: () => void; onOpen: (task: TaskSearchResult) => void }) {
+export function SearchPalette({ onClose, onOpen }: SearchPaletteProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<TaskSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -20,7 +22,7 @@ export function SearchPalette({ onClose, onOpen }: { onClose: () => void; onOpen
   }, [query]);
 
   return (
-    <div className="search-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className={`search-backdrop ${styles.root}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="search-palette" role="dialog" aria-label="Search all tasks">
         <header><Search /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }} placeholder="Search tasks across every project…" /><kbd>ESC</kbd><button onClick={onClose} aria-label="Close search"><X /></button></header>
         <div className="search-results">

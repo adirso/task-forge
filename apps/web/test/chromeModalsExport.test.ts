@@ -55,3 +55,39 @@ test("AgentOpsPage unit exposes the required co-located files", () => {
     assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
   }
 });
+
+const SHELL = [
+  "Sidebar",
+  "Avatar",
+  "NotificationPanel",
+  "SearchPalette",
+  "MultiFilterDropdown",
+  "ProjectHeaderActions",
+] as const;
+
+test("shell chrome units are folders and App imports them from components/<Name>", () => {
+  const app = readFileSync(resolve("src/App.tsx"), "utf8");
+  for (const name of SHELL) {
+    const root = resolve("src/components", name);
+    assert.match(readFileSync(resolve(root, "index.ts"), "utf8"), new RegExp(name));
+    for (const file of [`${name}.tsx`, `${name}.module.css`, "types.ts"]) {
+      assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, `${name}/${file}`);
+    }
+    assert.doesNotMatch(app, new RegExp(`from ["']\\.\\/components\\/${name}\\.tsx["']`));
+    if (name === "Avatar") {
+      // Avatar is consumed by shell/pages/widgets, not App directly.
+      assert.match(
+        readFileSync(resolve("src/components/Sidebar/Sidebar.tsx"), "utf8"),
+        /from ["']\.\.\/Avatar["']/,
+      );
+      continue;
+    }
+    assert.match(app, new RegExp(`from ["']\\.\\/components\\/${name}["']`));
+  }
+});
+
+test("Sidebar keeps mobile className hook", () => {
+  const tsx = readFileSync(resolve("src/components/Sidebar/Sidebar.tsx"), "utf8");
+  assert.match(tsx, /className/);
+  assert.match(readFileSync(resolve("src/App.tsx"), "utf8"), /mobile-sidebar/);
+});

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { User } from "@taskforge/contracts";
 import { Link2, MoreHorizontal, Pencil, Plus, Trash2, UsersRound } from "lucide-react";
-import { Avatar } from "./Avatar";
+import { Avatar } from "../Avatar";
+
+import type { ProjectHeaderActionsProps } from "./types";
+import styles from "./ProjectHeaderActions.module.css";
 
 export function ProjectHeaderActions({
   members,
@@ -11,15 +13,7 @@ export function ProjectHeaderActions({
   onEdit,
   onDelete,
   onCreateTask,
-}: {
-  members: User[];
-  canManageProject: boolean;
-  onOpenMembers: () => void;
-  onCopyLink: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onCreateTask: () => void;
-}) {
+}: ProjectHeaderActionsProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -45,7 +39,7 @@ export function ProjectHeaderActions({
   }
 
   return (
-    <>
+    <div className={styles.root}>
       <button type="button" className="avatar-stack" onClick={onOpenMembers} aria-label="View project members">
         {members.slice(0, 3).map((member) => <Avatar key={member.id} user={member} size="sm" />)}
         {members.length > 3 && <span>+{members.length - 3}</span>}
@@ -75,6 +69,6 @@ export function ProjectHeaderActions({
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }

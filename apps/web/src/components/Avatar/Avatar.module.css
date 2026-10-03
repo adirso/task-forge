@@ -1,0 +1,10 @@
+.root {
+  /* CSS Modules ownership hook; rules live in :global below */
+}
+
+:global {
+.avatar { display: inline-grid; place-items: center; overflow: hidden; border-radius: 50%; color: white; background: linear-gradient(145deg, #00a3bf, #008da6); font-weight: 750; letter-spacing: -.02em; }.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar-sm { width: 22px; height: 22px; font-size: 7px; }.avatar-md { width: 30px; height: 30px; font-size: 9px; }.avatar-lg { width: 38px; height: 38px; font-size: 11px; }
+.avatar-agent { background: linear-gradient(145deg, #8777d9, #5243aa); }
+.avatar-empty { background: #ebecf0; color: #8993a4; }
+}

@@ -1,5 +1,6 @@
-import type { Notification } from "@taskforge/contracts";
 import { Bell, CheckCheck, GitPullRequestArrow, UserRoundCheck, X } from "lucide-react";
+import type { NotificationPanelProps } from "./types";
+import styles from "./NotificationPanel.module.css";
 
 function relativeTime(value: string) {
   const seconds = Math.max(1, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
@@ -18,12 +19,10 @@ function NotificationIcon({ type }: { type: string }) {
   return <Bell />;
 }
 
-export function NotificationPanel({ notifications, onClose, onOpen, onReadAll }: {
-  notifications: Notification[]; onClose: () => void; onOpen: (notification: Notification) => void; onReadAll: () => void;
-}) {
+export function NotificationPanel({ notifications, onClose, onOpen, onReadAll }: NotificationPanelProps) {
   const unread = notifications.filter((item) => !item.readAt).length;
   return (
-    <aside className="notification-panel" aria-label="Notifications">
+    <aside className={`notification-panel ${styles.root}`} aria-label="Notifications">
       <header><div><h2>Notifications</h2><span>{unread ? `${unread} unread` : "You're all caught up"}</span></div><button className="icon-button" onClick={onClose} aria-label="Close notifications"><X /></button></header>
       {unread > 0 && <button className="read-all" onClick={onReadAll}><CheckCheck /> Mark all as read</button>}
       <div className="notification-list">

@@ -1,0 +1,30 @@
+.root {
+  /* CSS Modules ownership hook; rules live in :global below */
+}
+
+:global {
+.multi-filter { position: relative; }
+.multi-filter-trigger { height: 38px; border: 1px solid #dfe1e6; border-radius: 6px; background: white; color: #42526e; display: inline-flex; align-items: center; gap: 7px; padding: 0 9px; font-size: 12px; max-width: 220px; }
+.multi-filter-trigger > svg:first-child { width: 13px; color: #6b778c; }
+.multi-filter-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.multi-filter-trigger > b { flex: 0 0 auto; min-width: 18px; height: 18px; border-radius: 9px; background: #eae6ff; color: #403294; display: grid; place-items: center; padding: 0 5px; font-size: 10px; font-weight: 750; }
+.multi-filter-trigger > svg:last-child { width: 11px; color: #6b778c; margin-left: auto; }
+.multi-filter.open .multi-filter-trigger, .multi-filter.has-value .multi-filter-trigger { border-color: #c0b6f2; }
+.multi-filter.open .multi-filter-trigger { box-shadow: 0 0 0 3px rgba(101,84,192,.1); }
+.multi-filter-menu { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: min(260px, 70vw); border: 1px solid #dfe1e6; border-radius: 8px; background: white; box-shadow: 0 12px 28px rgba(9,30,66,.16); overflow: hidden; }
+.multi-filter-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border-bottom: 1px solid #ebecf0; }
+.multi-filter-menu-head strong { color: #42526e; font-size: 11px; }
+.multi-filter-menu-head button { border: 0; background: transparent; color: #5243aa; font-size: 10px; font-weight: 650; }
+.multi-filter-options { max-height: 240px; overflow: auto; padding: 6px; display: grid; gap: 2px; }
+.multi-filter-options > button { width: 100%; border: 0; border-radius: 6px; background: transparent; color: #253858; display: flex; align-items: center; gap: 8px; padding: 8px 8px; text-align: left; font-size: 12px; line-height: 1.2; }
+.multi-filter-options > button:hover, .multi-filter-options > button.selected { background: #f4f5f7; }
+.multi-filter-check { width: 14px; height: 14px; border: 0; border-radius: 3px; background: #fff; color: #fff; box-shadow: inset 0 0 0 1.5px #6b778c; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; box-sizing: border-box; line-height: 0; }
+.multi-filter-check.on { background: #6554c0; box-shadow: none; }
+.multi-filter-check svg { width: 10px; height: 10px; display: block; stroke-width: 3; }
+.multi-filter-empty { margin: 0; padding: 12px 8px; color: #8993a4; font-size: 11px; text-align: center; }
+
+@media (max-width: 650px) {
+  .toolbar-filters.open .multi-filter { min-width: 0; }
+  .toolbar-filters.open .multi-filter-trigger { width: 100%; max-width: none; }
+}
+}

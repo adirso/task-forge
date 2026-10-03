@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
-
-export type MultiFilterOption = { value: string; label: string };
+import type { MultiFilterDropdownProps } from "./types";
+import styles from "./MultiFilterDropdown.module.css";
 
 export function MultiFilterDropdown({
   label,
@@ -10,14 +10,7 @@ export function MultiFilterDropdown({
   value,
   onChange,
   icon,
-}: {
-  label: string;
-  allLabel: string;
-  options: MultiFilterOption[];
-  value: string[];
-  onChange: (next: string[]) => void;
-  icon?: ReactNode;
-}) {
+}: MultiFilterDropdownProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const listId = useId();
@@ -50,7 +43,7 @@ export function MultiFilterDropdown({
   }
 
   return (
-    <div className={`multi-filter${open ? " open" : ""}${value.length ? " has-value" : ""}`} ref={rootRef}>
+    <div className={`multi-filter ${styles.root}${open ? " open" : ""}${value.length ? " has-value" : ""}`} ref={rootRef}>
       <button
         type="button"
         className="multi-filter-trigger"

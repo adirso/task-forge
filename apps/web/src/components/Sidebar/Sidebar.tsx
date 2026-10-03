@@ -1,10 +1,9 @@
-import type { Project, User } from "@taskforge/contracts";
 import { Bell, ChevronDown, LayoutDashboard, Layers3, Plus, Search, Settings } from "lucide-react";
-import { Avatar } from "./Avatar";
+import { Avatar } from "../Avatar";
+import type { SidebarProps } from "./types";
+import styles from "./Sidebar.module.css";
 
-export function Sidebar({ projects, currentId, user, unreadCount, settingsActive, dashboardActive, onSearch, onNotifications, onSettings, onSelect, onCreate, onLogout, onReorder, onHome, className, onNavigate }: {
-  projects: Project[]; currentId: string | null; user: User; unreadCount: number; settingsActive: boolean; dashboardActive: boolean; onSearch: () => void; onNotifications: () => void; onSettings: () => void; onSelect: (id: string) => void; onCreate: () => void; onLogout: () => void; onReorder: (projectIds: string[]) => void; onHome: () => void; className?: string; onNavigate?: () => void;
-}) {
+export function Sidebar({ projects, currentId, user, unreadCount, settingsActive, dashboardActive, onSearch, onNotifications, onSettings, onSelect, onCreate, onLogout, onReorder, onHome, className, onNavigate }: SidebarProps) {
   function moveProject(sourceId: string, targetId: string) {
     if (sourceId === targetId) return;
     const next = [...projects]; const sourceIndex = next.findIndex((project) => project.id === sourceId); const targetIndex = next.findIndex((project) => project.id === targetId);
@@ -12,7 +11,7 @@ export function Sidebar({ projects, currentId, user, unreadCount, settingsActive
     const [moved] = next.splice(sourceIndex, 1); next.splice(targetIndex, 0, moved!); onReorder(next.map((project) => project.id));
   }
   return (
-    <aside className={`sidebar${className ? ` ${className}` : ""}`} aria-label={className?.includes("mobile-sidebar") ? "Mobile navigation" : undefined}>
+    <aside className={`sidebar ${styles.root}${className ? ` ${className}` : ""}`} aria-label={className?.includes("mobile-sidebar") ? "Mobile navigation" : undefined}>
       <div className="brand-lockup"><span className="brand-mark"><Layers3 /></span>TaskForge</div>
       <nav className="main-nav">
         <button className={dashboardActive ? "active" : ""} onClick={() => { onHome(); onNavigate?.(); }}><LayoutDashboard /><span>Home</span></button>
