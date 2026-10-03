@@ -1,25 +1,19 @@
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
-import type { ActivityEvent, AgentArtifact, AgentPlan, AgentRunInterventionAction, Attachment, Phase, Project, PullRequestState, Tag, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType, User } from "@taskforge/contracts";
+import type { ActivityEvent, AgentArtifact, AgentPlan, AgentRunInterventionAction, Attachment, PullRequestState, Task, TaskCreate, TaskNote, TaskPriority, TaskStatus, TaskType } from "@taskforge/contracts";
 import { Activity, Check, Download, ExternalLink, FileText, GitBranch, GitPullRequest, Image, Link2, ListTree, Paperclip, Send, Sparkles, Terminal, Trash2, UploadCloud, X } from "lucide-react";
-import { priorityMeta, statusMeta, taskTypeMeta } from "../lib/ui";
-import { api, type AgentCycleState, type AgentLog, type AgentRun } from "../lib/api";
-import { Avatar } from "./Avatar";
-import { SendToAI } from "./SendToAI";
-import { selectAIPromptMode, type AIPromptMode } from "../lib/aiPrompt";
-import { TaskTagEditor } from "./TaskTags";
-import { TaskDependencyEditor } from "./TaskDependencies";
-import { formatAge, formatCountdown, getRunHealth, latestRunLog, runIsWaitingForInput, runLogs } from "../lib/runObservability";
-import { canForceCycle, FORCE_CYCLE_FAILURE_MESSAGE, forceCycleRequestId } from "../lib/cycleLimit";
-import { artifactProvenance, artifactTypeLabel } from "../lib/agentArtifacts";
+import { priorityMeta, statusMeta, taskTypeMeta } from "../../lib/ui";
+import { api, type AgentCycleState, type AgentLog, type AgentRun } from "../../lib/api";
+import { Avatar } from "../Avatar";
+import { SendToAI } from "../SendToAI";
+import { selectAIPromptMode, type AIPromptMode } from "../../lib/aiPrompt";
+import { TaskTagEditor } from "../TaskTags";
+import { TaskDependencyEditor } from "../TaskDependencies";
+import { formatAge, formatCountdown, getRunHealth, latestRunLog, runIsWaitingForInput, runLogs } from "../../lib/runObservability";
+import { canForceCycle, FORCE_CYCLE_FAILURE_MESSAGE, forceCycleRequestId } from "../../lib/cycleLimit";
+import { artifactProvenance, artifactTypeLabel } from "../../lib/agentArtifacts";
+import type { TaskModalProps, TaskModalTab } from "./types";
 
-type TaskModalTab = "details" | "updates" | "plans" | "agents";
-
-export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete, onRouted, onPlanApplied }: {
-  task: Task | null; initialStatus: TaskStatus; defaultPhaseId: string | null; project: Project; currentUser: User; members: User[]; phases: Phase[]; availableTags: Tag[]; tasks: Task[];
-  onClose: () => void; onSave: (input: TaskCreate) => Promise<void>; onDelete: (() => Promise<void>) | null;
-  onRouted?: (task: Task) => void;
-  onPlanApplied?: () => Promise<void>;
-}) {
+export function TaskModal({ task, initialStatus, defaultPhaseId, project, currentUser, members, phases, availableTags, tasks, onClose, onSave, onDelete, onRouted, onPlanApplied }: TaskModalProps) {
   const [form, setForm] = useState<TaskCreate>({ title: "", description: "", definitionOfDone: "", status: initialStatus, priority: "MEDIUM", type: "FEATURE", assigneeId: null, parentId: null, branch: null, dueDate: null, estimatePoints: null, phaseId: defaultPhaseId, pullRequestUrl: null, pullRequestTitle: null, pullRequestState: null, tags: [], dependencyIds: [] });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
