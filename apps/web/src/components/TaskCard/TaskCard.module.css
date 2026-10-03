@@ -1,0 +1,131 @@
+.root {
+  background: white;
+  border: 1px solid #e1e3e7;
+  border-radius: 7px;
+  padding: 11px 11px 9px;
+  margin-bottom: 7px;
+  box-shadow: 0 1px 2px rgba(9, 30, 66, 0.08);
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+}
+
+.root:hover {
+  transform: translateY(-1px);
+  border-color: #b9b3dd;
+  box-shadow: 0 5px 14px rgba(9, 30, 66, 0.11);
+}
+
+.root:active {
+  cursor: grabbing;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.top :global(.task-key) {
+  margin-left: auto;
+}
+
+.root h3 {
+  margin: 0 0 12px;
+  color: #253858;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 620;
+}
+
+.pills {
+  display: flex;
+  margin: -4px 0 10px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: -3px 0 10px;
+  color: #bf2600;
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.blocked svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.subtask {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #6554c0;
+  background: #efecff;
+  font-size: 10px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  margin: -4px 0 9px;
+}
+
+.subtask svg {
+  width: 10px;
+}
+
+.meta {
+  min-height: 24px;
+  border-top: 1px solid #f1f2f4;
+  padding-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #8993a4;
+  font-size: 10px;
+}
+
+.meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.meta svg {
+  width: 11px;
+}
+
+.meta b {
+  color: #505f79;
+}
+
+.prIndicator {
+  font-weight: 700;
+}
+
+.assignee {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  display: grid !important;
+  place-items: center;
+  flex: 0 0 22px;
+}
+
+.meta .assignee > :global(.avatar) {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  line-height: 1;
+}
+
+.meta .assignee > :global(.avatar) svg {
+  display: block;
+  margin: auto;
+}
