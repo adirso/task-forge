@@ -1,0 +1,82 @@
+.root {
+  min-width: 0;
+}
+
+.noActive,
+.empty {
+  min-width: 600px;
+  margin-bottom: 14px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 13px;
+}
+
+.noActive {
+  min-height: 62px;
+  border: 1px solid #ffe2a8;
+  background: #fffaf0;
+}
+
+.noActive > svg {
+  width: 22px;
+  color: #ff8b00;
+}
+
+.noActive > div {
+  flex: 1;
+  display: grid;
+  gap: 3px;
+}
+
+.noActive strong {
+  font-size: 12px;
+}
+
+.noActive span {
+  color: #7a869a;
+  font-size: 10px;
+}
+
+.empty {
+  min-height: 260px;
+  border: 1px dashed #c7cbd3;
+  background: #fafbfc;
+  flex-direction: column;
+  justify-content: center;
+  color: #7a869a;
+  text-align: center;
+}
+
+.empty > svg {
+  width: 28px;
+  height: 28px;
+  color: #6554c0;
+}
+
+.empty strong {
+  color: #253858;
+  font-size: 14px;
+}
+
+.empty span {
+  font-size: 11px;
+}
+
+.empty :global(.button) {
+  margin-top: 6px;
+}
+
+@media (max-width: 900px) {
+  .noActive,
+  .empty {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .empty {
+    min-height: 220px;
+    padding: 24px;
+  }
+}

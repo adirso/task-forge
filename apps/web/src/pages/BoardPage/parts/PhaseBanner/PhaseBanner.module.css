@@ -1,0 +1,147 @@
+.banner {
+  min-width: 900px;
+  min-height: 62px;
+  margin-bottom: 14px;
+  border: 1px solid #d8d3f0;
+  background: linear-gradient(90deg, #f8f7ff, #fff);
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 13px;
+}
+
+.banner.viewing {
+  border-color: #b3d4ff;
+  background: linear-gradient(90deg, #f3f9ff, #fff);
+}
+
+.badge {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: #6554c0;
+  color: white;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.banner.viewing .badge {
+  background: #0065ff;
+}
+
+.copy {
+  flex: 1;
+  min-width: 140px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.copy > span {
+  color: #6554c0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.banner.viewing .copy > span {
+  color: #0052cc;
+}
+
+.banner strong {
+  color: #253858;
+  font-size: 12px;
+}
+
+.banner p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #6b778c;
+  font-size: 10px;
+}
+
+.banner > small {
+  flex: 0 0 auto;
+  color: #7a869a;
+  font-size: 10px;
+}
+
+.selector {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 3px;
+  color: #6b778c;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.selector > div {
+  height: 32px;
+  min-width: 138px;
+  border: 1px solid #c7cbd3;
+  border-radius: 6px;
+  background: white;
+  display: flex;
+  align-items: center;
+}
+
+.selector select {
+  appearance: none;
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding: 0 7px 0 9px;
+  color: #253858;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.selector svg {
+  width: 13px;
+  margin-right: 7px;
+  color: #6b778c;
+  pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .banner {
+    min-width: 0;
+    width: 100%;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 12px;
+  }
+
+  .copy {
+    padding-top: 3px;
+  }
+
+  .selector {
+    order: 5;
+    width: 100%;
+  }
+
+  .selector > div {
+    width: 100%;
+  }
+
+  .banner > small {
+    margin-left: auto;
+    padding-top: 4px;
+  }
+
+  .banner :global(.button) {
+    order: 4;
+  }
+}
