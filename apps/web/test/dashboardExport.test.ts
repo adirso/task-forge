@@ -52,3 +52,16 @@ test("projectDashboard imports ModuleLayout from ModularDashboard folder", () =>
   assert.match(src, /from ["']\.\.\/components\/ModularDashboard["']/);
   assert.doesNotMatch(src, /ModularDashboard\.tsx/);
 });
+
+test("App imports DashboardPage from pages/DashboardPage", () => {
+  const app = readFileSync(resolve("src/App.tsx"), "utf8");
+  assert.match(app, /from ["']\.\/pages\/DashboardPage["']/);
+  assert.doesNotMatch(app, /from ["']\.\/components\/DashboardPage["']/);
+});
+
+test("DashboardPage unit exposes the required co-located files", () => {
+  const root = resolve("src/pages/DashboardPage");
+  for (const file of ["index.ts", "DashboardPage.tsx", "DashboardPage.module.css", "types.ts"]) {
+    assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
+  }
+});

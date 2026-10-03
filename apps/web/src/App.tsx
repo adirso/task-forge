@@ -18,7 +18,7 @@ import { ProjectHeaderActions } from "./components/ProjectHeaderActions";
 import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
 import { AutomationManager } from "./components/AutomationManager";
 import { ProjectDashboard } from "./components/ProjectDashboard";
-import { DashboardPage } from "./components/DashboardPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { MultiFilterDropdown } from "./components/MultiFilterDropdown";
 import { PhaseMergeModal } from "./components/PhaseMergeModal";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
