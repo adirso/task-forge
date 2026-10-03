@@ -23,3 +23,9 @@ test("task helper components are folder units", () => {
     assert.equal(readFileSync(resolve(`src/components/${name}/${name}.module.css`), "utf8").length > 0, true);
   }
 });
+
+test("SendToAI is a folder unit", () => {
+  const index = readFileSync(resolve("src/components/SendToAI/index.ts"), "utf8");
+  assert.match(index, /export \{ SendToAI \}/);
+  assert.equal(readFileSync(resolve("src/components/SendToAI/SendToAI.module.css"), "utf8").length > 0, true);
+});
