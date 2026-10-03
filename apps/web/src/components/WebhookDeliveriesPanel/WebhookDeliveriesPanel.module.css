@@ -1,0 +1,155 @@
+.root {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  border: 1px solid #ebecf0;
+  border-radius: 8px;
+  background: #fafbfc;
+  padding: 10px 12px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0 8px;
+}
+
+.headerCopy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.header strong {
+  color: #42526e;
+  font-size: 11px;
+}
+
+.header small {
+  color: #8993a4;
+  font-size: 9px;
+}
+
+.refresh {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #6554c0;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.refresh:hover {
+  background: #efecff;
+}
+
+.refresh:disabled {
+  opacity: 0.45;
+}
+
+.refresh svg {
+  width: 14px;
+}
+
+.empty {
+  margin: 4px 0 2px;
+  color: #8993a4;
+  font-size: 10px;
+}
+
+.list {
+  max-height: min(60vh, 480px);
+  overflow: auto;
+  display: grid;
+  gap: 0;
+  border: 1px solid #ebecf0;
+  background: white;
+  border-radius: 6px;
+  padding: 0 10px;
+}
+
+.item {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid #f0f1f3;
+}
+
+.item:first-child {
+  border-top: 0;
+}
+
+.itemBody {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.item strong {
+  font-size: 10px;
+}
+
+.item small {
+  color: #7a869a;
+  font-size: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item :global(.button) {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.item :global(.button) svg {
+  width: 11px;
+}
+
+.status {
+  border-radius: 9px;
+  padding: 3px 7px;
+  font-size: 7px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+}
+
+.statusDelivered {
+  background: #e3fcef;
+  color: #006644;
+}
+
+.statusFailed {
+  background: #ffebe6;
+  color: #bf2600;
+}
+
+.statusPending {
+  background: #deebff;
+  color: #0747a6;
+}
+
+.error {
+  color: #bf2600;
+}
+
+@media (max-width: 860px) {
+  .item {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 7px 0;
+  }
+
+  .item :global(.button) {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

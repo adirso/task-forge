@@ -1,0 +1,215 @@
+.root {
+  padding: 20px 22px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.heading {
+  display: grid;
+  gap: 4px;
+}
+
+.heading h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #172b4d;
+}
+
+.heading p {
+  margin: 0;
+  color: #6b778c;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tokenBlock {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px solid #f0f1f3;
+}
+
+.tokenBlock > h4,
+.list h4 {
+  margin: 0;
+  font-size: 12px;
+  color: #42526e;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: 1.2fr 0.7fr auto;
+  gap: 9px;
+  align-items: end;
+}
+
+.form label {
+  display: grid;
+  gap: 7px;
+  color: #42526e;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.form input,
+.form select {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  border: 1px solid #dfe1e6;
+  border-radius: 6px;
+  background: white;
+  color: #172b4d;
+  outline: 0;
+  padding: 0 11px;
+  font-size: 13px;
+}
+
+.form input:focus,
+.form select:focus {
+  border-color: #8777d9;
+  box-shadow: 0 0 0 3px rgba(101, 84, 192, 0.1);
+}
+
+.issued {
+  margin: 16px 0;
+  background: #e3fcef;
+  border: 1px solid #abf5d1;
+  border-radius: 8px;
+  padding: 13px;
+}
+
+.issued > strong {
+  color: #006644;
+  font-size: 11px;
+}
+
+.issued > p {
+  color: #47705f;
+  margin: 4px 0 10px;
+  font-size: 9px;
+}
+
+.issued > div {
+  display: flex;
+  border: 1px solid #79f2c0;
+  background: white;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.issued code {
+  flex: 1;
+  min-width: 0;
+  padding: 9px;
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issued button {
+  border: 0;
+  border-left: 1px solid #79f2c0;
+  background: #f1fff8;
+  color: #006644;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.issued button svg {
+  width: 12px;
+}
+
+.list h4 {
+  margin: 0 0 9px;
+  font-size: 11px;
+}
+
+.item {
+  min-height: 48px;
+  border-top: 1px solid #f0f1f3;
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.item > svg {
+  width: 15px;
+  color: #6554c0;
+}
+
+.item > span {
+  display: grid;
+  gap: 3px;
+}
+
+.item strong {
+  font-size: 10px;
+}
+
+.item small {
+  color: #7a869a;
+  font-size: 8px;
+}
+
+.itemRevoked {
+  opacity: 0.55;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.actions > button {
+  border: 0;
+  background: transparent;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+}
+
+.actions > button svg {
+  width: 13px;
+}
+
+.reveal {
+  color: #5243aa;
+}
+
+.reveal:hover {
+  background: #efecff;
+}
+
+.revoke {
+  color: #de350b;
+}
+
+.revoke:hover {
+  background: #ffebe6;
+}
+
+.empty {
+  color: #8993a4;
+  font-size: 10px;
+}
+
+@media (max-width: 860px) {
+  .root {
+    padding: 16px;
+  }
+
+  .form {
+    grid-template-columns: 1fr;
+  }
+}

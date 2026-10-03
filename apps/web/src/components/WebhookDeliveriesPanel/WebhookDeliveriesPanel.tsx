@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
-import type { User, WebhookDelivery } from "@taskforge/contracts";
+import type { WebhookDelivery } from "@taskforge/contracts";
 import { RefreshCw, RotateCcw } from "lucide-react";
-import { api } from "../lib/api";
-import { summarizeWebhookDeliveries } from "../lib/webhookDeliveries";
+import { api } from "../../lib/api";
+import { summarizeWebhookDeliveries } from "../../lib/webhookDeliveries";
+import type { WebhookDeliveriesPanelProps } from "./types";
+import styles from "./WebhookDeliveriesPanel.module.css";
 
-export function WebhookDeliveriesPanel({ agent, onSuccess, onError }: {
-  agent: User;
-  onSuccess: (message: string) => void;
-  onError: (message: string) => void;
-}) {
+function statusClass(status: WebhookDelivery["status"]) {
+  const key = status.toLowerCase();
+  if (key === "delivered") return `${styles.status} ${styles.statusDelivered}`;
+  if (key === "failed") return `${styles.status} ${styles.statusFailed}`;
+  return `${styles.status} ${styles.statusPending}`;
+}
+
+export function WebhookDeliveriesPanel({ agent, onSuccess, onError }: WebhookDeliveriesPanelProps) {
   const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
   const [loading, setLoading] = useState(false);
   const [retryingId, setRetryingId] = useState("");
@@ -37,24 +42,24 @@ export function WebhookDeliveriesPanel({ agent, onSuccess, onError }: {
   const summary = deliveries.length ? summarizeWebhookDeliveries(deliveries) : "";
 
   return (
-    <section className="webhook-deliveries webhook-deliveries-panel">
-      <header>
-        <span>
+    <section className={styles.root}>
+      <header className={styles.header}>
+        <span className={styles.headerCopy}>
           <strong>Recent deliveries</strong>
           <small>{summary || "Stable event IDs let receivers safely deduplicate retries."}</small>
         </span>
-        <button type="button" className="icon-button" title="Refresh deliveries" disabled={loading} onClick={() => void loadDeliveries()}>
+        <button type="button" className={styles.refresh} title="Refresh deliveries" disabled={loading} onClick={() => void loadDeliveries()}>
           <RefreshCw />
         </button>
       </header>
       {!deliveries.length ? (
-        <p className="no-tokens">{loading ? "Loading deliveries…" : "No webhook deliveries for this agent yet."}</p>
+        <p className={styles.empty}>{loading ? "Loading deliveries…" : "No webhook deliveries for this agent yet."}</p>
       ) : (
-        <div className="webhook-deliveries-list" role="list">
+        <div className={styles.list} role="list">
           {deliveries.map((delivery) => (
-            <article key={delivery.id} role="listitem">
-              <span className={`webhook-delivery-status status-${delivery.status.toLowerCase()}`}>{delivery.status}</span>
-              <span>
+            <article key={delivery.id} className={styles.item} role="listitem">
+              <span className={statusClass(delivery.status)}>{delivery.status}</span>
+              <span className={styles.itemBody}>
                 <strong>{delivery.eventType}</strong>
                 <small>
                   {delivery.projectKey && delivery.taskNumber ? `${delivery.projectKey}-${delivery.taskNumber} · ` : ""}
@@ -63,7 +68,7 @@ export function WebhookDeliveriesPanel({ agent, onSuccess, onError }: {
                   {delivery.attemptCount} attempt{delivery.attemptCount === 1 ? "" : "s"}
                 </small>
                 {delivery.lastError && (
-                  <small className="webhook-delivery-error">
+                  <small className={styles.error}>
                     {delivery.lastError}{delivery.httpStatus ? ` (${delivery.httpStatus})` : ""}
                   </small>
                 )}

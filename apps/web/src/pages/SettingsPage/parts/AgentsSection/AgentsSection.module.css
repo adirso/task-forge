@@ -1,0 +1,155 @@
+.root {
+  background: white;
+  border: 1px solid #dfe1e6;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(9, 30, 66, 0.04);
+  overflow: hidden;
+}
+
+.heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #ebecf0;
+}
+
+.heading > div {
+  min-width: 0;
+}
+
+.heading h2 {
+  margin: 0 0 5px;
+  font-size: 19px;
+}
+
+.heading p {
+  margin: 0;
+  color: #6b778c;
+  font-size: 12px;
+}
+
+.heading .button {
+  flex: 0 0 auto;
+}
+
+.notice {
+  margin: 24px;
+  border-radius: 8px;
+  background: #deebff;
+  color: #0747a6;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px;
+}
+
+.notice svg {
+  width: 20px;
+}
+
+.notice span {
+  display: grid;
+  gap: 3px;
+}
+
+.notice strong {
+  font-size: 12px;
+}
+
+.notice small {
+  font-size: 10px;
+}
+
+.settings {
+  display: grid;
+}
+
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 56px 24px;
+  color: #8993a4;
+  text-align: center;
+}
+
+.empty .button {
+  margin-top: 4px;
+}
+
+.empty svg {
+  width: 28px;
+  opacity: 0.55;
+}
+
+.empty strong {
+  color: #42526e;
+  font-size: 13px;
+}
+
+.empty small {
+  max-width: 320px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.manager {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 420px;
+}
+
+.selectEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: #8993a4;
+  font-size: 10px;
+}
+
+.selectEmpty svg {
+  width: 25px;
+}
+
+.root label {
+  display: grid;
+  gap: 7px;
+  color: #42526e;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.root label > span {
+  color: #8993a4;
+  font-weight: 400;
+}
+
+.root input,
+.root select {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  border: 1px solid #dfe1e6;
+  border-radius: 6px;
+  background: white;
+  color: #172b4d;
+  outline: 0;
+  padding: 0 11px;
+  font-size: 13px;
+}
+
+.root input:focus,
+.root select:focus {
+  border-color: #8777d9;
+  box-shadow: 0 0 0 3px rgba(101, 84, 192, 0.1);
+}
+
+@media (max-width: 860px) {
+  .manager {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-/** Canonical Agents settings tabs — keep in sync with SettingsPage agent detail. */
+/** Canonical Agents settings tabs — keep in sync with pages/SettingsPage agent detail. */
 export const AGENT_SETTINGS_TABS = [
   { id: "identity", title: "Identity", includes: ["avatar", "picture"] },
   { id: "access", title: "Access", includes: ["webhook", "tokens"] },
