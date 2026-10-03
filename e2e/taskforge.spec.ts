@@ -190,12 +190,18 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("option", { name: new RegExp(`Settings agent ${suffix}`) }).click();
     const detail = page.getByLabel(new RegExp(`Settings agent ${suffix} settings`));
     await expect(detail.getByRole("heading", { name: "Identity" })).toBeVisible();
+    await expect(detail.getByRole("tab", { name: "Access" })).toBeVisible();
+    await expect(detail.getByRole("tab", { name: "Routing" })).toBeVisible();
+    await expect(detail.getByRole("tab", { name: "Danger zone" })).toBeVisible();
+    await detail.getByRole("tab", { name: "Access" }).click();
     await expect(detail.getByRole("heading", { name: "Access" })).toBeVisible();
-    await expect(detail.getByRole("heading", { name: "Routing" })).toBeVisible();
-    await expect(detail.getByRole("heading", { name: "Danger zone" })).toBeVisible();
     await expect(detail.getByLabel("Dispatch webhook URL")).toBeVisible();
     await expect(detail.getByLabel("Issue API token")).toBeVisible();
+    await detail.getByRole("tab", { name: "Routing" }).click();
+    await expect(detail.getByRole("heading", { name: "Routing" })).toBeVisible();
     await expect(detail.getByLabel("Routing capabilities")).toBeVisible();
+    await detail.getByRole("tab", { name: "Danger zone" }).click();
+    await expect(detail.getByRole("heading", { name: "Danger zone" })).toBeVisible();
     await expect(detail.getByRole("button", { name: new RegExp(`Delete Settings agent ${suffix}`) })).toBeVisible();
   });
 
@@ -215,9 +221,11 @@ test.describe("workspace browser smoke", () => {
     await page.getByRole("button", { name: "Agents" }).click();
     await page.getByRole("option", { name: new RegExp(`Routing agent ${suffix}`) }).click();
     await expect(page.getByRole("heading", { name: "Identity", exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Access", exact: true })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Access" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Routing" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Danger zone" })).toBeVisible();
+    await page.getByRole("tab", { name: "Routing" }).click();
     await expect(page.getByRole("heading", { name: "Routing", exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Danger zone", exact: true })).toBeVisible();
     await expect(page.getByLabel("Routing capabilities")).toBeVisible();
     await page.getByLabel("Provider").fill("fake-github");
     await page.getByLabel("Model").fill("deterministic-v1");
@@ -226,6 +234,8 @@ test.describe("workspace browser smoke", () => {
     await page.getByLabel("Health").selectOption("HEALTHY");
     await page.getByRole("button", { name: "Save capabilities" }).click();
     await expect(page.getByText("Capability profile saved")).toBeVisible();
+    await page.getByRole("tab", { name: "Access" }).click();
+    await expect(page.getByRole("heading", { name: "Access", exact: true })).toBeVisible();
     await page.getByLabel("Token name").fill(`Browser token ${suffix}`);
     await page.getByRole("button", { name: "Issue token" }).click();
     await expect(page.getByText("Copy this token now")).toBeVisible();

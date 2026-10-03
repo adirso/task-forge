@@ -40,10 +40,10 @@ export function WidgetShell({ type, title, icon, children, onClose }: WidgetShel
 
   return (
     <WidgetRefreshContext.Provider value={register}>
-      <div className={styles.card}>
+      <div className={`${styles.card} widget-card`}>
         <header className={`${styles.dragHandle} widget-drag-handle`}>
           <span className={styles.headerIcon}>{icon}</span>
-          <span className={styles.headerTitle}>{label}</span>
+          <span className={`${styles.headerTitle} widget-header-title`}>{label}</span>
           {canRefresh && (
             <button
               type="button"

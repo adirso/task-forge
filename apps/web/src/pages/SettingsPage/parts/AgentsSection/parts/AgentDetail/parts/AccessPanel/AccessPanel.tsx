@@ -46,7 +46,7 @@ export function AccessPanel({
           <button type="submit" className="button button-primary" disabled={issuingToken}><KeyRound /> {issuingToken ? "Issuing…" : "Issue token"}</button>
         </form>
         {issuedToken && (
-          <div className={styles.issued} role="status">
+          <div className={`${styles.issued} issued-token`} role="status">
             <strong>{revealedTokenId ? "Revealed token" : "Copy this token now"}</strong>
             <p>{revealedTokenId ? "Store it securely. You can reveal it again from the list below." : "You can also reveal it later from the issued tokens list."}</p>
             <div>

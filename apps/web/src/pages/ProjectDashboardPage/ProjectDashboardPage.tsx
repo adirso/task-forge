@@ -46,7 +46,7 @@ function ProjectDashboardData({ project }: { project: Project }) {
         </button>
       </div>
       {metrics && (
-        <div className={styles.metrics}>
+        <div className={`${styles.metrics} project-dashboard-metrics`}>
           {(
             [
               ["Open tasks", metrics.open.length],

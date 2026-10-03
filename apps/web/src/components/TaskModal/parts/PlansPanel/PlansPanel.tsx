@@ -18,7 +18,7 @@ export function PlansPanel({ project, plans, tasksById, canControlRuns, reviewin
       {plans.length ? (
         <div className={styles.list}>
           {plans.map((plan) => (
-            <article className={styles.item} key={plan.id}>
+            <article className={`${styles.item} plan-item`} key={plan.id}>
               <header>
                 <span>
                   <strong>Plan v{plan.version}</strong>
