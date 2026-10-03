@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Project, ProjectMember, User } from "@taskforge/contracts";
 import { ShieldCheck, Trash2, UserPlus, UsersRound, X } from "lucide-react";
-import { api } from "../lib/api";
-import { Avatar } from "./Avatar";
+import { api } from "../../lib/api";
+import { Avatar } from "../Avatar";
+
+import type { ProjectMembersModalProps } from "./types";
+import styles from "./ProjectMembersModal.module.css";
 
 export function ProjectMembersModal({
   project,
@@ -10,13 +13,7 @@ export function ProjectMembersModal({
   currentUser,
   onClose,
   onChanged,
-}: {
-  project: Project;
-  users: User[];
-  currentUser: User;
-  onClose: () => void;
-  onChanged: (project: Project) => void;
-}) {
+}: ProjectMembersModalProps) {
   const [roster, setRoster] = useState<Project>(project);
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -93,7 +90,7 @@ export function ProjectMembersModal({
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
+    <div className={`modal-backdrop ${styles.root}`} onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
       <div className="project-modal members-modal" role="dialog" aria-modal="true" aria-labelledby="members-modal-title">
         <header>
           <div className="modal-header-copy">

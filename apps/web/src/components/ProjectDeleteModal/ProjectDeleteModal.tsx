@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from "react";
-import type { Project } from "@taskforge/contracts";
 import { AlertTriangle, Trash2, X } from "lucide-react";
 
-export function ProjectDeleteModal({ project, onClose, onConfirm }: { project: Project; onClose: () => void; onConfirm: () => Promise<void> }) {
+import type { ProjectDeleteModalProps } from "./types";
+import styles from "./ProjectDeleteModal.module.css";
+
+export function ProjectDeleteModal({ project, onClose, onConfirm }: ProjectDeleteModalProps) {
   const [confirmation, setConfirmation] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
@@ -14,7 +16,7 @@ export function ProjectDeleteModal({ project, onClose, onConfirm }: { project: P
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) onClose(); }}>
+    <div className={`modal-backdrop ${styles.root}`} onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) onClose(); }}>
       <form className="delete-project-modal" onSubmit={submit}>
         <header><span className="delete-warning-icon"><AlertTriangle /></span><button type="button" className="icon-button" onClick={onClose} disabled={deleting}><X /></button></header>
         <h2>Delete {project.name}?</h2>

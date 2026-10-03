@@ -1,10 +1,12 @@
-import type { User } from "@taskforge/contracts";
 import { LogOut, X } from "lucide-react";
-import { Avatar } from "./Avatar";
+import { Avatar } from "../Avatar";
 
-export function LogoutConfirmModal({ user, onClose, onConfirm }: { user: User; onClose: () => void; onConfirm: () => void }) {
+import type { LogoutConfirmModalProps } from "./types";
+import styles from "./LogoutConfirmModal.module.css";
+
+export function LogoutConfirmModal({ user, onClose, onConfirm }: LogoutConfirmModalProps) {
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className={`modal-backdrop ${styles.root}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="logout-modal" role="dialog" aria-modal="true" aria-labelledby="logout-title">
         <header>
           <span className="logout-icon"><LogOut /></span>

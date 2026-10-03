@@ -1,23 +1,17 @@
 import { useState, type FormEvent } from "react";
-import type { Phase } from "@taskforge/contracts";
 import { AlertTriangle, Trash2, X } from "lucide-react";
 
-export type PhaseDeleteDisposition =
-  | { taskAction?: undefined; targetPhaseId?: undefined }
-  | { taskAction: "move"; targetPhaseId: string }
-  | { taskAction: "delete" };
+import type { PhaseDeleteDisposition, PhaseDeleteModalProps } from "./types";
+import styles from "./PhaseDeleteModal.module.css";
+
+export type { PhaseDeleteDisposition } from "./types";
 
 export function PhaseDeleteModal({
   phase,
   alternatives,
   onClose,
   onConfirm,
-}: {
-  phase: Phase;
-  alternatives: Phase[];
-  onClose: () => void;
-  onConfirm: (disposition: PhaseDeleteDisposition) => Promise<void>;
-}) {
+}: PhaseDeleteModalProps) {
   const taskCount = phase.taskCount ?? 0;
   const hasTasks = taskCount > 0;
   const canMove = alternatives.length > 0;
@@ -44,7 +38,7 @@ export function PhaseDeleteModal({
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) onClose(); }}>
+    <div className={`modal-backdrop ${styles.root}`} onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) onClose(); }}>
       <form className="delete-project-modal" onSubmit={submit}>
         <header>
           <span className="delete-warning-icon"><AlertTriangle /></span>

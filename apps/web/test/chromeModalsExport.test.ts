@@ -91,3 +91,31 @@ test("Sidebar keeps mobile className hook", () => {
   assert.match(tsx, /className/);
   assert.match(readFileSync(resolve("src/App.tsx"), "utf8"), /mobile-sidebar/);
 });
+
+const MODALS = [
+  "ProjectModal",
+  "ProjectMembersModal",
+  "ProjectDeleteModal",
+  "PhaseDeleteModal",
+  "PhaseMergeModal",
+  "LogoutConfirmModal",
+] as const;
+
+test("modal units are folders and App imports them from components/<Name>", () => {
+  const app = readFileSync(resolve("src/App.tsx"), "utf8");
+  for (const name of MODALS) {
+    const root = resolve("src/components", name);
+    assert.match(readFileSync(resolve(root, "index.ts"), "utf8"), new RegExp(name));
+    for (const file of [`${name}.tsx`, `${name}.module.css`, "types.ts"]) {
+      assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, `${name}/${file}`);
+    }
+    if (name === "PhaseDeleteModal") {
+      assert.match(
+        readFileSync(resolve("src/pages/PhasesPage/PhasesPage.tsx"), "utf8"),
+        /from ["']\.\.\/\.\.\/components\/PhaseDeleteModal["']/,
+      );
+      continue;
+    }
+    assert.match(app, new RegExp(`from ["']\.\/components\/${name}["']`));
+  }
+});

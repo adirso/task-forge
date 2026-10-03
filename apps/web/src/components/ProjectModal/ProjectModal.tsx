@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { X } from "lucide-react";
 import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, TASK_STATUSES, type AgentWorkflow, type DependencyResolutionStatus, type Project, type ProjectReviewPolicy, type TaskStatus } from "@taskforge/contracts";
-import { statusMeta } from "../lib/ui";
+import { statusMeta } from "../../lib/ui";
 
-type ProjectFormInput = { sourceProjectId?: string; key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses?: TaskStatus[]; defaultStatus?: TaskStatus; agentWorkflow?: AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[]; mergeTarget?: "main" | "phase"; dependencyResolutionStatuses?: DependencyResolutionStatus[]; reviewPolicy?: ProjectReviewPolicy };
+import type { ProjectFormInput, ProjectModalProps } from "./types";
+import styles from "./ProjectModal.module.css";
 
-export function ProjectModal({ project, projects = [], sourceProjects = projects, onClose, onSave, onEnableWorkflow }: { project?: Project | null; projects?: Project[]; sourceProjects?: Project[]; onClose: () => void; onSave: (project: ProjectFormInput) => Promise<void>; onEnableWorkflow?: () => Promise<void> }) {
+export function ProjectModal({ project, projects = [], sourceProjects = projects, onClose, onSave, onEnableWorkflow }: ProjectModalProps) {
   const [sourceProjectId, setSourceProjectId] = useState("");
   const [name, setName] = useState(project?.name ?? "");
   const [key, setKey] = useState(project?.key ?? "");
@@ -43,7 +44,7 @@ export function ProjectModal({ project, projects = [], sourceProjects = projects
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className={`modal-backdrop ${styles.root}`} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form className={`project-modal${project ? " project-modal-wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="project-modal-title" onSubmit={submit}>
         <header>
           <div className="modal-header-copy">
