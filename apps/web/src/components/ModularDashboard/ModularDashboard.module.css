@@ -1,0 +1,277 @@
+.page {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  width: 100%;
+  overflow: auto;
+  background: #f4f5f7;
+}
+
+.canvas {
+  position: relative;
+  width: 100%;
+  min-height: 100%;
+}
+
+.gridBg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.grid {
+  position: relative;
+  z-index: 1;
+}
+
+.gridItem {
+  height: 100%;
+}
+
+.gridItem:hover :global(.react-resizable-handle-se)::after {
+  border-right-color: #6554c0;
+  border-bottom-color: #6554c0;
+}
+
+:global(.react-grid-item.react-grid-placeholder) {
+  background: #6554c0;
+  opacity: 0.12;
+  border-radius: 14px;
+}
+
+:global(.react-resizable-handle) {
+  z-index: 2;
+}
+
+:global(.react-resizable-handle-se) {
+  width: 16px;
+  height: 16px;
+  right: 6px;
+  bottom: 6px;
+}
+
+:global(.react-resizable-handle-se)::after {
+  border-right-color: #b3bac5;
+  border-bottom-color: #b3bac5;
+}
+
+:global(.react-resizable-handle-e) {
+  width: 10px;
+  right: 0;
+}
+
+:global(.react-resizable-handle-s) {
+  height: 10px;
+  bottom: 0;
+}
+
+.empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: #8993a4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.empty svg {
+  width: 40px;
+  opacity: 0.3;
+}
+
+.empty h3 {
+  margin: 0;
+  color: #42526e;
+  font-size: 18px;
+}
+
+.empty p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.fabArea {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  z-index: 1000;
+}
+
+.fab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: #6554c0;
+  color: white;
+  border: 0;
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(101, 84, 192, 0.4);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.fab:hover {
+  background: #5243aa;
+  box-shadow: 0 6px 24px rgba(101, 84, 192, 0.5);
+}
+
+.fab svg {
+  width: 16px;
+}
+
+.fabReset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: white;
+  color: #42526e;
+  border: 1px solid #dfe1e6;
+  border-radius: 24px;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(9, 30, 66, 0.08);
+  transition: background 0.15s, color 0.15s;
+}
+
+.fabReset:hover {
+  background: #f4f5f7;
+  color: #172b4d;
+}
+
+.fabReset svg {
+  width: 15px;
+}
+
+.picker {
+  background: white;
+  border: 1px solid #dfe1e6;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(9, 30, 66, 0.16);
+  width: 300px;
+  overflow: hidden;
+}
+
+.pickerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #f0f1f3;
+  font-size: 13px;
+  font-weight: 650;
+  color: #172b4d;
+}
+
+.pickerClose {
+  border: 0;
+  background: transparent;
+  color: #8993a4;
+  cursor: pointer;
+  display: flex;
+  padding: 4px;
+  border-radius: 5px;
+}
+
+.pickerClose:hover {
+  background: #f4f5f7;
+}
+
+.pickerClose svg {
+  width: 15px;
+}
+
+.pickerList {
+  display: flex;
+  flex-direction: column;
+}
+
+.pickerItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.pickerItem:hover {
+  background: #f4f5f7;
+}
+
+.pickerIcon {
+  color: #6554c0;
+  display: flex;
+  flex-shrink: 0;
+}
+
+.pickerIcon svg {
+  width: 18px;
+}
+
+.pickerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pickerText strong {
+  font-size: 13px;
+  color: #172b4d;
+}
+
+.pickerText small {
+  font-size: 11px;
+  color: #8993a4;
+  line-height: 1.4;
+}
+
+.mobileList {
+  display: grid;
+  gap: 12px;
+  padding: 14px 12px 120px;
+}
+
+.mobileItem {
+  min-height: 220px;
+}
+
+@media (max-width: 700px) {
+  .gridBg,
+  .grid {
+    display: none;
+  }
+
+  .fabArea {
+    right: 12px;
+    bottom: 12px;
+    gap: 8px;
+  }
+
+  .fab,
+  .fabReset {
+    border-radius: 14px;
+  }
+
+  .picker {
+    width: min(92vw, 320px);
+  }
+}

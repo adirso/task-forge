@@ -1,11 +1,12 @@
 import type { AgentOpsEntry } from "@taskforge/contracts";
 import { AlertTriangle, Bot, ShieldCheck } from "lucide-react";
-import { api } from "../../lib/api";
-import { openTask } from "../../lib/dashboardNav";
-import { useWidgetQuery } from "../../lib/widgetQuery";
-import type { User } from "@taskforge/contracts";
-import { Avatar } from "../Avatar";
-import { WidgetError } from "../WidgetShell";
+import { api } from "../../../lib/api";
+import { openTask } from "../../../lib/dashboardNav";
+import { useWidgetQuery } from "../../../lib/widgetQuery";
+import { Avatar } from "../../Avatar";
+import { WidgetEmpty, WidgetError, WidgetLoading } from "../../WidgetShell";
+import type { AgentOpsWidgetProps } from "./types";
+import styles from "./AgentOpsWidget.module.css";
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -17,7 +18,7 @@ function formatRelative(iso: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function AgentOpsWidget({ currentUser }: { currentUser: User }) {
+export function AgentOpsWidget({ currentUser }: AgentOpsWidgetProps) {
   const isAdmin = currentUser.role === "ADMIN";
   const { data: agents, error, loading, reload } = useWidgetQuery<AgentOpsEntry[]>(
     () => api.agentOps().then((res) => res.agents),
@@ -26,36 +27,36 @@ export function AgentOpsWidget({ currentUser }: { currentUser: User }) {
 
   if (!isAdmin) {
     return (
-      <div className="widget-empty">
+      <WidgetEmpty>
         <ShieldCheck style={{ width: 20, opacity: 0.5 }} />
         Admin access required.
-      </div>
+      </WidgetEmpty>
     );
   }
 
   if (error) return <WidgetError message={error} onRetry={reload} />;
-  if (loading || !agents) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
-  if (agents.length === 0) return <div className="widget-empty"><Bot style={{ width: 20, opacity: 0.4 }} /> No agents yet.</div>;
+  if (loading || !agents) return <WidgetLoading lines={2} />;
+  if (agents.length === 0) return <WidgetEmpty><Bot style={{ width: 20, opacity: 0.4 }} /> No agents yet.</WidgetEmpty>;
 
   return (
-    <div className="widget-agent-ops">
+    <div className={styles.root}>
       {agents.map((agent) => (
-        <div key={agent.id} className={`wao-row${agent.stuckTaskCount > 0 ? " wao-stuck" : ""}`}>
+        <div key={agent.id} className={`${styles.row}${agent.stuckTaskCount > 0 ? ` ${styles.rowStuck}` : ""}`}>
           <Avatar user={agent} size="sm" />
-          <div className="wao-info">
-            <span className="wao-name">{agent.name}</span>
-            <span className="wao-meta">
+          <div className={styles.info}>
+            <span className={styles.name}>{agent.name}</span>
+            <span className={styles.meta}>
               {agent.lastActiveAt ? formatRelative(agent.lastActiveAt) : "Never active"}
               {" · "}
               {agent.openTaskCount} open
-              {agent.stuckTaskCount > 0 && <span className="wao-stuck-badge"><AlertTriangle /> {agent.stuckTaskCount} stuck</span>}
+              {agent.stuckTaskCount > 0 && <span className={styles.stuckBadge}><AlertTriangle /> {agent.stuckTaskCount} stuck</span>}
             </span>
           </div>
           {agent.inProgressTasks.slice(0, 2).map((task) => (
             <button
               key={task.id}
               type="button"
-              className={`wao-task${task.isStuck ? " wao-task-stuck" : ""}`}
+              className={`${styles.task}${task.isStuck ? ` ${styles.taskStuck}` : ""}`}
               onClick={() => openTask(task.projectKey, task.number)}
             >
               {task.projectKey}-{task.number}

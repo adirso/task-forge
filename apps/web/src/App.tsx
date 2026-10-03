@@ -17,8 +17,8 @@ import { ProjectMembersModal } from "./components/ProjectMembersModal";
 import { ProjectHeaderActions } from "./components/ProjectHeaderActions";
 import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
 import { AutomationManager } from "./components/AutomationManager";
-import { ProjectDashboard } from "./components/ProjectDashboard";
-import { DashboardPage } from "./components/DashboardPage";
+import { ProjectDashboardPage } from "./pages/ProjectDashboardPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { MultiFilterDropdown } from "./components/MultiFilterDropdown";
 import { PhaseMergeModal } from "./components/PhaseMergeModal";
 import { boardPhaseQueryValue, resolveBoardPhase } from "./lib/boardPhase";
@@ -394,7 +394,7 @@ export default function App() {
             <span className="task-total">{view === "board" ? boardTasks.length : visibleTasks.length} {view === "board" ? boardTasks.length === 1 ? "task" : "tasks" : visibleTasks.length === 1 ? "task" : "tasks"}</span>
           </section>}
           {view === "automations" && <AutomationManager key={currentProject?.id} project={currentProject} users={allUsers} phases={phases} />}
-          {view === "dashboard" && <ProjectDashboard project={currentProject} />}
+          {view === "dashboard" && <ProjectDashboardPage project={currentProject} />}
           <section className={`content-area${view === "automations" ? " automations-hidden" : ""}${view === "dashboard" ? " dashboard-hidden" : ""}`}>
             {view === "phases" ? <PhasesPage project={currentProject} phases={phases} onChange={({ phases: updated, deletedPhaseId, taskAction, targetPhaseId }) => {
               setPhases(updated);

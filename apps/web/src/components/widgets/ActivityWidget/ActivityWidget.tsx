@@ -1,9 +1,10 @@
 import type { ActivityEvent } from "@taskforge/contracts";
-import { api } from "../../lib/api";
-import { activityHref, openHref } from "../../lib/dashboardNav";
-import { useWidgetQuery } from "../../lib/widgetQuery";
-import { Avatar } from "../Avatar";
-import { WidgetError } from "../WidgetShell";
+import { api } from "../../../lib/api";
+import { activityHref, openHref } from "../../../lib/dashboardNav";
+import { useWidgetQuery } from "../../../lib/widgetQuery";
+import { Avatar } from "../../Avatar";
+import { WidgetEmpty, WidgetError, WidgetLoading } from "../../WidgetShell";
+import styles from "./ActivityWidget.module.css";
 
 function formatRelative(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -34,11 +35,11 @@ export function ActivityWidget() {
   const { data: events, error, loading, reload } = useWidgetQuery<ActivityEvent[]>(() => api.activityFeed(20).then((res) => res.activity));
 
   if (error) return <WidgetError message={error} onRetry={reload} />;
-  if (loading || !events) return <div className="widget-loading"><span className="widget-skeleton" /><span className="widget-skeleton" /><span className="widget-skeleton" /></div>;
-  if (events.length === 0) return <div className="widget-empty">No recent activity.</div>;
+  if (loading || !events) return <WidgetLoading />;
+  if (events.length === 0) return <WidgetEmpty>No recent activity.</WidgetEmpty>;
 
   return (
-    <div className="widget-activity">
+    <div className={styles.root}>
       {events.map((event) => {
         const href = activityHref(window.location.href, event);
         const content = (
@@ -55,21 +56,21 @@ export function ActivityWidget() {
               }}
               size="sm"
             />
-            <div className="wa-body">
-              <span className="wa-actor">{event.actorName || "Someone"}</span>
+            <div className={styles.body}>
+              <span className={styles.actor}>{event.actorName || "Someone"}</span>
               {" "}
-              <span className="wa-action">{actionLabel(event)}</span>
-              {typeof event.metadata.title === "string" && <span className="wa-task">: {event.metadata.title}</span>}
+              <span>{actionLabel(event)}</span>
+              {typeof event.metadata.title === "string" && <span className={styles.task}>: {event.metadata.title}</span>}
             </div>
-            <span className="wa-time">{formatRelative(event.createdAt)}</span>
+            <span className={styles.time}>{formatRelative(event.createdAt)}</span>
           </>
         );
         return href ? (
-          <button key={event.id} type="button" className="wa-row wa-row-link" onClick={() => openHref(href)}>
+          <button key={event.id} type="button" className={`${styles.row} ${styles.rowLink}`} onClick={() => openHref(href)}>
             {content}
           </button>
         ) : (
-          <div key={event.id} className="wa-row">{content}</div>
+          <div key={event.id} className={styles.row}>{content}</div>
         );
       })}
     </div>

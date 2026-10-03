@@ -1,28 +1,19 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import { getCompactor } from "react-grid-layout/core";
 import { GridBackground } from "react-grid-layout/extras";
 import { LayoutDashboard, Plus, RotateCcw, X } from "lucide-react";
-import { WidgetShell } from "./WidgetShell";
-import { findNextSlot, makeWidgetId, GRID_COLS, GRID_MARGIN, GRID_PADDING, GRID_ROW_HEIGHT } from "../lib/dashboard";
+import { WidgetShell } from "../WidgetShell";
+import { findNextSlot, makeWidgetId, GRID_COLS, GRID_MARGIN, GRID_PADDING, GRID_ROW_HEIGHT } from "../../lib/dashboard";
+import type { ModularDashboardProps, ModuleLayout } from "./types";
+import styles from "./ModularDashboard.module.css";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
-export interface ModuleLayout<T extends string> {
-  version: 2;
-  widgets: Array<{ id: string; type: T; x: number; y: number; w: number; h: number }>;
-}
-interface Props<T extends string> {
-  catalog: Record<T, { label: string; description: string; icon: ReactNode; w: number; h: number; minW: number; minH: number }>;
-  load: () => ModuleLayout<T>;
-  save: (layout: ModuleLayout<T>) => void;
-  defaults: () => ModuleLayout<T>;
-  render: (type: T) => ReactNode;
-}
 const gridCompactor = getCompactor(null, false, true);
 const GRID_CONFIG = { cols: GRID_COLS, rowHeight: GRID_ROW_HEIGHT, margin: GRID_MARGIN, containerPadding: GRID_PADDING };
 
-export function ModularDashboard<T extends string>({ catalog, load, save, defaults, render }: Props<T>) {
+export function ModularDashboard<T extends string>({ catalog, load, save, defaults, render }: ModularDashboardProps<T>) {
   const { width, containerRef, mounted } = useContainerWidth();
   const [layout, setLayout] = useState(() => load());
   const [showPicker, setShowPicker] = useState(false);
@@ -99,10 +90,10 @@ export function ModularDashboard<T extends string>({ catalog, load, save, defaul
   }
 
   return (
-    <div className="dashboard-page">
-      <div className="dashboard-canvas" ref={containerRef}>
+    <div className={`${styles.page} dashboard-page`}>
+      <div className={`${styles.canvas} dashboard-canvas`} ref={containerRef}>
         {layout.widgets.length === 0 && (
-          <div className="dashboard-empty">
+          <div className={styles.empty}>
             <LayoutDashboard />
             <h3>Your dashboard is empty</h3>
             <p>Click <strong>+ Add widget</strong> to get started.</p>
@@ -120,7 +111,7 @@ export function ModularDashboard<T extends string>({ catalog, load, save, defaul
               rows={gridRows}
               color="#e8eaed"
               borderRadius={12}
-              className="dashboard-grid-bg"
+              className={`${styles.gridBg} dashboard-grid-bg`}
             />
             <ReactGridLayout
               width={width}
@@ -130,10 +121,10 @@ export function ModularDashboard<T extends string>({ catalog, load, save, defaul
               resizeConfig={{ enabled: true, handles: ["se", "e", "s"] }}
               compactor={gridCompactor}
               onLayoutChange={handleLayoutChange}
-              className="dashboard-grid"
+              className={`${styles.grid} dashboard-grid`}
             >
               {layout.widgets.map((widget) => (
-                <div key={widget.id} className="dashboard-grid-item">
+                <div key={widget.id} className={`${styles.gridItem} dashboard-grid-item`}>
                   <WidgetShell
                     title={catalog[widget.type].label}
                     icon={catalog[widget.type].icon}
@@ -147,9 +138,9 @@ export function ModularDashboard<T extends string>({ catalog, load, save, defaul
           </>
         )}
         {mounted && isMobile && (
-          <div className="dashboard-mobile-list">
+          <div className={styles.mobileList}>
             {mobileWidgets.map((widget) => (
-              <div key={widget.id} className="dashboard-mobile-item">
+              <div key={widget.id} className={styles.mobileItem}>
                 <WidgetShell
                   title={catalog[widget.type].label}
                   icon={catalog[widget.type].icon}
@@ -163,23 +154,23 @@ export function ModularDashboard<T extends string>({ catalog, load, save, defaul
         )}
       </div>
 
-      <div className="dashboard-fab-area">
+      <div className={`${styles.fabArea} dashboard-fab-area`}>
         {showPicker && (
-          <div className="widget-picker">
-            <div className="widget-picker-header">
+          <div className={`${styles.picker} widget-picker`}>
+            <div className={styles.pickerHeader}>
               <span>Add widget</span>
-              <button type="button" onClick={() => setShowPicker(false)} className="widget-picker-close" aria-label="Close widget picker"><X /></button>
+              <button type="button" onClick={() => setShowPicker(false)} className={styles.pickerClose} aria-label="Close widget picker"><X /></button>
             </div>
-            <div className="widget-picker-list">
+            <div className={styles.pickerList}>
               {(Object.keys(catalog) as T[]).map((type) => (
                 <button
                   key={type}
                   type="button"
-                  className="widget-picker-item"
+                  className={styles.pickerItem}
                   onClick={() => addWidget(type)}
                 >
-                  <span className="widget-picker-icon">{catalog[type].icon}</span>
-                  <span className="widget-picker-text">
+                  <span className={styles.pickerIcon}>{catalog[type].icon}</span>
+                  <span className={styles.pickerText}>
                     <strong>{catalog[type].label}</strong>
                     <small>{catalog[type].description}</small>
                   </span>
@@ -190,7 +181,7 @@ export function ModularDashboard<T extends string>({ catalog, load, save, defaul
         )}
         <button
           type="button"
-          className="dashboard-fab-reset"
+          className={styles.fabReset}
           onClick={handleResetLayout}
           aria-label="Reset layout"
         >
@@ -198,7 +189,7 @@ export function ModularDashboard<T extends string>({ catalog, load, save, defaul
         </button>
         <button
           type="button"
-          className="dashboard-fab"
+          className={styles.fab}
           onClick={() => setShowPicker((open) => !open)}
           aria-label="Add widget"
         >
