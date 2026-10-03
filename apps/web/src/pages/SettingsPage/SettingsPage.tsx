@@ -1,27 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { ApiTokenMetadata, User } from "@taskforge/contracts";
+import type { ApiTokenMetadata } from "@taskforge/contracts";
 import { Activity, Bot, Check, Copy, Download, Eye, HardDrive, KeyRound, LayoutDashboard, List, Monitor, Plus, Route, ShieldCheck, Trash2, Upload, UserRound, Webhook } from "lucide-react";
-import { api } from "../lib/api";
-import { type AgentDetailTab, type SettingsTab, parseSettingsTab, readSettingsLocation, writeSettingsLocation } from "../lib/settingsNav";
-import { Avatar } from "./Avatar";
-import { AgentOpsPage } from "./AgentOpsPage";
-import { WebhookManager } from "./WebhookManager";
-import { WebhookDeliveriesPanel } from "./WebhookDeliveriesPanel";
-import { AgentCapabilityEditor } from "./AgentCapabilityEditor";
-import { RevealTokenConfirmModal } from "./RevealTokenConfirmModal";
+import { api } from "../../lib/api";
+import { type AgentDetailTab, type SettingsTab, parseSettingsTab, readSettingsLocation, writeSettingsLocation } from "../../lib/settingsNav";
+import { Avatar } from "../../components/Avatar";
+import { AgentOpsPage } from "../../components/AgentOpsPage";
+import { WebhookManager } from "../../components/WebhookManager";
+import { WebhookDeliveriesPanel } from "../../components/WebhookDeliveriesPanel";
+import { AgentCapabilityEditor } from "../../components/AgentCapabilityEditor";
+import { RevealTokenConfirmModal } from "../../components/RevealTokenConfirmModal";
+import type { SettingsPageProps } from "./types";
 
-export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated, onAgentCreated, onAgentUpdated, onAgentDeleted, onDefaultViewChange, onTextSizeChange }: {
-  user: User;
-  users: User[];
-  defaultView: "board" | "list";
-  textSize: "comfortable" | "large";
-  onUserUpdated: (user: User) => void;
-  onAgentCreated: (user: User) => void;
-  onAgentUpdated: (user: User) => void;
-  onAgentDeleted: (id: string) => void;
-  onDefaultViewChange: (view: "board" | "list") => void;
-  onTextSizeChange: (size: "comfortable" | "large") => void;
-}) {
+export function SettingsPage({ user, users, defaultView, textSize, onUserUpdated, onAgentCreated, onAgentUpdated, onAgentDeleted, onDefaultViewChange, onTextSizeChange }: SettingsPageProps) {
   const initialSettings = useMemo(() => readSettingsLocation(window.location.search, user.role === "ADMIN"), [user.role]);
   const [tab, setTab] = useState<SettingsTab>(initialSettings.tab);
   const [name, setName] = useState(user.name);
