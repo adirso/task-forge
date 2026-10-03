@@ -34,3 +34,21 @@ test("home widgets are folder units", () => {
     }
   }
 });
+
+test("ModularDashboard is a folder unit exporting ModuleLayout", () => {
+  const index = readFileSync(resolve("src/components/ModularDashboard/index.ts"), "utf8");
+  assert.match(index, /ModularDashboard/);
+  assert.match(index, /ModuleLayout/);
+  const tsx = readFileSync(resolve("src/components/ModularDashboard/ModularDashboard.tsx"), "utf8");
+  assert.match(tsx, /widget-drag-handle/);
+  assert.match(tsx, /dashboard-page/);
+  for (const file of ["ModularDashboard.tsx", "ModularDashboard.module.css", "types.ts"]) {
+    assert.equal(readFileSync(resolve("src/components/ModularDashboard", file), "utf8").length > 0, true, file);
+  }
+});
+
+test("projectDashboard imports ModuleLayout from ModularDashboard folder", () => {
+  const src = readFileSync(resolve("src/lib/projectDashboard.ts"), "utf8");
+  assert.match(src, /from ["']\.\.\/components\/ModularDashboard["']/);
+  assert.doesNotMatch(src, /ModularDashboard\.tsx/);
+});
