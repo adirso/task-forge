@@ -1,7 +1,7 @@
 # Web pages & components structure — Design Spec
 
 **Date:** 2026-10-03  
-**Status:** Draft (pending review)  
+**Status:** Approved  
 **Scope:** `apps/web` structural refactor only — no intentional product behavior changes
 
 ## Overview
