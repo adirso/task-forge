@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import type { Automation, AutomationCopyResult, AutomationAction, AutomationCondition, AutomationCreate, Phase, Project, TaskStatus, User } from "@taskforge/contracts";
 import { Check, Plus, Save, Trash2, Zap } from "lucide-react";
-import { api } from "../lib/api";
-import { statusMeta, taskTypeMeta } from "../lib/ui";
+import { api } from "../../lib/api";
+import { statusMeta, taskTypeMeta } from "../../lib/ui";
+import type { AutomationsPageProps } from "./types";
+import styles from "./AutomationsPage.module.css";
 
 const fields = [{ value: "status", label: "Status" }, { value: "priority", label: "Priority" }, { value: "type", label: "Type" }, { value: "assigneeId", label: "Assignee" }, { value: "pullRequestState", label: "PR state" }, { value: "phaseId", label: "Phase" }, { value: "branch", label: "Branch" }, { value: "estimatePoints", label: "Estimate" }] as const;
 const operators = ["equals", "not_equals", "changed_to", "changed_from_to", "is_empty", "is_not_empty"] as const;
@@ -23,7 +25,7 @@ const choices: Partial<Record<AutomationCondition["field"], Array<{ value: strin
   pullRequestState: ["OPEN", "MERGED", "CLOSED"].map((value) => ({ value, label: value })),
 };
 
-export function AutomationManager({ project, users, phases = [] }: { project: Project | null; users: User[]; phases?: Phase[] }) {
+export function AutomationsPage({ project, users, phases = [] }: AutomationsPageProps) {
   const [rules, setRules] = useState<Automation[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [destinations, setDestinations] = useState<Project[]>([]);
@@ -65,7 +67,7 @@ export function AutomationManager({ project, users, phases = [] }: { project: Pr
     return <input type={field === "estimatePoints" ? "number" : "text"} value={value ?? ""} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />;
   }
   if (!project) return null;
-  return <div className="automation-page">
+  return <div className={`automation-page ${styles.root}`}>
     <header className="automation-page-header"><div className="automation-heading"><span className="automation-icon"><Zap /></span><div><span className="eyebrow">Project workflow</span><h2>Automations</h2><p>Keep {project.name} moving with rules that react to task changes.</p></div></div><div className="automation-header-meta"><strong>{rules.filter((rule) => rule.enabled).length}</strong><span>active rules</span></div></header>
     {error && <div className="automation-alert error">{error}</div>}{saved && <div className="automation-alert success"><Check /> Automation saved</div>}
     <div className="automation-layout"><section className="automation-card automation-builder"><div className="automation-card-heading"><div><span className="eyebrow">Rule builder</span><h3>{editing ? "Edit automation" : "Create an automation"}</h3></div><span className="step-badge">{editing ? "Editing" : "New rule"}</span></div><label>Rule name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Assign task to actioner" /></label><div className="automation-two-col"><label>When<select value={trigger} onChange={(e) => setTrigger(e.target.value as AutomationCreate["trigger"])}><option value="TASK_UPDATED">A task is updated</option><option value="TASK_CREATED">A task is created</option></select></label><label>Triggered by<select value={actorType} onChange={(e) => setActorType(e.target.value as AutomationCreate["actorType"])}><option value="ANY">Anyone</option><option value="USER">A specific user</option><option value="SERVICE">A service</option></select></label></div>{actorType === "USER" && <label>Specific user<select value={actorId ?? ""} onChange={(e) => setActorId(e.target.value)}><option value="">Choose a user</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}{actorType === "SERVICE" && <label>Service<select value={service ?? ""} onChange={(e) => setService(e.target.value)}><option value="">Choose a service</option>{services.map((s) => <option key={s}>{s}</option>)}</select></label>}

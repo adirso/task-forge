@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import type { AgentOpsEntry } from "@taskforge/contracts";
 import { Activity, AlertTriangle, Bot, CheckCircle2, Clock, ExternalLink, RefreshCw, Webhook } from "lucide-react";
-import { api } from "../lib/api";
-import { Avatar } from "./Avatar";
+import { api } from "../../lib/api";
+import { Avatar } from "../../components/Avatar";
+import type { AgentOpsPageProps } from "./types";
+import styles from "./AgentOpsPage.module.css";
 
-export function AgentOpsPage({ onOpenAgent }: { onOpenAgent?: (agentId: string) => void }) {
+export function AgentOpsPage({ onOpenAgent }: AgentOpsPageProps) {
   const [agents, setAgents] = useState<AgentOpsEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -34,7 +36,7 @@ export function AgentOpsPage({ onOpenAgent }: { onOpenAgent?: (agentId: string) 
   if (error) return <div className="form-error">{error}</div>;
 
   return (
-    <div className="agent-ops">
+    <div className={`agent-ops ${styles.root}`}>
       <div className="agent-ops-header">
         <div className="agent-ops-summary">
           <span><strong>{agents.length}</strong> agents</span>

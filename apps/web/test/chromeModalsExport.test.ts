@@ -28,3 +28,30 @@ test("PhasesPage unit exposes the required co-located files", () => {
     assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
   }
 });
+
+test("App imports AutomationsPage from pages/AutomationsPage", () => {
+  const app = readFileSync(resolve("src/App.tsx"), "utf8");
+  assert.match(app, /from ["']\.\/pages\/AutomationsPage["']/);
+  assert.match(app, /<AutomationsPage/);
+  assert.doesNotMatch(app, /AutomationManager/);
+});
+
+test("AutomationsPage unit exposes the required co-located files", () => {
+  const root = resolve("src/pages/AutomationsPage");
+  for (const file of ["index.ts", "AutomationsPage.tsx", "AutomationsPage.module.css", "types.ts"]) {
+    assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
+  }
+});
+
+test("Settings imports AgentOpsPage from pages/AgentOpsPage", () => {
+  const settings = readFileSync(resolve("src/pages/SettingsPage/SettingsPage.tsx"), "utf8");
+  assert.match(settings, /from ["']\.\.\/AgentOpsPage["']/);
+  assert.doesNotMatch(settings, /components\/AgentOpsPage/);
+});
+
+test("AgentOpsPage unit exposes the required co-located files", () => {
+  const root = resolve("src/pages/AgentOpsPage");
+  for (const file of ["index.ts", "AgentOpsPage.tsx", "AgentOpsPage.module.css", "types.ts"]) {
+    assert.equal(readFileSync(resolve(root, file), "utf8").length > 0, true, file);
+  }
+});
