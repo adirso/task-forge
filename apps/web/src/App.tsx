@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { phaseBranchName, type Notification, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskPriority, type TaskSearchResult, type TaskStatus, type User } from "@taskforge/contracts";
-import { BarChart3, Bell, Filter, Flag, Kanban, LayoutList, Link2, Menu, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
+import { Archive, BarChart3, Bell, Filter, Flag, Kanban, LayoutList, Link2, Menu, Search, Settings, Tag as TagIcon, X, Zap } from "lucide-react";
 import { api, ApiError } from "./lib/api";
 import { Login } from "./pages/Login";
 import { Sidebar } from "./components/Sidebar";
@@ -13,6 +13,7 @@ import { SearchPalette } from "./components/SearchPalette";
 import { SettingsPage } from "./pages/SettingsPage";
 import { PhasesPage } from "./pages/PhasesPage";
 import { ProjectDeleteModal } from "./components/ProjectDeleteModal";
+import { ProjectArchiveModal } from "./components/ProjectArchiveModal";
 import { ProjectMembersModal } from "./components/ProjectMembersModal";
 import { ProjectHeaderActions } from "./components/ProjectHeaderActions";
 import { LogoutConfirmModal } from "./components/LogoutConfirmModal";
@@ -31,6 +32,8 @@ type View = DefaultView | "dashboard" | "phases" | "automations";
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
+  const [showArchived, setShowArchived] = useState(() => new URLSearchParams(window.location.search).get("projects") === "archived");
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [phases, setPhases] = useState<Phase[]>([]);
@@ -58,6 +61,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [textSize, setTextSize] = useState<"comfortable" | "large">(() => localStorage.getItem("taskforge_text_size") === "large" ? "large" : "comfortable");
   const [showDeleteProject, setShowDeleteProject] = useState(false);
+  const [showArchiveProject, setShowArchiveProject] = useState(false);
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showMobileNav, setShowMobileNav] = useState(false);
@@ -122,6 +126,15 @@ export default function App() {
   }, [textSize]);
 
   useEffect(() => {
+    if (!user || !showArchived) return;
+    api.projects("archived").then(({ projects: archived }) => setArchivedProjects(archived)).catch(() => flash("Could not load archived projects"));
+  }, [user, showArchived]);
+
+  useEffect(() => {
+    if (currentProject?.archivedAt) setShowArchived(true);
+  }, [currentProject?.id, currentProject?.archivedAt]);
+
+  useEffect(() => {
     if (!user) return;
     const url = new URL(window.location.href);
     if (showSettings) {
@@ -147,15 +160,17 @@ export default function App() {
       url.searchParams.delete("phase");
       url.searchParams.delete("view");
     }
+    if (showArchived && !showSettings) url.searchParams.set("projects", "archived");
+    else url.searchParams.delete("projects");
     window.history.replaceState({}, "", url);
-  }, [user, showSettings, currentProject, selectedTask, view, boardPhaseId, phases]);
+  }, [user, showSettings, currentProject, selectedTask, view, boardPhaseId, phases, showArchived]);
 
   async function login(email: string, password: string) {
     const result = await api.login(email, password);
     localStorage.setItem("taskforge_token", result.token); setUser(result.user); setLoading(true);
     await loadWorkspace(); setLoading(false);
   }
-  function logout() { localStorage.removeItem("taskforge_token"); setUser(null); setProjects([]); setCurrentProject(null); setShowLogoutConfirm(false); }
+  function logout() { localStorage.removeItem("taskforge_token"); setUser(null); setProjects([]); setArchivedProjects([]); setCurrentProject(null); setShowLogoutConfirm(false); }
   function flash(message: string) { setToast(message); window.setTimeout(() => setToast(""), 2600); }
 
   const visibleTasks = useMemo(() => tasks.filter((task) => {
@@ -230,13 +245,14 @@ export default function App() {
     setSelectedTask(null); flash("Task deleted");
   }
   async function createProject(input: { sourceProjectId?: string; key: string; name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string }) {
-    const { project } = await api.createProject(input); setProjects((items) => [project, ...items]); setShowSettings(false); await loadProject(project.id); flash(input.sourceProjectId ? "Project created with members, automations, and workflow settings copied" : "Project created");
+    const { project } = await api.createProject(input); setProjects((items) => [project, ...items]); setShowArchived(false); setShowSettings(false); await loadProject(project.id); flash(input.sourceProjectId ? "Project created with members, automations, and workflow settings copied" : "Project created");
   }
   async function updateProject(input: { name: string; description: string; repoUrl: string | null; localRepoPath: string | null; color: string; availableStatuses: TaskStatus[]; defaultStatus: TaskStatus; agentWorkflow?: import("@taskforge/contracts").AgentWorkflow | null; hiddenEmptyStatuses?: TaskStatus[]; mergeTarget?: "main" | "phase"; dependencyResolutionStatuses?: import("@taskforge/contracts").DependencyResolutionStatus[]; reviewPolicy?: import("@taskforge/contracts").ProjectReviewPolicy }) {
     if (!currentProject) return;
     const { project } = await api.updateProject(currentProject.id, input);
     setCurrentProject((current) => current?.id === project.id ? { ...current, ...project } : current);
     setProjects((items) => items.map((item) => item.id === project.id ? { ...item, ...project } : item));
+    setArchivedProjects((items) => items.map((item) => item.id === project.id ? { ...item, ...project } : item));
     setShowEditProject(false); flash("Project updated");
   }
   async function enableAgentWorkflow() {
@@ -283,12 +299,28 @@ export default function App() {
     if (!currentProject) return;
     await api.deleteProject(currentProject.id);
     const remaining = projects.filter((project) => project.id !== currentProject.id);
-    setProjects(remaining); setCurrentProject(null); setTasks([]); setPhases([]); setTags([]); setSelectedTask(null); setShowDeleteProject(false);
+    setProjects(remaining); setArchivedProjects((items) => items.filter((project) => project.id !== currentProject.id)); setCurrentProject(null); setTasks([]); setPhases([]); setTags([]); setSelectedTask(null); setShowDeleteProject(false);
     if (remaining[0]) await loadProject(remaining[0].id);
     else {
       const url = new URL(window.location.href); url.searchParams.delete("project"); url.searchParams.delete("task"); url.searchParams.delete("view"); window.history.replaceState({}, "", url);
     }
     flash("Project deleted");
+  }
+  async function toggleCurrentProjectArchive() {
+    if (!currentProject) return;
+    const restoring = Boolean(currentProject.archivedAt);
+    // Only the mutation can fail the confirmation; once it succeeds the new state is committed.
+    const { project } = restoring ? await api.restoreProject(currentProject.id) : await api.archiveProject(currentProject.id);
+    const updated = { ...currentProject, ...project };
+    setCurrentProject((current) => current?.id === project.id ? { ...current, ...project } : current);
+    setProjects((items) => restoring ? [...items.filter((item) => item.id !== project.id), updated] : items.filter((item) => item.id !== project.id));
+    setArchivedProjects((items) => restoring ? items.filter((item) => item.id !== project.id) : [updated, ...items.filter((item) => item.id !== project.id)]);
+    setShowArchived(!restoring); setShowArchiveProject(false);
+    flash(restoring ? "Project restored" : "Project archived");
+    // Server order and counts are reconciled separately; a failed refresh keeps the locally committed lists.
+    Promise.all([api.projects(), api.projects("archived")])
+      .then(([{ projects: active }, { projects: archived }]) => { setProjects(active); setArchivedProjects(archived); })
+      .catch(() => flash("Could not refresh project lists"));
   }
   async function reorderProjects(projectIds: string[]) {
     const previous = projects;
@@ -303,9 +335,9 @@ export default function App() {
   const members = currentProject?.members ?? allUsers.filter((candidate) => candidate.id === user.id);
   return (
     <div className={`app-shell ${styles.root}`}>
-      <Sidebar projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} dashboardActive={!showSettings && !currentProject} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} onHome={() => { setShowSettings(false); setCurrentProject(null); setSelectedTask(null); }} />
+      <Sidebar projects={projects} archivedProjects={archivedProjects} showArchived={showArchived} onToggleArchived={() => setShowArchived((shown) => !shown)} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} dashboardActive={!showSettings && !currentProject} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} onHome={() => { setShowSettings(false); setCurrentProject(null); setSelectedTask(null); }} />
       {showMobileNav && <button className="mobile-nav-scrim" type="button" aria-label="Close navigation menu" onClick={() => setShowMobileNav(false)} />}
-      <Sidebar className={`mobile-sidebar${showMobileNav ? " mobile-open" : ""}`} onNavigate={() => setShowMobileNav(false)} projects={projects} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} dashboardActive={!showSettings && !currentProject} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} onHome={() => { setShowSettings(false); setCurrentProject(null); setSelectedTask(null); }} />
+      <Sidebar className={`mobile-sidebar${showMobileNav ? " mobile-open" : ""}`} onNavigate={() => setShowMobileNav(false)} projects={projects} archivedProjects={archivedProjects} showArchived={showArchived} onToggleArchived={() => setShowArchived((shown) => !shown)} currentId={showSettings ? null : currentProject?.id ?? null} user={user} unreadCount={notifications.filter((item) => !item.readAt).length} settingsActive={showSettings} dashboardActive={!showSettings && !currentProject} onSearch={() => setShowSearch(true)} onNotifications={() => setShowNotifications((shown) => !shown)} onSettings={() => { setSelectedTask(null); setShowSettings(true); }} onSelect={(id) => { setShowSettings(false); setSelectedTask(null); loadProject(id).catch(() => flash("Could not load project")); }} onCreate={() => { setShowSettings(false); setShowProjectModal(true); }} onLogout={() => setShowLogoutConfirm(true)} onReorder={(projectIds) => reorderProjects(projectIds).catch(() => undefined)} onHome={() => { setShowSettings(false); setCurrentProject(null); setSelectedTask(null); }} />
       <main className="workspace">
         <header className="mobile-topbar">
           <button type="button" className="mobile-topbar-menu" aria-label="Open navigation menu" onClick={() => setShowMobileNav(true)}><Menu /></button>
@@ -317,7 +349,7 @@ export default function App() {
         </header>
         {showSettings ? <SettingsPage user={user} users={allUsers} defaultView={localStorage.getItem("taskforge_default_view") === "list" ? "list" : "board"} textSize={textSize} onUserUpdated={(updated) => { setUser(updated); setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); }} onAgentCreated={(created) => setAllUsers((items) => [...items, created])} onAgentUpdated={(updated) => { setAllUsers((items) => items.map((item) => item.id === updated.id ? updated : item)); setTasks((items) => items.map((task) => task.assigneeId === updated.id ? { ...task, assignee: updated } : task)); }} onAgentDeleted={(id) => setAllUsers((items) => items.filter((item) => item.id !== id))} onDefaultViewChange={changeDefaultView} onTextSizeChange={changeTextSize} /> : currentProject ? <>
           <header className="project-header">
-            <div className="breadcrumbs"><span>Projects</span><span>/</span><strong>{currentProject.name}</strong></div>
+            <div className="breadcrumbs"><span>{currentProject.archivedAt ? "Archived projects" : "Projects"}</span><span>/</span><strong>{currentProject.name}</strong>{currentProject.archivedAt && <span className="project-archived-badge" title={`Archived ${new Date(currentProject.archivedAt).toLocaleDateString()}`}><Archive /> Archived</span>}</div>
             <div className="project-title-row">
               <div><span className="project-logo" style={{ background: currentProject.color }}>{currentProject.key.slice(0, 1)}</span><div><h1>{currentProject.name}</h1><p>{currentProject.description}</p></div></div>
               <div className="header-actions">
@@ -425,7 +457,8 @@ export default function App() {
       {phaseMergeDraft && currentProject && <PhaseMergeModal {...phaseMergeDraft} targetBranch="main" onClose={() => setPhaseMergeDraft(null)} onAuthorize={async () => { await api.mergePhaseToMain(currentProject.id, activePhase!.id); flash("Phase merge authorized; GitHub compare opened"); setPhaseMergeDraft(null); }} />}
       {(selectedTask || newTaskStatus) && currentProject && <TaskModal task={selectedTask} initialStatus={newTaskStatus ?? selectedTask?.status ?? currentProject.defaultStatus} defaultPhaseId={(view === "board" ? selectedBoardPhase : activePhase)?.id ?? null} project={currentProject} currentUser={user} members={members} phases={phases} availableTags={tags} tasks={tasks} onClose={() => { setSelectedTask(null); setNewTaskStatus(null); }} onSave={saveTask} onDelete={selectedTask ? deleteSelected : null} onRouted={(routed) => { setTasks((items) => items.map((item) => item.id === routed.id ? routed : item)); setSelectedTask(routed); }} onPlanApplied={refreshTasksAfterPlan} />}
       {showProjectModal && <ProjectModal projects={projects} sourceProjects={projects.filter((project) => user.role === "ADMIN" || project.ownerId === user.id)} onClose={() => setShowProjectModal(false)} onSave={createProject} />}
-      {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onEnableWorkflow={enableAgentWorkflow} onSave={async ({ name, description, repoUrl, localRepoPath, color, availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget, dependencyResolutionStatuses, reviewPolicy }) => updateProject({ name, description, repoUrl, localRepoPath, color, availableStatuses: availableStatuses!, defaultStatus: defaultStatus!, agentWorkflow, hiddenEmptyStatuses, mergeTarget, dependencyResolutionStatuses, reviewPolicy })} />}
+      {showEditProject && currentProject && <ProjectModal project={currentProject} onClose={() => setShowEditProject(false)} onEnableWorkflow={enableAgentWorkflow} onToggleArchive={() => { setShowEditProject(false); setShowArchiveProject(true); }} onSave={async ({ name, description, repoUrl, localRepoPath, color, availableStatuses, defaultStatus, agentWorkflow, hiddenEmptyStatuses, mergeTarget, dependencyResolutionStatuses, reviewPolicy }) => updateProject({ name, description, repoUrl, localRepoPath, color, availableStatuses: availableStatuses!, defaultStatus: defaultStatus!, agentWorkflow, hiddenEmptyStatuses, mergeTarget, dependencyResolutionStatuses, reviewPolicy })} />}
+      {showArchiveProject && currentProject && <ProjectArchiveModal project={currentProject} onClose={() => setShowArchiveProject(false)} onConfirm={toggleCurrentProjectArchive} />}
       {showDeleteProject && currentProject && <ProjectDeleteModal project={currentProject} onClose={() => setShowDeleteProject(false)} onConfirm={deleteCurrentProject} />}
       {showMembersModal && currentProject && <ProjectMembersModal project={currentProject} users={allUsers} currentUser={user} onClose={() => setShowMembersModal(false)} onChanged={applyProjectMembers} />}
       {showLogoutConfirm && <LogoutConfirmModal user={user} onClose={() => setShowLogoutConfirm(false)} onConfirm={logout} />}

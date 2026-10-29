@@ -2,6 +2,9 @@ import type { Project, User } from "@taskforge/contracts";
 
 export type SidebarProps = {
   projects: Project[];
+  archivedProjects: Project[];
+  showArchived: boolean;
+  onToggleArchived: () => void;
   currentId: string | null;
   user: User;
   unreadCount: number;

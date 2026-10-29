@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { memberAddSchema, projectCreateSchema, projectOrderSchema, projectUpdateSchema } from "@taskforge/contracts";
+import { memberAddSchema, projectCreateSchema, projectListQuerySchema, projectOrderSchema, projectUpdateSchema } from "@taskforge/contracts";
 import { db } from "../db/database.js";
 import { createUnitOfWork } from "../infrastructure/database.js";
 import { ProjectApplicationService } from "../application/resource-services.js";
@@ -11,12 +11,14 @@ const projectContext = (request: Parameters<typeof requestContext>[0], projectId
 
 export async function projectRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.authenticate);
-  app.get("/", { schema: { tags: ["Projects"], summary: "List accessible projects" } }, async (request) => ({ projects: await service.list(requestContext(request)) }));
+  app.get("/", { schema: { tags: ["Projects"], summary: "List accessible projects; archived projects are excluded unless ?archived=archived|all" } }, async (request) => ({ projects: await service.list(requestContext(request), projectListQuerySchema.parse(request.query).archived) }));
   app.post("/", { schema: { tags: ["Projects"], summary: "Create a project" } }, async (request, reply) => { const body = projectCreateSchema.parse(request.body); try { return reply.code(201).send({ project: await service.create(requestContext(request), { ...body, repoUrl: body.repoUrl ?? null, localRepoPath: body.localRepoPath ?? null }) }); } catch (error) { if (typeof error === "object" && error !== null && "code" in error && error.code === "CONFLICT") return reply.code(409).send({ error: error instanceof Error ? error.message : "Project name or key is already in use" }); throw error; } });
   app.patch("/order", { schema: { tags: ["Projects"], summary: "Reorder accessible projects" } }, async (request, reply) => { await service.reorder(requestContext(request), projectOrderSchema.parse(request.body).projectIds); return reply.code(204).send(); });
   app.get<{ Params: ProjectParams }>("/:id", { schema: { tags: ["Projects"], summary: "Get a project" } }, async (request) => ({ project: await service.get(projectContext(request, request.params.id)) }));
   app.patch<{ Params: ProjectParams }>("/:id", { schema: { tags: ["Projects"], summary: "Update a project" } }, async (request) => ({ project: await service.update(projectContext(request, request.params.id), projectUpdateSchema.parse(request.body)) }));
   app.post<{ Params: ProjectParams }>("/:id/agent-workflow/enable", { schema: { tags: ["Projects"], summary: "Enable the default Smithy agent workflow" } }, async (request) => ({ project: await service.enableAgentWorkflow(projectContext(request, request.params.id)) }));
+  app.post<{ Params: ProjectParams }>("/:id/archive", { schema: { tags: ["Projects"], summary: "Archive a project, keeping its tasks, phases, and history" } }, async (request) => ({ project: await service.archive(projectContext(request, request.params.id)) }));
+  app.post<{ Params: ProjectParams }>("/:id/restore", { schema: { tags: ["Projects"], summary: "Restore an archived project to the active list" } }, async (request) => ({ project: await service.restore(projectContext(request, request.params.id)) }));
   app.post<{ Params: ProjectParams }>("/:id/members", { schema: { tags: ["Projects"], summary: "Add a project member" } }, async (request, reply) => { const body = memberAddSchema.parse(request.body); await service.addMember(projectContext(request, request.params.id), body.userId, body.role); return reply.code(204).send(); });
   app.delete<{ Params: ProjectParams & { userId: string } }>("/:id/members/:userId", { schema: { tags: ["Projects"], summary: "Remove a project member" } }, async (request, reply) => { await service.removeMember(projectContext(request, request.params.id), request.params.userId); return reply.code(204).send(); });
   app.delete<{ Params: ProjectParams }>("/:id", { schema: { tags: ["Projects"], summary: "Delete a project and all of its data" } }, async (request, reply) => { await service.delete(projectContext(request, request.params.id)); return reply.code(204).send(); });

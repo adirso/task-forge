@@ -769,6 +769,15 @@ export const migrations: readonly Migration[] = [
       }
     },
   },
+  {
+    version: "0033_project_archived_at",
+    async up(executor, dialect) {
+      // Nullable and additive: existing projects stay active and older readers ignore the column.
+      // MySQL auto-commits ALTER before the ledger insert, so a retry must tolerate an existing column.
+      if (await hasColumn(executor, dialect, "projects", "archived_at")) return;
+      await executor.run(dialect === "mysql" ? "ALTER TABLE projects ADD COLUMN archived_at VARCHAR(30) NULL" : "ALTER TABLE projects ADD COLUMN archived_at TEXT NULL", []);
+    },
+  },
 ];
 
 async function validateMigrationLedger(adapter: Adapter, registry: readonly Migration[]) {

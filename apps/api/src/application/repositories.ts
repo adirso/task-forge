@@ -19,11 +19,12 @@ export interface UserRepository {
 export interface ProjectRepository {
   findById(id: string): Promise<ProjectEntity | null>;
   findByKey(key: string): Promise<ProjectEntity | null>;
-  listAccessible(actorId: string, isAdmin: boolean): Promise<ProjectEntity[]>;
+  listAccessible(actorId: string, isAdmin: boolean, archived?: "active" | "archived" | "all"): Promise<ProjectEntity[]>;
   allocateSortOrder(): Promise<number>;
   reorder(ids: string[]): Promise<void>;
   create(input: ProjectEntity): Promise<ProjectEntity>;
   update(id: string, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses" | "reviewPolicy">>): Promise<ProjectEntity>;
+  setArchivedAt(id: string, archivedAt: string | null): Promise<ProjectEntity>;
   delete(id: string): Promise<void>;
 }
 

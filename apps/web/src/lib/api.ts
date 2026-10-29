@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentArtifact, type AgentCapabilityProfile, type AgentOpsEntry, type AgentPlan, type AgentPlanDecision, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCopy, type AutomationCopyResult, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, TASK_STATUSES, type ActivityEvent, type AgentArtifact, type AgentCapabilityProfile, type AgentOpsEntry, type AgentPlan, type AgentPlanDecision, type AgentRoutingRequest, type AgentRunIntervention, type ApiTokenMetadata, type Attachment, type AuthResponse, type Automation, type AutomationCopy, type AutomationCopyResult, type AutomationCreate, type AutomationUpdate, type DashboardSummary, type DeliveryMonitorHealth, type Notification, type PageInfo, type Phase, type Project, type ProjectArchiveFilter, type Tag, type Task, type TaskCreate, type TaskNote, type TaskSearchResult, type TaskUpdate, type User, type WebhookDelivery, type WebhookDeliveryStatus } from "@taskforge/contracts";
 
 export interface AgentRun {
   id: string; taskId: string; projectId: string; requestedById: string; executedById: string | null; kind: "IMPLEMENTATION" | "REVIEW" | "RE_REVIEW" | "FIX";
@@ -239,7 +239,7 @@ async function mockRequest<T>(path: string, options: Options = {}): Promise<T> {
 
   if (pathname === "/auth/login" && method === "POST") return { token: "mock-token", user: MOCK_USER } as T;
   if (pathname === "/auth/me" && method === "GET") return { user: MOCK_USER } as T;
-  if (pathname === "/projects" && method === "GET") return { projects: mockProjects } as T;
+  if (pathname === "/projects" && method === "GET") return { projects: url.searchParams.get("archived") === "archived" ? [] : mockProjects } as T;
   if (pathname === "/projects/order" && method === "PATCH") return undefined as T;
   if (pathname === "/users" && method === "GET") return { users: [MOCK_USER, MOCK_MEMBER, MOCK_AGENT] } as T;
   if (pathname === "/notifications" && method === "GET") return { notifications: mockNotifications, unreadCount: mockNotifications.filter((n) => !n.readAt).length } as T;
@@ -466,7 +466,7 @@ async function request<T>(path: string, options: Options = {}): Promise<T> {
 export const api = {
   login: (email: string, password: string) => request<AuthResponse>("/auth/login", { method: "POST", body: { email, password } }),
   me: () => request<{ user: User }>("/auth/me"),
-  projects: () => request<{ projects: Project[] }>("/projects").then((response) => ({ projects: response.projects.map((project) => ({ ...project, localRepoPath: project.localRepoPath ?? null })) })),
+  projects: (archived: ProjectArchiveFilter = "active") => request<{ projects: Project[] }>(archived === "active" ? "/projects" : `/projects?archived=${archived}`).then((response) => ({ projects: response.projects.map((project) => ({ ...project, localRepoPath: project.localRepoPath ?? null })) })),
   reorderProjects: (projectIds: string[]) => request<void>("/projects/order", { method: "PATCH", body: { projectIds } }),
   project: (id: string) => request<{ project: Project }>(`/projects/${id}`),
   addProjectMember: (projectId: string, userId: string) => request<void>(`/projects/${projectId}/members`, { method: "POST", body: { userId, role: "MEMBER" } }),
@@ -487,6 +487,8 @@ export const api = {
   updateProject: (id: string, input: { name?: string; description?: string; repoUrl?: string | null; localRepoPath?: string | null; color?: string; availableStatuses?: Project["availableStatuses"]; defaultStatus?: Project["defaultStatus"]; agentWorkflow?: Project["agentWorkflow"]; hiddenEmptyStatuses?: Project["hiddenEmptyStatuses"]; mergeTarget?: Project["mergeTarget"]; dependencyResolutionStatuses?: Project["dependencyResolutionStatuses"]; reviewPolicy?: Project["reviewPolicy"] }) =>
     request<{ project: Project }>(`/projects/${id}`, { method: "PATCH", body: input }),
   enableAgentWorkflow: (id: string) => request<{ project: Project }>(`/projects/${id}/agent-workflow/enable`, { method: "POST" }),
+  archiveProject: (id: string) => request<{ project: Project }>(`/projects/${id}/archive`, { method: "POST" }),
+  restoreProject: (id: string) => request<{ project: Project }>(`/projects/${id}/restore`, { method: "POST" }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   tasks: async (projectId: string) => {
     const tasks: Task[] = [];

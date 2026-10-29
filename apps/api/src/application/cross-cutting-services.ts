@@ -55,7 +55,7 @@ export class DashboardApplicationService implements DashboardService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now: () => string = () => new Date().toISOString()) {}
   async summary(context: RequestContext): Promise<DashboardSummary> {
     return this.unitOfWork.run(async (repositories) => {
-      const accessible = await repositories.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN");
+      const accessible = await repositories.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN", "active");
       const projectsByName = [...accessible].sort((left, right) => left.name.localeCompare(right.name));
       const projectIds = projectsByName.map((project) => project.id);
       const cutoff = new Date(new Date(this.now()).getTime() - STUCK_THRESHOLD_MS).toISOString();
