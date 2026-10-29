@@ -262,6 +262,7 @@ export interface ProjectEntity {
   dependencyResolutionStatuses: DependencyResolutionStatus[];
   reviewPolicy: ProjectReviewPolicy;
   ownerId: string;
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   members?: Array<UserEntity & { projectRole: "OWNER" | "MEMBER" }>;

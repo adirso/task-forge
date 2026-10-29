@@ -24,4 +24,6 @@ export type ProjectModalProps = {
   onClose: () => void;
   onSave: (project: ProjectFormInput) => Promise<void>;
   onEnableWorkflow?: () => Promise<void>;
+  /** Opens the archive/restore confirmation; only passed for users who can manage the project. */
+  onToggleArchive?: () => void;
 };

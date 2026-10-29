@@ -589,6 +589,92 @@ test("project ordering persists and new projects prepend", async () => {
   assert.deepEqual(listed.json().projects.slice(0, 3).map((project: { id: string }) => project.id), [newest.json().project.id, secondId, remainingIds[0]]);
 });
 
+test("project archiving preserves data, filters lists, and enforces project authorization", async () => {
+  const auth = (token: string) => ({ authorization: `Bearer ${token}` });
+  const memberToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "member@example.com", password: "password123" } })).json().token as string;
+  const outsiderId = randomUUID();
+  await db.prepare("INSERT INTO users (id, email, name, password_hash, kind, role, created_at) VALUES (?, ?, ?, ?, 'HUMAN', 'MEMBER', ?)").run(outsiderId, `outsider-${outsiderId}@example.com`, "Outsider", await bcrypt.hash("password123", 8), new Date().toISOString());
+  const outsiderToken = (await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: `outsider-${outsiderId}@example.com`, password: "password123" } })).json().token as string;
+
+  const created = await app.inject({ method: "POST", url: "/api/projects", headers: auth(jwtToken), payload: { key: "ARCH", name: "Archive candidate", description: "", color: "#123456" } });
+  assert.equal(created.statusCode, 201, created.body);
+  const archiveId = created.json().project.id as string;
+  assert.equal(created.json().project.archivedAt, null);
+  assert.equal((await app.inject({ method: "POST", url: `/api/projects/${archiveId}/members`, headers: auth(jwtToken), payload: { userId: memberId, role: "MEMBER" } })).statusCode, 204);
+  const task = await app.inject({ method: "POST", url: `/api/projects/${archiveId}/tasks`, headers: auth(jwtToken), payload: { title: "Keep me", status: "IN_PROGRESS" } });
+  assert.equal(task.statusCode, 201, task.body);
+  assert.equal((await app.inject({ method: "POST", url: `/api/tasks/${task.json().task.id}/updates`, headers: auth(jwtToken), payload: { body: "History survives archiving." } })).statusCode, 201);
+  const snapshot = async () => ({
+    tasks: (await app.inject({ method: "GET", url: `/api/projects/${archiveId}/tasks`, headers: auth(jwtToken) })).json().tasks.map((item: { id: string; status: string; phaseId: string | null; updatedAt: string }) => [item.id, item.status, item.phaseId, item.updatedAt]),
+    phases: (await app.inject({ method: "GET", url: `/api/projects/${archiveId}/phases`, headers: auth(jwtToken) })).json().phases.map((phase: { id: string; isActive: boolean }) => [phase.id, phase.isActive]),
+    updates: (await app.inject({ method: "GET", url: `/api/tasks/${task.json().task.id}/updates`, headers: auth(jwtToken) })).json().updates.length,
+    activity: (await app.inject({ method: "GET", url: `/api/activity?projectId=${archiveId}&limit=100`, headers: auth(jwtToken) })).json().activity.length,
+  });
+  const before = await snapshot();
+  assert.equal(before.tasks.length, 1);
+  assert.equal(before.phases.length, 1);
+
+  assert.equal((await app.inject({ method: "POST", url: `/api/projects/${archiveId}/archive` })).statusCode, 401);
+  const memberArchive = await app.inject({ method: "POST", url: `/api/projects/${archiveId}/archive`, headers: auth(memberToken) });
+  assert.equal(memberArchive.statusCode, 403, memberArchive.body);
+  assert.equal((await app.inject({ method: "POST", url: `/api/projects/${archiveId}/archive`, headers: auth(outsiderToken) })).statusCode, 403);
+  assert.equal((await app.inject({ method: "POST", url: `/api/projects/${randomUUID()}/archive`, headers: auth(jwtToken) })).statusCode, 404);
+
+  const archived = await app.inject({ method: "POST", url: `/api/projects/${archiveId}/archive`, headers: auth(jwtToken) });
+  assert.equal(archived.statusCode, 200, archived.body);
+  const archivedAt = archived.json().project.archivedAt as string;
+  assert.ok(archivedAt);
+  const repeated = await app.inject({ method: "POST", url: `/api/projects/${archiveId}/archive`, headers: auth(jwtToken) });
+  assert.equal(repeated.json().project.archivedAt, archivedAt, "archiving is idempotent");
+  assert.deepEqual(await snapshot(), before, "tasks, phases, updates, and activity are unchanged");
+
+  const ids = async (token: string, query = "") => (await app.inject({ method: "GET", url: `/api/projects${query}`, headers: auth(token) })).json().projects.map((project: { id: string }) => project.id) as string[];
+  assert.equal((await ids(jwtToken)).includes(archiveId), false);
+  assert.equal((await ids(memberToken)).includes(archiveId), false);
+  assert.equal((await ids(memberToken, "?archived=archived")).includes(archiveId), true);
+  assert.equal((await ids(jwtToken, "?archived=all")).includes(archiveId), true);
+  assert.equal((await ids(jwtToken, "?archived=archived")).every((id) => id !== projectId), true, "active projects are not in the archived view");
+  assert.equal((await ids(outsiderToken, "?archived=archived")).includes(archiveId), false);
+  assert.equal((await app.inject({ method: "GET", url: "/api/projects?archived=yes", headers: auth(jwtToken) })).statusCode, 400);
+  const memberDeepLink = await app.inject({ method: "GET", url: `/api/projects/${archiveId}`, headers: auth(memberToken) });
+  assert.equal(memberDeepLink.statusCode, 200, memberDeepLink.body);
+  assert.equal(memberDeepLink.json().project.archivedAt, archivedAt);
+  const contextLink = await app.inject({ method: "GET", url: "/api/context?project=ARCH", headers: auth(memberToken) });
+  assert.equal(contextLink.statusCode, 200, contextLink.body);
+  assert.equal(contextLink.json().project.archivedAt, archivedAt);
+  assert.equal((await app.inject({ method: "GET", url: `/api/projects/${archiveId}`, headers: auth(outsiderToken) })).statusCode, 403);
+  assert.equal((await app.inject({ method: "GET", url: `/api/projects/${archiveId}/tasks`, headers: auth(outsiderToken) })).statusCode, 403);
+  const summary = await app.inject({ method: "GET", url: "/api/dashboard/summary", headers: auth(jwtToken) });
+  assert.equal(summary.json().projects.some((project: { id: string }) => project.id === archiveId), false);
+  const reorder = await app.inject({ method: "PATCH", url: "/api/projects/order", headers: auth(jwtToken), payload: { projectIds: await ids(jwtToken) } });
+  assert.equal(reorder.statusCode, 204, "reordering the active list does not require archived projects");
+
+  assert.equal((await app.inject({ method: "POST", url: `/api/projects/${archiveId}/restore`, headers: auth(memberToken) })).statusCode, 403);
+  const restored = await app.inject({ method: "POST", url: `/api/projects/${archiveId}/restore`, headers: auth(jwtToken) });
+  assert.equal(restored.statusCode, 200, restored.body);
+  assert.equal(restored.json().project.archivedAt, null);
+  assert.equal((await ids(memberToken)).includes(archiveId), true);
+  assert.deepEqual(await snapshot(), before);
+  assert.equal((await app.inject({ method: "DELETE", url: `/api/projects/${archiveId}`, headers: auth(jwtToken) })).statusCode, 204);
+
+  // A non-admin project owner may archive and restore their own project; outsiders still may not.
+  const owned = await app.inject({ method: "POST", url: "/api/projects", headers: auth(memberToken), payload: { key: "MOWN", name: "Member owned archive", description: "", color: "#654321" } });
+  assert.equal(owned.statusCode, 201, owned.body);
+  const ownedId = owned.json().project.id as string;
+  assert.equal((await app.inject({ method: "POST", url: `/api/projects/${ownedId}/archive`, headers: auth(outsiderToken) })).statusCode, 403);
+  const ownerArchive = await app.inject({ method: "POST", url: `/api/projects/${ownedId}/archive`, headers: auth(memberToken) });
+  assert.equal(ownerArchive.statusCode, 200, ownerArchive.body);
+  assert.ok(ownerArchive.json().project.archivedAt);
+  assert.equal((await ids(memberToken)).includes(ownedId), false);
+  assert.equal((await ids(memberToken, "?archived=archived")).includes(ownedId), true);
+  assert.equal((await app.inject({ method: "POST", url: `/api/projects/${ownedId}/restore`, headers: auth(outsiderToken) })).statusCode, 403);
+  const ownerRestore = await app.inject({ method: "POST", url: `/api/projects/${ownedId}/restore`, headers: auth(memberToken) });
+  assert.equal(ownerRestore.statusCode, 200, ownerRestore.body);
+  assert.equal(ownerRestore.json().project.archivedAt, null);
+  assert.equal((await ids(memberToken)).includes(ownedId), true);
+  assert.equal((await app.inject({ method: "DELETE", url: `/api/projects/${ownedId}`, headers: auth(memberToken) })).statusCode, 204);
+});
+
 test("task lifecycle supports assignment and status changes", async () => {
   const addMember = await app.inject({
     method: "POST", url: `/api/projects/${projectId}/members`, headers: { authorization: `Bearer ${jwtToken}` },

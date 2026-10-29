@@ -374,6 +374,9 @@ export const projectUpdateSchema = projectCreateSchema.omit({ key: true, sourceP
   reviewPolicy: projectReviewPolicySchema.optional(),
 });
 export const projectOrderSchema = z.object({ projectIds: z.array(z.string().uuid()).min(1).max(500) });
+export const PROJECT_ARCHIVE_FILTERS = ["active", "archived", "all"] as const;
+export type ProjectArchiveFilter = (typeof PROJECT_ARCHIVE_FILTERS)[number];
+export const projectListQuerySchema = z.object({ archived: z.enum(PROJECT_ARCHIVE_FILTERS).default("active") });
 
 export const phaseCreateSchema = z.object({
   number: z.number().int().min(1).max(10000),
@@ -627,6 +630,8 @@ export interface Project {
   dependencyResolutionStatuses: DependencyResolutionStatus[];
   reviewPolicy: ProjectReviewPolicy;
   ownerId: string;
+  /** ISO timestamp when the project was archived; null while active. */
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   taskCount?: number;

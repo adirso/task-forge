@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, TASK_STATUSES, automationCreateSchema, projectUpdateSchema, agentWorkflowSchema, phaseBranchName, projectReviewPolicySchema, type AgentCapabilityProfile } from "@taskforge/contracts";
+import { DEFAULT_AGENT_WORKFLOW, DEFAULT_DEPENDENCY_RESOLUTION_STATUSES, DEFAULT_PROJECT_REVIEW_POLICY, TASK_STATUSES, automationCreateSchema, projectUpdateSchema, agentWorkflowSchema, phaseBranchName, projectReviewPolicySchema, type AgentCapabilityProfile, type ProjectArchiveFilter } from "@taskforge/contracts";
 import { AutomationApplicationService } from "./automation-service.js";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import type { ProjectContext, RequestContext } from "./context.js";
@@ -19,7 +19,7 @@ async function projectAccess(repositories: RepositorySet, context: RequestContex
 
 export class ProjectApplicationService implements ProjectService {
   constructor(private readonly unitOfWork: UnitOfWork, private readonly now: () => string = () => new Date().toISOString(), private readonly newId: () => string = randomUUID) {}
-  async list(context: RequestContext) { return this.unitOfWork.run((repositories) => repositories.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN")); }
+  async list(context: RequestContext, archived: ProjectArchiveFilter = "active") { return this.unitOfWork.run((repositories) => repositories.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN", archived)); }
   async get(context: ProjectContext) { return this.unitOfWork.run(async (repositories) => { const project = await projectAccess(repositories, context, context.projectId); const members = await repositories.memberships.list(context.projectId); return { ...project, members: members.map((member) => ({ ...member, projectRole: member.id === project.ownerId ? "OWNER" as const : "MEMBER" as const })) }; }); }
   async create(context: RequestContext, input: ProjectCreateInput) {
     return this.unitOfWork.run(async (r) => {
@@ -29,7 +29,7 @@ export class ProjectApplicationService implements ProjectService {
       if (await r.projects.findByKey(input.key)) throw new ConflictError(`Project key ${input.key} is already in use`);
       if ((await r.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN")).some((project) => project.name.trim().toLowerCase() === input.name.trim().toLowerCase())) throw new ConflictError("Project name is already in use");
       const now = this.now();
-      const project: ProjectEntity = { ...details, sortOrder: await r.projects.allocateSortOrder(), availableStatuses: [...TASK_STATUSES], defaultStatus: "TODO", agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW }, hiddenEmptyStatuses: [...TASK_STATUSES], mergeTarget: "main", dependencyResolutionStatuses: [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES], reviewPolicy: { ...DEFAULT_PROJECT_REVIEW_POLICY, allowedReviewerAgentIds: [] }, id: this.newId(), ownerId: source?.ownerId ?? context.actor.userId, createdAt: now, updatedAt: now };
+      const project: ProjectEntity = { ...details, sortOrder: await r.projects.allocateSortOrder(), availableStatuses: [...TASK_STATUSES], defaultStatus: "TODO", agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW }, hiddenEmptyStatuses: [...TASK_STATUSES], mergeTarget: "main", dependencyResolutionStatuses: [...DEFAULT_DEPENDENCY_RESOLUTION_STATUSES], reviewPolicy: { ...DEFAULT_PROJECT_REVIEW_POLICY, allowedReviewerAgentIds: [] }, id: this.newId(), ownerId: source?.ownerId ?? context.actor.userId, archivedAt: null, createdAt: now, updatedAt: now };
       if (source) {
         Object.assign(project, structuredClone({ availableStatuses: source.availableStatuses, defaultStatus: source.defaultStatus, agentWorkflow: source.agentWorkflow, hiddenEmptyStatuses: source.hiddenEmptyStatuses, mergeTarget: source.mergeTarget, dependencyResolutionStatuses: source.dependencyResolutionStatuses, reviewPolicy: source.reviewPolicy }));
         const parsed = projectUpdateSchema.safeParse(project);
@@ -126,8 +126,19 @@ export class ProjectApplicationService implements ProjectService {
       return repositories.projects.update(project.id, { availableStatuses: [...new Set([...project.availableStatuses, ...Object.values(DEFAULT_AGENT_WORKFLOW)])], agentWorkflow: { ...DEFAULT_AGENT_WORKFLOW } });
     });
   }
+  async archive(context: ProjectContext) { return this.setArchived(context, true); }
+  async restore(context: ProjectContext) { return this.setArchived(context, false); }
+  // Archiving only flags the project; tasks, phases, statuses, and history are left untouched.
+  private async setArchived(context: ProjectContext, archived: boolean) {
+    return this.unitOfWork.run(async (repositories) => {
+      const project = await projectAccess(repositories, context, context.projectId);
+      if (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId) throw new ForbiddenError(`Only the project owner or an administrator can ${archived ? "archive" : "restore"} this project`);
+      if (archived === Boolean(project.archivedAt)) return project;
+      return repositories.projects.setArchivedAt(project.id, archived ? this.now() : null);
+    });
+  }
   async delete(context: ProjectContext) { return this.unitOfWork.run(async (repositories) => { const project = await projectAccess(repositories, context, context.projectId); if (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can delete this project"); await repositories.projects.delete(context.projectId); }); }
-  async reorder(context: RequestContext, projectIds: string[]) { return this.unitOfWork.run(async (repositories) => { const accessible = await repositories.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN"); const allowed = new Set(accessible.map((project) => project.id)); if (projectIds.length !== accessible.length || projectIds.some((id) => !allowed.has(id))) throw new ValidationError("Project order must include every accessible project exactly once"); if (new Set(projectIds).size !== projectIds.length) throw new ValidationError("Project order contains duplicates"); await repositories.projects.reorder(projectIds); }); }
+  async reorder(context: RequestContext, projectIds: string[]) { return this.unitOfWork.run(async (repositories) => { const accessible = await repositories.projects.listAccessible(context.actor.userId, context.actor.role === "ADMIN", "active"); const allowed = new Set(accessible.map((project) => project.id)); if (projectIds.length !== accessible.length || projectIds.some((id) => !allowed.has(id))) throw new ValidationError("Project order must include every active accessible project exactly once"); if (new Set(projectIds).size !== projectIds.length) throw new ValidationError("Project order contains duplicates"); await repositories.projects.reorder(projectIds); }); }
   async addMember(context: ProjectContext, userId: string, role: "OWNER" | "MEMBER") { return this.unitOfWork.run(async (repositories) => { const project = await projectAccess(repositories, context, context.projectId); if (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can manage members"); const user = await repositories.users.findById(userId); if (!user) throw new NotFoundError("User"); if (role === "OWNER" && userId !== project.ownerId) throw new ValidationError("A project can only have its original owner"); await repositories.memberships.add(context.projectId, userId, userId === project.ownerId ? "OWNER" : role); }); }
   async removeMember(context: ProjectContext, userId: string) { return this.unitOfWork.run(async (repositories) => { const project = await projectAccess(repositories, context, context.projectId); if (context.actor.role !== "ADMIN" && project.ownerId !== context.actor.userId) throw new ForbiddenError("Only the project owner or an administrator can manage members"); if (userId === project.ownerId) throw new ValidationError("The project owner cannot be removed"); if (!(await repositories.memberships.isMember(context.projectId, userId))) throw new NotFoundError("Project member"); if (project.reviewPolicy.allowedReviewerAgentIds.includes(userId)) throw new ValidationError("Remove this agent from the allowed reviewer policy before removing project membership"); await repositories.tasks.unassignForProjectMember(context.projectId, userId); await repositories.memberships.remove(context.projectId, userId); }); }
 }

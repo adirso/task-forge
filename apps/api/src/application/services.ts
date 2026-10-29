@@ -1,8 +1,8 @@
-import type { AgentCapabilityProfile, AgentOpsEntry, AgentRoutingRequest, DashboardSummary, WebhookDelivery, WebhookDeliveryStatus } from "@taskforge/contracts";
+import type { AgentCapabilityProfile, AgentOpsEntry, AgentRoutingRequest, DashboardSummary, ProjectArchiveFilter, WebhookDelivery, WebhookDeliveryStatus } from "@taskforge/contracts";
 import type { ProjectContext, RequestContext } from "./context.js";
 import type { ActivityEntity, AgentHandoffEntity, AgentLogEntity, ApiTokenEntity, AttachmentEntity, FindingDisposition, FindingSeverity, NotificationEntity, Page, PageRequest, PhaseEntity, ProjectEntity, TaskEntity, TaskFindingEntity, TaskGateEntity, TaskUpdateEntity, UserEntity } from "./models.js";
 
-export type ProjectCreateInput = { sourceProjectId?: string } & Omit<ProjectEntity, "id" | "ownerId" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses" | "reviewPolicy">;
+export type ProjectCreateInput = { sourceProjectId?: string } & Omit<ProjectEntity, "id" | "ownerId" | "archivedAt" | "createdAt" | "updatedAt" | "sortOrder" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses" | "reviewPolicy">;
 type TaskInputFields = Partial<Omit<TaskEntity, "id" | "projectId" | "number" | "creatorId" | "position" | "createdAt" | "updatedAt" | "assignee" | "tags" | "dependencies">> & Pick<TaskEntity, "title">;
 export type TaskCreateInput = TaskInputFields & { tags?: string[]; dependencyIds?: string[] };
 export type TaskUpdateInput = Partial<TaskInputFields> & { tags?: string[]; dependencyIds?: string[]; runId?: string | null };
@@ -28,11 +28,13 @@ export interface ContextService {
 }
 
 export interface ProjectService {
-  list(context: RequestContext): Promise<ProjectEntity[]>;
+  list(context: RequestContext, archived?: ProjectArchiveFilter): Promise<ProjectEntity[]>;
   get(context: ProjectContext): Promise<ProjectEntity>;
   create(context: RequestContext, input: ProjectCreateInput): Promise<ProjectEntity>;
   update(context: ProjectContext, input: Partial<Pick<ProjectEntity, "name" | "description" | "repoUrl" | "localRepoPath" | "color" | "availableStatuses" | "defaultStatus" | "agentWorkflow" | "hiddenEmptyStatuses" | "mergeTarget" | "dependencyResolutionStatuses" | "reviewPolicy">>): Promise<ProjectEntity>;
   enableAgentWorkflow(context: ProjectContext): Promise<ProjectEntity>;
+  archive(context: ProjectContext): Promise<ProjectEntity>;
+  restore(context: ProjectContext): Promise<ProjectEntity>;
   delete(context: ProjectContext): Promise<void>;
   reorder(context: RequestContext, projectIds: string[]): Promise<void>;
   addMember(context: ProjectContext, userId: string, role: "OWNER" | "MEMBER"): Promise<void>;

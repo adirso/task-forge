@@ -55,6 +55,26 @@ test("SQLite artifacts survive restart and preserve content integrity", async ()
   await restarted.close();
 });
 
+test("SQLite archived project state survives restart without touching tasks or phases", async () => {
+  const databasePath = path.join(testRoot, `${crypto.randomUUID()}-archive-restart.db`);
+  const first = createSqliteAdapter(databasePath);
+  const now = "2026-10-29T12:00:00.000Z";
+  await runMigrations(first, "sqlite");
+  await first.run("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'HUMAN', 'ADMIN', ?)", ["owner-archive", "archive@example.test", "Archive owner", now]);
+  await first.run("INSERT INTO projects (id, `key`, name, description, owner_id, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?, ?)", ["project-archive", "ARC", "Archive project", "owner-archive", now, now]);
+  await first.run("INSERT INTO phases (id, project_id, number, goal, is_active, created_at, updated_at) VALUES (?, ?, 1, ?, 1, ?, ?)", ["phase-archive", "project-archive", "Goal", now, now]);
+  await first.run("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, creator_id, phase_id, created_at, updated_at) VALUES (?, ?, 1, ?, '', '', 'IN_PROGRESS', ?, ?, ?, ?)", ["task-archive", "project-archive", "Archived task", "owner-archive", "phase-archive", now, now]);
+  await first.run("UPDATE projects SET archived_at = ? WHERE id = ?", [now, "project-archive"]);
+  await first.close();
+
+  const restarted = createSqliteAdapter(databasePath);
+  await runMigrations(restarted, "sqlite");
+  assert.equal((await restarted.get<{ archived_at: string | null }>("SELECT archived_at FROM projects WHERE id = ?", ["project-archive"]))?.archived_at, now);
+  assert.equal((await restarted.get<{ status: string }>("SELECT status FROM tasks WHERE id = ?", ["task-archive"]))?.status, "IN_PROGRESS");
+  assert.ok(await restarted.get("SELECT 1 FROM phases WHERE id = ?", ["phase-archive"]));
+  await restarted.close();
+});
+
 async function createFixtureDatabase(driver: DatabaseDriver) {
   if (driver === "sqlite") {
     const databasePath = path.join(testRoot, `${crypto.randomUUID()}.db`);
@@ -205,9 +225,14 @@ async function assertCurrentSchema(adapter: Adapter, driver: DatabaseDriver, exp
   assert.equal(hasAgentArtifacts, true);
   assert.equal(hasRequiredArtifacts, true);
   if (expectsLegacyTask) {
-    const project = await adapter.get<{ dependency_resolution_statuses: string }>("SELECT dependency_resolution_statuses FROM projects WHERE id = ?", ["project-1"]);
+    const project = await adapter.get<{ dependency_resolution_statuses: string; archived_at: string | null }>("SELECT dependency_resolution_statuses, archived_at FROM projects WHERE id = ?", ["project-1"]);
     assert.deepEqual(JSON.parse(project!.dependency_resolution_statuses), ["DONE", "CANCELLED"]);
+    assert.equal(project!.archived_at, null, "existing projects remain active after the archive migration");
   }
+  const hasArchivedAtColumn = driver === "sqlite"
+    ? Boolean(await adapter.get("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'archived_at'", []))
+    : Boolean(await adapter.get("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'projects' AND column_name = 'archived_at'", []));
+  assert.equal(hasArchivedAtColumn, true);
   const hasWebhookTable = driver === "sqlite"
     ? Boolean(await adapter.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'", []))
     : Boolean(await adapter.get("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'webhook_deliveries'", []));
@@ -262,6 +287,27 @@ for (const driver of ["sqlite", "mysql"] as const) {
         });
       });
     }
+  });
+
+  test(`project archive migration retries safely after partial application on ${driver}`, { skip: driver === "mysql" && !mysqlTestUrl }, async () => {
+    await withFixture(driver, async (adapter) => {
+      const archiveIndex = migrations.findIndex((migration) => migration.version === "0033_project_archived_at");
+      assert.ok(archiveIndex > 0);
+      await runMigrations(adapter, driver, migrations.slice(0, archiveIndex));
+      await adapter.run("INSERT INTO users (id, email, name, kind, role, created_at) VALUES (?, ?, ?, 'HUMAN', 'MEMBER', ?)", ["owner-partial", "partial@example.test", "Partial owner", "2026-10-29T00:00:00.000Z"]);
+      await adapter.run("INSERT INTO projects (id, `key`, name, description, owner_id, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?, ?)", ["project-partial", "PRT", "Partial project", "owner-partial", "2026-10-29T00:00:00.000Z", "2026-10-29T00:00:00.000Z"]);
+      await adapter.run("INSERT INTO tasks (id, project_id, number, title, description, definition_of_done, status, creator_id, created_at, updated_at) VALUES (?, ?, 1, ?, '', '', 'IN_REVIEW', ?, ?, ?)", ["task-partial", "project-partial", "Partial task", "owner-partial", "2026-10-29T00:00:00.000Z", "2026-10-29T00:00:00.000Z"]);
+      // Simulate a crash after MySQL committed the ALTER but before the ledger row was written.
+      await adapter.run(driver === "mysql" ? "ALTER TABLE projects ADD COLUMN archived_at VARCHAR(30) NULL" : "ALTER TABLE projects ADD COLUMN archived_at TEXT NULL", []);
+      await adapter.run("UPDATE projects SET archived_at = ? WHERE id = ?", ["2026-10-29T01:00:00.000Z", "project-partial"]);
+      assert.equal(await adapter.get("SELECT 1 FROM schema_migrations WHERE version = ?", ["0033_project_archived_at"]), undefined);
+
+      await runMigrations(adapter, driver);
+      assert.ok(await adapter.get("SELECT 1 FROM schema_migrations WHERE version = ?", ["0033_project_archived_at"]));
+      assert.equal((await adapter.get<{ archived_at: string | null }>("SELECT archived_at FROM projects WHERE id = ?", ["project-partial"]))?.archived_at, "2026-10-29T01:00:00.000Z");
+      assert.equal((await adapter.get<{ status: string }>("SELECT status FROM tasks WHERE id = ?", ["task-partial"]))?.status, "IN_REVIEW");
+      assert.equal((await adapter.all("SELECT version FROM schema_migrations", [])).length, migrations.length);
+    });
   });
 
   test(`unsafe and inconsistent migration states fail safely on ${driver}`, { skip: driver === "mysql" && !mysqlTestUrl }, async (t) => {
